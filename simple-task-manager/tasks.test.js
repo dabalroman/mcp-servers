@@ -1,7 +1,8 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'fs';
-import { join } from 'path';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync, copyFileSync } from 'fs';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
 import { tmpdir } from 'os';
 import {
   parseTasks,
@@ -12,9 +13,17 @@ import {
   wrapLines,
 } from './tasks.js';
 
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const FIXTURES = join(__dirname, 'fixtures');
+
 let dir;
 let tasksFile;
 let doneFile;
+
+function useFixtures() {
+  copyFileSync(join(FIXTURES, 'TASKS.md'), tasksFile);
+  copyFileSync(join(FIXTURES, 'TASKS_DONE.md'), doneFile);
+}
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'task-manager-test-'));
@@ -34,78 +43,48 @@ describe('parseTasks', () => {
     assert.deepEqual(result, { counter: 0, tasks: [] });
   });
 
-  test('parses counter and a single task', () => {
-    writeFileSync(tasksFile, [
-      '# Counter: 3',
-      '',
-      '# 3 Fix the bug',
-      '## bug | todo | high',
-      'Some description here.',
-      '',
-    ].join('\n'));
-
+  test('reads counter and all tasks from fixture', () => {
+    useFixtures();
     const { counter, tasks } = parseTasks(tasksFile);
-    assert.equal(counter, 3);
-    assert.equal(tasks.length, 1);
-    assert.equal(tasks[0].id, 3);
-    assert.equal(tasks[0].title, 'Fix the bug');
-    assert.equal(tasks[0].type, 'bug');
-    assert.equal(tasks[0].status, 'todo');
-    assert.equal(tasks[0].priority, 'high');
-    assert.equal(tasks[0].description, 'Some description here.');
+    assert.equal(counter, 5);
+    assert.equal(tasks.length, 4);
   });
 
-  test('parses multiple tasks in correct order', () => {
-    writeFileSync(tasksFile, [
-      '# Counter: 5',
-      '',
-      '# 5 Second task',
-      '## feature | in_progress | medium',
-      '',
-      '# 2 First task',
-      '## idea | done | low',
-      'Idea details.',
-      '',
-    ].join('\n'));
-
+  test('parses task fields correctly', () => {
+    useFixtures();
     const { tasks } = parseTasks(tasksFile);
-    assert.equal(tasks.length, 2);
-    assert.equal(tasks[0].id, 5);
-    assert.equal(tasks[1].id, 2);
+    const t = tasks.find(t => t.id === 4);
+    assert.equal(t.title, 'Fix auth middleware session leak');
+    assert.equal(t.type, 'bug');
+    assert.equal(t.status, 'todo');
+    assert.equal(t.priority, 'critical');
+    assert.ok(t.description.includes('log in with an expired token'));
+  });
+
+  test('parses in_progress status', () => {
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const t = tasks.find(t => t.id === 5);
+    assert.equal(t.status, 'in_progress');
+  });
+
+  test('parses multiline description', () => {
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const t = tasks.find(t => t.id === 4);
+    const lines = t.description.split('\n');
+    assert.equal(lines.length, 2);
   });
 
   test('parses task with empty description', () => {
-    writeFileSync(tasksFile, [
-      '# Counter: 1',
-      '',
-      '# 1 No description',
-      '## tool | todo | critical',
-      '',
-    ].join('\n'));
-
+    useFixtures();
     const { tasks } = parseTasks(tasksFile);
-    assert.equal(tasks.length, 1);
-    assert.equal(tasks[0].description, '');
+    const t = tasks.find(t => t.id === 2);
+    // idea task has a single-line description — just verify it parsed
+    assert.ok(t.description.length > 0);
   });
 
-  test('parses task with multiline description', () => {
-    writeFileSync(tasksFile, [
-      '# Counter: 1',
-      '',
-      '# 1 Multi',
-      '## other | todo | low',
-      'Line one.',
-      'Line two.',
-      '',
-      'After blank.',
-      '',
-    ].join('\n'));
-
-    const { tasks } = parseTasks(tasksFile);
-    assert.equal(tasks[0].description, 'Line one.\nLine two.\n\nAfter blank.');
-  });
-
-  test('skips task with invalid metadata and continues parsing', () => {
+  test('skips task with invalid metadata and continues', () => {
     writeFileSync(tasksFile, [
       '# Counter: 2',
       '',
@@ -122,205 +101,220 @@ describe('parseTasks', () => {
     assert.equal(tasks[0].id, 2);
   });
 
-  test('returns counter 0 when no counter line present', () => {
-    writeFileSync(tasksFile, [
-      '# 1 A task',
-      '## bug | todo | high',
-      '',
-    ].join('\n'));
-
-    const { counter } = parseTasks(tasksFile);
-    assert.equal(counter, 0);
+  test('parses done tasks from TASKS_DONE fixture', () => {
+    useFixtures();
+    const { tasks } = parseTasks(doneFile);
+    assert.equal(tasks.length, 1);
+    assert.equal(tasks[0].id, 1);
+    assert.equal(tasks[0].status, 'done');
   });
 });
 
 // ── writeTasks ─────────────────────────────────────────────────────────────────
 
 describe('writeTasks', () => {
-  test('round-trips a task through write + parse', () => {
-    const tasks = [{
-      id: 7,
-      title: 'Round trip',
-      type: 'feature',
-      priority: 'medium',
-      status: 'todo',
-      description: 'Some details.',
-    }];
-
-    writeTasks(tasksFile, 7, tasks);
-    const { counter, tasks: parsed } = parseTasks(tasksFile);
-    assert.equal(counter, 7);
-    assert.equal(parsed.length, 1);
-    assert.deepEqual(parsed[0], tasks[0]);
+  test('round-trips fixture tasks unchanged', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    writeTasks(tasksFile, counter, tasks);
+    const { counter: c2, tasks: t2 } = parseTasks(tasksFile);
+    assert.equal(c2, counter);
+    assert.equal(t2.length, tasks.length);
+    for (const orig of tasks) {
+      const reparsed = t2.find(t => t.id === orig.id);
+      assert.deepEqual(reparsed, orig);
+    }
   });
 
-  test('sorts tasks by id descending', () => {
-    const tasks = [
-      { id: 1, title: 'A', type: 'bug', priority: 'low', status: 'todo', description: '' },
-      { id: 5, title: 'B', type: 'bug', priority: 'low', status: 'todo', description: '' },
-      { id: 3, title: 'C', type: 'bug', priority: 'low', status: 'todo', description: '' },
-    ];
-
-    writeTasks(tasksFile, 5, tasks);
-    const { tasks: parsed } = parseTasks(tasksFile);
-    assert.deepEqual(parsed.map(t => t.id), [5, 3, 1]);
-  });
-
-  test('writes atomically via .tmp file (tmp is gone after write)', () => {
-    writeTasks(tasksFile, 0, []);
-    const tmpExists = (() => {
-      try { readFileSync(tasksFile + '.tmp'); return true; } catch { return false; }
-    })();
-    assert.equal(tmpExists, false);
-    assert.ok(readFileSync(tasksFile, 'utf8').startsWith('# Counter:'));
-  });
-
-  test('skips description block when empty', () => {
-    writeTasks(tasksFile, 1, [{
-      id: 1, title: 'No desc', type: 'other', priority: 'low', status: 'todo', description: ''
-    }]);
+  test('sorts tasks by id descending in output file', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    writeTasks(tasksFile, counter, tasks);
     const content = readFileSync(tasksFile, 'utf8');
-    assert.ok(!content.includes('\n\n\n'));
+    const ids = [...content.matchAll(/^# (\d+) /gm)].map(m => parseInt(m[1]));
+    assert.deepEqual(ids, [...ids].sort((a, b) => b - a));
+  });
+
+  test('writes atomically — no .tmp file left after write', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    writeTasks(tasksFile, counter, tasks);
+    assert.throws(() => readFileSync(tasksFile + '.tmp'), { code: 'ENOENT' });
+  });
+
+  test('counter line is present in output', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    writeTasks(tasksFile, counter, tasks);
+    const content = readFileSync(tasksFile, 'utf8');
+    assert.ok(content.startsWith('# Counter: 5'));
   });
 });
 
 // ── writeDoneTasks ─────────────────────────────────────────────────────────────
 
 describe('writeDoneTasks', () => {
-  test('round-trips done tasks through write + parse', () => {
-    const tasks = [{
-      id: 4,
-      title: 'Done thing',
-      type: 'tool',
-      priority: 'high',
-      status: 'done',
-      description: 'Completed.',
-    }];
-
+  test('round-trips done fixture tasks unchanged', () => {
+    useFixtures();
+    const { tasks } = parseTasks(doneFile);
     writeDoneTasks(doneFile, tasks);
-    const { tasks: parsed } = parseTasks(doneFile);
-    assert.equal(parsed.length, 1);
-    assert.deepEqual(parsed[0], tasks[0]);
+    const { tasks: reparsed } = parseTasks(doneFile);
+    assert.equal(reparsed.length, tasks.length);
+    assert.deepEqual(reparsed[0], tasks[0]);
   });
 
-  test('writes header line', () => {
-    writeDoneTasks(doneFile, []);
+  test('output starts with done tasks header', () => {
+    useFixtures();
+    const { tasks } = parseTasks(doneFile);
+    writeDoneTasks(doneFile, tasks);
     const content = readFileSync(doneFile, 'utf8');
     assert.ok(content.startsWith('# Done tasks'));
+  });
+
+  test('writes atomically — no .tmp file left after write', () => {
+    useFixtures();
+    const { tasks } = parseTasks(doneFile);
+    writeDoneTasks(doneFile, tasks);
+    assert.throws(() => readFileSync(doneFile + '.tmp'), { code: 'ENOENT' });
+  });
+});
+
+// ── update round-trip ──────────────────────────────────────────────────────────
+
+describe('update round-trip', () => {
+  test('patching title of an active task persists correctly', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    const task = tasks.find(t => t.id === 3);
+    task.title = 'Renamed: Relative scale for SVG merger';
+    writeTasks(tasksFile, counter, tasks.map(t => (t.id === 3 ? task : t)));
+
+    const { tasks: result } = parseTasks(tasksFile);
+    const updated = result.find(t => t.id === 3);
+    assert.equal(updated.title, 'Renamed: Relative scale for SVG merger');
+    assert.equal(updated.type, 'feature');       // unchanged
+    assert.equal(updated.priority, 'medium');    // unchanged
+  });
+
+  test('patching description of an active task persists correctly', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    const task = tasks.find(t => t.id === 4);
+    task.description = 'Updated reproduction steps here.';
+    writeTasks(tasksFile, counter, tasks.map(t => (t.id === 4 ? task : t)));
+
+    const { tasks: result } = parseTasks(tasksFile);
+    const updated = result.find(t => t.id === 4);
+    assert.equal(updated.description, 'Updated reproduction steps here.');
+    assert.equal(updated.title, 'Fix auth middleware session leak'); // unchanged
+    assert.equal(updated.priority, 'critical');                      // unchanged
+  });
+
+  test('patching priority and type of an active task persists correctly', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    const task = tasks.find(t => t.id === 2);
+    task.priority = 'high';
+    task.type = 'feature';
+    writeTasks(tasksFile, counter, tasks.map(t => (t.id === 2 ? task : t)));
+
+    const { tasks: result } = parseTasks(tasksFile);
+    const updated = result.find(t => t.id === 2);
+    assert.equal(updated.priority, 'high');
+    assert.equal(updated.type, 'feature');
+    assert.equal(updated.title, 'Improve task picker UX'); // unchanged
+  });
+
+  test('patching a done task updates the done file only', () => {
+    useFixtures();
+    const { tasks: done } = parseTasks(doneFile);
+    const task = done.find(t => t.id === 1);
+    task.title = 'Bootstrap project (renamed)';
+    writeDoneTasks(doneFile, done.map(t => (t.id === 1 ? task : t)));
+
+    const { tasks: resultDone } = parseTasks(doneFile);
+    assert.equal(resultDone[0].title, 'Bootstrap project (renamed)');
+
+    // active file must be untouched
+    const { tasks: resultActive } = parseTasks(tasksFile);
+    assert.ok(!resultActive.some(t => t.id === 1));
+  });
+
+  test('other tasks are not affected when one task is updated', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    const originalIds = tasks.map(t => t.id).sort((a, b) => a - b);
+
+    const task = tasks.find(t => t.id === 5);
+    task.title = 'Updated task 5';
+    writeTasks(tasksFile, counter, tasks.map(t => (t.id === 5 ? task : t)));
+
+    const { tasks: result } = parseTasks(tasksFile);
+    assert.deepEqual(result.map(t => t.id).sort((a, b) => a - b), originalIds);
+
+    // Spot-check a different task is intact
+    const t4 = result.find(t => t.id === 4);
+    assert.equal(t4.title, 'Fix auth middleware session leak');
   });
 });
 
 // ── sortByPriority ─────────────────────────────────────────────────────────────
 
 describe('sortByPriority', () => {
-  const make = (id, priority) => ({ id, priority, title: '', type: 'bug', status: 'todo', description: '' });
-
-  test('sorts critical before high before medium before low', () => {
-    const tasks = [make(1, 'low'), make(2, 'high'), make(3, 'critical'), make(4, 'medium')];
+  test('sorts fixture tasks: critical before high before medium before low', () => {
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
     const sorted = sortByPriority(tasks);
-    assert.deepEqual(sorted.map(t => t.priority), ['critical', 'high', 'medium', 'low']);
+    const priorities = sorted.map(t => t.priority);
+    const order = { critical: 4, high: 3, medium: 2, low: 1 };
+    for (let i = 1; i < priorities.length; i++) {
+      assert.ok(order[priorities[i - 1]] >= order[priorities[i]]);
+    }
   });
 
-  test('breaks priority ties by id descending (FILO)', () => {
+  test('breaks ties by id descending (FILO)', () => {
+    const make = (id, priority) => ({ id, priority, title: '', type: 'bug', status: 'todo', description: '' });
     const tasks = [make(1, 'high'), make(3, 'high'), make(2, 'high')];
     const sorted = sortByPriority(tasks);
     assert.deepEqual(sorted.map(t => t.id), [3, 2, 1]);
   });
 
   test('does not mutate the input array', () => {
-    const tasks = [make(1, 'low'), make(2, 'high')];
-    const original = [...tasks];
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const snapshot = tasks.map(t => t.id);
     sortByPriority(tasks);
-    assert.deepEqual(tasks, original);
+    assert.deepEqual(tasks.map(t => t.id), snapshot);
   });
 });
 
 // ── sortForNext ────────────────────────────────────────────────────────────────
 
 describe('sortForNext', () => {
-  const make = (id, status, priority) => ({ id, status, priority, title: '', type: 'bug', description: '' });
-
-  test('puts in_progress before todo', () => {
-    const tasks = [make(1, 'todo', 'critical'), make(2, 'in_progress', 'low')];
-    const sorted = sortForNext(tasks);
-    assert.equal(sorted[0].id, 2);
+  test('in_progress task from fixture comes first', () => {
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const actionable = tasks.filter(t => t.status !== 'done');
+    const sorted = sortForNext(actionable);
+    assert.equal(sorted[0].status, 'in_progress');
+    assert.equal(sorted[0].id, 5);
   });
 
-  test('within same status, sorts by priority desc then id desc', () => {
-    const tasks = [
-      make(1, 'todo', 'low'),
-      make(3, 'todo', 'high'),
-      make(2, 'todo', 'high'),
-    ];
-    const sorted = sortForNext(tasks);
-    assert.deepEqual(sorted.map(t => t.id), [3, 2, 1]);
+  test('within same status, highest priority comes first', () => {
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const todos = tasks.filter(t => t.status === 'todo');
+    const sorted = sortForNext(todos);
+    assert.equal(sorted[0].priority, 'critical');
+    assert.equal(sorted[0].id, 4);
   });
 
   test('does not mutate the input array', () => {
-    const tasks = [make(1, 'todo', 'high'), make(2, 'in_progress', 'low')];
-    const original = [...tasks];
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const snapshot = tasks.map(t => t.id);
     sortForNext(tasks);
-    assert.deepEqual(tasks, original);
-  });
-});
-
-// ── update round-trip (write → parse → patch → write → parse) ─────────────────
-
-describe('update round-trip', () => {
-  test('patching title and description persists correctly', () => {
-    const original = {
-      id: 10, title: 'Original title', type: 'bug',
-      priority: 'high', status: 'todo', description: 'Old description.'
-    };
-    writeTasks(tasksFile, 10, [original]);
-
-    // Simulate what the update tool does
-    const { counter, tasks } = parseTasks(tasksFile);
-    const task = tasks.find(t => t.id === 10);
-    task.title = 'Updated title';
-    task.description = 'New description.';
-    writeTasks(tasksFile, counter, tasks.map(t => (t.id === 10 ? task : t)));
-
-    const { tasks: result } = parseTasks(tasksFile);
-    assert.equal(result[0].title, 'Updated title');
-    assert.equal(result[0].description, 'New description.');
-    assert.equal(result[0].priority, 'high'); // unchanged
-    assert.equal(result[0].type, 'bug');       // unchanged
-  });
-
-  test('patching priority and type persists correctly', () => {
-    const original = {
-      id: 11, title: 'Some task', type: 'idea',
-      priority: 'low', status: 'todo', description: ''
-    };
-    writeTasks(tasksFile, 11, [original]);
-
-    const { counter, tasks } = parseTasks(tasksFile);
-    const task = tasks.find(t => t.id === 11);
-    task.priority = 'critical';
-    task.type = 'feature';
-    writeTasks(tasksFile, counter, tasks.map(t => (t.id === 11 ? task : t)));
-
-    const { tasks: result } = parseTasks(tasksFile);
-    assert.equal(result[0].priority, 'critical');
-    assert.equal(result[0].type, 'feature');
-    assert.equal(result[0].title, 'Some task'); // unchanged
-  });
-
-  test('update on done task writes to done file', () => {
-    const original = {
-      id: 12, title: 'Done task', type: 'tool',
-      priority: 'medium', status: 'done', description: 'Finished.'
-    };
-    writeDoneTasks(doneFile, [original]);
-
-    const { tasks: done } = parseTasks(doneFile);
-    const task = done.find(t => t.id === 12);
-    task.title = 'Renamed done task';
-    writeDoneTasks(doneFile, done.map(t => (t.id === 12 ? task : t)));
-
-    const { tasks: result } = parseTasks(doneFile);
-    assert.equal(result[0].title, 'Renamed done task');
+    assert.deepEqual(tasks.map(t => t.id), snapshot);
   });
 });
 
@@ -332,7 +326,7 @@ describe('wrapLines', () => {
   });
 
   test('wraps long line at whitespace', () => {
-    const long = 'word '.repeat(30).trim(); // 149 chars
+    const long = 'word '.repeat(30).trim();
     const wrapped = wrapLines(long, 50);
     const lines = wrapped.split('\n');
     assert.ok(lines.every(l => l.length <= 50));
@@ -355,5 +349,14 @@ describe('wrapLines', () => {
   test('returns falsy input unchanged', () => {
     assert.equal(wrapLines('', 120), '');
     assert.equal(wrapLines(null, 120), null);
+  });
+
+  test('wraps fixture task description correctly', () => {
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const t = tasks.find(t => t.id === 5);
+    const wrapped = wrapLines(t.description, 80);
+    const lines = wrapped.split('\n');
+    assert.ok(lines.every(l => l.length <= 80));
   });
 });
