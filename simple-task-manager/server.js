@@ -222,6 +222,51 @@ server.tool(
   }
 );
 
+// ── update ────────────────────────────────────────────────────────────────────
+server.tool(
+  'update',
+  'Patch an existing task\'s fields in place — use when the user asks to edit, rename, update, or correct a task\'s title, description, priority, or type. Only the fields you provide are changed; omitted fields keep their current values. Returns { success: true } or an error.',
+  {
+    id: z.coerce.number().int().positive().describe('Task ID to update'),
+    title: z.string().min(1).optional().describe('New title (replaces current)'),
+    description: z.string().optional().describe('New description (replaces current)'),
+    priority: z.enum(['low', 'medium', 'high', 'critical']).optional().describe('New priority'),
+    type: z.enum(['bug', 'feature', 'idea', 'tool', 'other']).optional().describe('New type'),
+  },
+  async ({ id, title, description, priority, type }) => {
+    const { counter, active, done } = loadState();
+    const inActive = active.find(t => t.id === id);
+    const inDone = done.find(t => t.id === id);
+    const task = inActive ?? inDone;
+
+    if (!task) {
+      const allIds = [...active.map(t => t.id), ...done.map(t => t.id)].sort((a, b) => a - b);
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: false,
+            error: `Task #${id} not found. Valid IDs are: ${allIds.join(', ') || 'none'}`
+          })
+        }]
+      };
+    }
+
+    if (title !== undefined) task.title = title.trim();
+    if (description !== undefined) task.description = description.trim();
+    if (priority !== undefined) task.priority = priority;
+    if (type !== undefined) task.type = type;
+
+    if (inActive) {
+      writeTasks(TASKS_FILE, counter, active.map(t => (t.id === id ? task : t)));
+    } else {
+      writeDoneTasks(DONE_FILE, done.map(t => (t.id === id ? task : t)));
+    }
+
+    return { content: [{ type: 'text', text: JSON.stringify({ success: true, task }) }] };
+  }
+);
+
 // ── delete ────────────────────────────────────────────────────────────────────
 server.tool(
   'delete',

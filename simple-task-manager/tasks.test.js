@@ -264,6 +264,66 @@ describe('sortForNext', () => {
   });
 });
 
+// ── update round-trip (write → parse → patch → write → parse) ─────────────────
+
+describe('update round-trip', () => {
+  test('patching title and description persists correctly', () => {
+    const original = {
+      id: 10, title: 'Original title', type: 'bug',
+      priority: 'high', status: 'todo', description: 'Old description.'
+    };
+    writeTasks(tasksFile, 10, [original]);
+
+    // Simulate what the update tool does
+    const { counter, tasks } = parseTasks(tasksFile);
+    const task = tasks.find(t => t.id === 10);
+    task.title = 'Updated title';
+    task.description = 'New description.';
+    writeTasks(tasksFile, counter, tasks.map(t => (t.id === 10 ? task : t)));
+
+    const { tasks: result } = parseTasks(tasksFile);
+    assert.equal(result[0].title, 'Updated title');
+    assert.equal(result[0].description, 'New description.');
+    assert.equal(result[0].priority, 'high'); // unchanged
+    assert.equal(result[0].type, 'bug');       // unchanged
+  });
+
+  test('patching priority and type persists correctly', () => {
+    const original = {
+      id: 11, title: 'Some task', type: 'idea',
+      priority: 'low', status: 'todo', description: ''
+    };
+    writeTasks(tasksFile, 11, [original]);
+
+    const { counter, tasks } = parseTasks(tasksFile);
+    const task = tasks.find(t => t.id === 11);
+    task.priority = 'critical';
+    task.type = 'feature';
+    writeTasks(tasksFile, counter, tasks.map(t => (t.id === 11 ? task : t)));
+
+    const { tasks: result } = parseTasks(tasksFile);
+    assert.equal(result[0].priority, 'critical');
+    assert.equal(result[0].type, 'feature');
+    assert.equal(result[0].title, 'Some task'); // unchanged
+  });
+
+  test('update on done task writes to done file', () => {
+    const original = {
+      id: 12, title: 'Done task', type: 'tool',
+      priority: 'medium', status: 'done', description: 'Finished.'
+    };
+    writeDoneTasks(doneFile, [original]);
+
+    const { tasks: done } = parseTasks(doneFile);
+    const task = done.find(t => t.id === 12);
+    task.title = 'Renamed done task';
+    writeDoneTasks(doneFile, done.map(t => (t.id === 12 ? task : t)));
+
+    const { tasks: result } = parseTasks(doneFile);
+    assert.equal(result[0].title, 'Renamed done task');
+  });
+});
+
 // ── wrapLines ─────────────────────────────────────────────────────────────────
 
 describe('wrapLines', () => {
