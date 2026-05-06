@@ -3,6 +3,18 @@ import { readFileSync, writeFileSync, renameSync } from 'fs';
 const PRIORITY_ORDER = { critical: 4, high: 3, medium: 2, low: 1 };
 const STATUS_ORDER = { in_progress: 2, todo: 1, done: 0 };
 
+function parseRefLine(raw) {
+  return raw.split(' | ').flatMap(part => {
+    const m = part.match(/^#(\d+)(?:\s+(.+))?$/);
+    if (!m) return [];
+    return [{ id: parseInt(m[1], 10), note: m[2]?.trim() || undefined }];
+  });
+}
+
+function serializeRefs(refs) {
+  return refs.map(r => r.note ? `#${r.id} ${r.note}` : `#${r.id}`).join(' | ');
+}
+
 /**
  * Parse the tasks markdown file.
  * Throws a descriptive error if the file is structurally corrupted.
@@ -98,12 +110,23 @@ export function parseTasks(filePath) {
       }
     }
 
-    // Trim trailing blank lines again after scope extraction
+    // Extract optional $ref: tag (follows $scope: or first non-blank line)
+    let refs;
+    const refMatch = bodyLines[firstNonBlank]?.match(/^\$ref:\s*(.+)$/);
+    if (refMatch) {
+      refs = parseRefLine(refMatch[1]);
+      bodyLines.splice(firstNonBlank, 1);
+      while (bodyLines.length > 0 && bodyLines[firstNonBlank]?.trim() === '') {
+        bodyLines.splice(firstNonBlank, 1);
+      }
+    }
+
+    // Trim trailing blank lines again after tag extraction
     while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1].trim() === '') {
       bodyLines.pop();
     }
 
-    tasks.push({ id, title, type, priority, status, scope, description: bodyLines.join('\n') });
+    tasks.push({ id, title, type, priority, status, scope, refs, description: bodyLines.join('\n') });
     i = k;
   }
 
@@ -126,6 +149,7 @@ export function writeTasks(filePath, counter, tasks) {
     content += `\n# ${task.id} ${task.title}\n`;
     content += `## ${task.type} | ${task.status} | ${task.priority}\n`;
     if (task.scope) content += `$scope: ${task.scope}\n`;
+    if (task.refs?.length) content += `$ref: ${serializeRefs(task.refs)}\n`;
     if (task.description.trim()) {
       content += `${task.description}\n`;
     }
@@ -150,6 +174,7 @@ export function writeDoneTasks(filePath, tasks) {
     content += `\n# ${task.id} ${task.title}\n`;
     content += `## ${task.type} | ${task.status} | ${task.priority}\n`;
     if (task.scope) content += `$scope: ${task.scope}\n`;
+    if (task.refs?.length) content += `$ref: ${serializeRefs(task.refs)}\n`;
     if (task.description.trim()) {
       content += `${task.description}\n`;
     }

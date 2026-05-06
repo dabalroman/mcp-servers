@@ -9,11 +9,13 @@ Tasks are stored in `TASKS.md` (active) and `TASKS_DONE.md` (archived). Each tas
 ```
 # 42 Fix the auth bug
 ## bug | in_progress | high
+$scope: task-manager
+$ref: #3 depends on | #9 blocked by
 Reproduction: log in with an expired token. The session is not invalidated.
 Steps to fix: check the middleware in src/auth.ts.
 ```
 
-The first line is the header (`# {id} {title}`), the second line is metadata (`## {type} | {status} | {priority}`), and the rest is the description. `TASKS.md` also has a `# Counter: N` line at the top that tracks the highest id ever issued.
+The first line is the header (`# {id} {title}`), the second line is metadata (`## {type} | {status} | {priority}`). Optional tag lines follow: `$scope:` names the tool or area the task belongs to; `$ref:` lists related tasks as `#id note | #id note …`. The rest is the free-text description. `TASKS.md` also has a `# Counter: N` line at the top that tracks the highest id ever issued.
 
 **Types**: `bug` · `feature` · `idea` · `tool` · `other`  
 **Priorities**: `low` · `medium` · `high` · `critical`  
@@ -55,11 +57,14 @@ The `prepare` script writes `.git/hooks/pre-commit` so tests run automatically b
 
 | Tool | Description |
 |---|---|
-| `add` | Schedule a new task (type, priority, title, description). Returns `{ id }`. |
+| `add` | Schedule a new task (type, priority, title, description, scope?, refs?). Returns `{ id }`. |
+| `update` | Patch an existing task's fields in place (title, description, priority, type, scope, refs). Omitted fields are unchanged. |
 | `getNext` | The single next recommended task — answers "what's next?". Optional `type` filter. |
 | `getAll` | All not-done tasks grouped by type, sorted by priority desc then id desc. |
 | `getByType` | All tasks of one type across all statuses. |
+| `getByScope` | All tasks tagged with a specific scope (e.g. `"eink-frame"`). |
 | `getById` | One task by numeric id (searches both active and done). |
+| `getRelated` | Tasks related to a given id — returns `outbound` (tasks it references) and `inbound` (tasks that reference it). |
 | `getOverview` | Count summary per type (total + actionable). |
 | `setStatus` | Move a task between `todo` / `in_progress` / `done`. Automatically relocates the task between files. |
 | `delete` | Permanently remove a task. Prefer `setStatus(done)` for completed work. |
