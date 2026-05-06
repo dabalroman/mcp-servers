@@ -71,20 +71,39 @@ export function parseTasks(filePath) {
 
     const [, type, status, priority] = metaMatch;
 
-    // Collect description lines until next # header or EOF
-    const descLines = [];
+    // Collect body lines until next # header or EOF
+    const bodyLines = [];
     let k = j + 1;
     while (k < lines.length && !lines[k].match(/^# /)) {
-      descLines.push(lines[k]);
+      bodyLines.push(lines[k]);
       k++;
     }
 
     // Trim trailing blank lines
-    while (descLines.length > 0 && descLines[descLines.length - 1].trim() === '') {
-      descLines.pop();
+    while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1].trim() === '') {
+      bodyLines.pop();
     }
 
-    tasks.push({ id, title, type, priority, status, description: descLines.join('\n') });
+    // Extract optional $scope: tag (must be the very first non-blank body line)
+    let scope;
+    let firstNonBlank = 0;
+    while (firstNonBlank < bodyLines.length && bodyLines[firstNonBlank].trim() === '') firstNonBlank++;
+    const scopeMatch = bodyLines[firstNonBlank]?.match(/^\$scope:\s*(.+)$/);
+    if (scopeMatch) {
+      scope = scopeMatch[1].trim();
+      bodyLines.splice(firstNonBlank, 1);
+      // Trim any blank line that directly followed $scope:
+      while (bodyLines.length > 0 && bodyLines[firstNonBlank]?.trim() === '') {
+        bodyLines.splice(firstNonBlank, 1);
+      }
+    }
+
+    // Trim trailing blank lines again after scope extraction
+    while (bodyLines.length > 0 && bodyLines[bodyLines.length - 1].trim() === '') {
+      bodyLines.pop();
+    }
+
+    tasks.push({ id, title, type, priority, status, scope, description: bodyLines.join('\n') });
     i = k;
   }
 
@@ -106,6 +125,7 @@ export function writeTasks(filePath, counter, tasks) {
   for (const task of sorted) {
     content += `\n# ${task.id} ${task.title}\n`;
     content += `## ${task.type} | ${task.status} | ${task.priority}\n`;
+    if (task.scope) content += `$scope: ${task.scope}\n`;
     if (task.description.trim()) {
       content += `${task.description}\n`;
     }
@@ -129,6 +149,7 @@ export function writeDoneTasks(filePath, tasks) {
   for (const task of sorted) {
     content += `\n# ${task.id} ${task.title}\n`;
     content += `## ${task.type} | ${task.status} | ${task.priority}\n`;
+    if (task.scope) content += `$scope: ${task.scope}\n`;
     if (task.description.trim()) {
       content += `${task.description}\n`;
     }

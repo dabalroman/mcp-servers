@@ -44,9 +44,11 @@ server.tool(
     title: z.string().min(1, 'Title must not be empty')
       .describe('Short, action-oriented title (e.g. "Fix undo animation glitch on session delete")'),
     description: z.string()
-      .describe('Full context: what is broken or needed, reproduction steps or acceptance criteria, any technical notes the implementer will need')
+      .describe('Full context: what is broken or needed, reproduction steps or acceptance criteria, any technical notes the implementer will need'),
+    scope: z.string().optional()
+      .describe('Optional scope tag — the tool or area this task belongs to (e.g. "svg-path-joiner", "eink-frame", "task-manager"). Omit when the task is project-wide.')
   },
-  async ({ type, priority, title, description }) => {
+  async ({ type, priority, title, description, scope }) => {
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
       return {
@@ -63,6 +65,7 @@ server.tool(
       type,
       priority,
       status: 'todo',
+      scope: scope?.trim() || undefined,
       description: description.trim()
     });
     writeTasks(TASKS_FILE, newId, tasks);
@@ -232,8 +235,9 @@ server.tool(
     description: z.string().optional().describe('New description (replaces current)'),
     priority: z.enum(['low', 'medium', 'high', 'critical']).optional().describe('New priority'),
     type: z.enum(['bug', 'feature', 'idea', 'tool', 'other']).optional().describe('New type'),
+    scope: z.string().nullable().optional().describe('New scope tag, or null to clear it'),
   },
-  async ({ id, title, description, priority, type }) => {
+  async ({ id, title, description, priority, type, scope }) => {
     const { counter, active, done } = loadState();
     const inActive = active.find(t => t.id === id);
     const inDone = done.find(t => t.id === id);
@@ -256,6 +260,7 @@ server.tool(
     if (description !== undefined) task.description = description.trim();
     if (priority !== undefined) task.priority = priority;
     if (type !== undefined) task.type = type;
+    if (scope !== undefined) task.scope = scope === null ? undefined : scope.trim() || undefined;
 
     if (inActive) {
       writeTasks(TASKS_FILE, counter, active.map(t => (t.id === id ? task : t)));
@@ -264,6 +269,21 @@ server.tool(
     }
 
     return { content: [{ type: 'text', text: JSON.stringify({ success: true, task }) }] };
+  }
+);
+
+// ── getByScope ────────────────────────────────────────────────────────────────
+server.tool(
+  'getByScope',
+  'Get all tasks tagged with a specific scope — use when the user asks "what tasks are there for svg-path-joiner?" or "show me everything related to eink-frame". Returns all statuses, sorted by priority desc then id desc.',
+  {
+    scope: z.string().describe('Scope value to filter by (e.g. "svg-path-joiner", "eink-frame", "task-manager")')
+  },
+  async ({ scope }) => {
+    const { active, done } = loadState();
+    const all = [...active, ...done];
+    const filtered = sortByPriority(all.filter(t => t.scope === scope));
+    return { content: [{ type: 'text', text: JSON.stringify({ scope, tasks: filtered }) }] };
   }
 );
 

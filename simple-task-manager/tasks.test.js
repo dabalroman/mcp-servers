@@ -179,6 +179,82 @@ describe('writeDoneTasks', () => {
   });
 });
 
+// ── scope field ───────────────────────────────────────────────────────────────
+
+describe('scope field', () => {
+  test('parses $scope tag from fixture', () => {
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const t5 = tasks.find(t => t.id === 5);
+    assert.equal(t5.scope, 'task-manager');
+    const t3 = tasks.find(t => t.id === 3);
+    assert.equal(t3.scope, 'svg-path-joiner');
+  });
+
+  test('scope is undefined for tasks without $scope tag', () => {
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const t4 = tasks.find(t => t.id === 4);
+    assert.equal(t4.scope, undefined);
+  });
+
+  test('description is not contaminated by $scope line', () => {
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const t3 = tasks.find(t => t.id === 3);
+    assert.ok(!t3.description.includes('$scope'));
+    assert.ok(t3.description.includes('The joiner should'));
+  });
+
+  test('round-trips scope through write + parse', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    writeTasks(tasksFile, counter, tasks);
+    const { tasks: reparsed } = parseTasks(tasksFile);
+    assert.equal(reparsed.find(t => t.id === 5).scope, 'task-manager');
+    assert.equal(reparsed.find(t => t.id === 3).scope, 'svg-path-joiner');
+    assert.equal(reparsed.find(t => t.id === 4).scope, undefined);
+  });
+
+  test('$scope line appears in written file before description', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    writeTasks(tasksFile, counter, tasks);
+    const content = readFileSync(tasksFile, 'utf8');
+    const t3Start = content.indexOf('# 3 ');
+    const t3End = content.indexOf('\n# ', t3Start + 1);
+    const t3Block = t3End === -1 ? content.slice(t3Start) : content.slice(t3Start, t3End);
+    const scopeLine = t3Block.split('\n').find(l => l.startsWith('$scope:'));
+    assert.ok(scopeLine, '$scope: line should be present');
+    assert.equal(scopeLine, '$scope: svg-path-joiner');
+  });
+
+  test('setting scope on a task that had none round-trips correctly', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    const task = tasks.find(t => t.id === 4);
+    task.scope = 'eink-frame';
+    writeTasks(tasksFile, counter, tasks.map(t => (t.id === 4 ? task : t)));
+    const { tasks: result } = parseTasks(tasksFile);
+    assert.equal(result.find(t => t.id === 4).scope, 'eink-frame');
+  });
+
+  test('clearing scope (setting to undefined) removes $scope line', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    const task = tasks.find(t => t.id === 5);
+    task.scope = undefined;
+    writeTasks(tasksFile, counter, tasks.map(t => (t.id === 5 ? task : t)));
+    const { tasks: result } = parseTasks(tasksFile);
+    assert.equal(result.find(t => t.id === 5).scope, undefined);
+    const content = readFileSync(tasksFile, 'utf8');
+    const t5Start = content.indexOf('# 5 ');
+    const t5End = content.indexOf('\n# ', t5Start + 1);
+    const t5Block = t5End === -1 ? content.slice(t5Start) : content.slice(t5Start, t5End);
+    assert.ok(!t5Block.split('\n').some(l => l.startsWith('$scope:')));
+  });
+});
+
 // ── update round-trip ──────────────────────────────────────────────────────────
 
 describe('update round-trip', () => {

@@ -2,6 +2,7 @@
 
 # 5 Add update command to MCP server
 ## tool | in_progress | high
+$scope: task-manager
 The MCP server exposes no way to update an existing task's title or description.
 Add an `update` tool that accepts id + optional fields and patches in place.
 
@@ -12,6 +13,7 @@ Steps: check src/auth.ts middleware, add expiry check on every request.
 
 # 3 Relative scale for SVG merger
 ## feature | todo | medium
+$scope: svg-path-joiner
 The joiner should accept real width/height in mm and rescale the viewBox.
 This makes tolerance meaningful in physical units instead of px.
 
