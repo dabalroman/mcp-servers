@@ -18,8 +18,7 @@ A persistent, file-based task manager for [Claude Code](https://claude.ai/code),
 ### Step 1 — Download and install
 
 ```sh
-mkdir -p ~/.claude/mcp-servers
-git clone https://github.com/YOUR_USERNAME/simple-task-manager ~/.claude/mcp-servers/simple-task-manager
+git clone https://github.com/dabalroman/mcp-servers ~/.claude/mcp-servers
 cd ~/.claude/mcp-servers/simple-task-manager
 npm install
 ```
