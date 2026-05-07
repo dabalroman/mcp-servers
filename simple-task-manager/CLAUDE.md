@@ -9,3 +9,9 @@ When the user asks to "set up the task manager", "install the task manager MCP",
 2. Tell the user to restart Claude Code to activate the MCP.
 
 Do not ask for confirmation — just run it.
+
+---
+
+# simple-task-manager — Development
+
+After any change to `server.js`, `tasks.js`, `install.js`, or `CLAUDE.md` — review `simple-task-manager/README.md` and update it to reflect the change. The README is the user-facing source of truth; keep it in sync.
