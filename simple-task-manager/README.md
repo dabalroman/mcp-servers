@@ -1,92 +1,205 @@
 # simple-task-manager MCP
 
-A persistent, file-based task manager exposed as an [MCP](https://modelcontextprotocol.io) server. Tasks live in two plain-text Markdown files that you can read and edit by hand. Claude Code reads these files to track work across sessions, survive compaction, and suggest what to do next.
+A persistent, file-based task manager for [Claude Code](https://claude.ai/code), exposed as an [MCP](https://modelcontextprotocol.io) server. Tasks live in two plain Markdown files (`TASKS.md` / `TASKS_DONE.md`) that you can read and edit by hand. Claude uses them to track work across sessions, survive context compaction, and suggest what to do next.
 
-## File format
+**No separate Claude instructions needed** — behavioral rules are embedded in the server and loaded automatically when Claude connects.
 
-Tasks are stored in `TASKS.md` (active) and `TASKS_DONE.md` (archived). Each task looks like:
+---
 
+## Prerequisites
+
+- **Node.js 18 or later** — check with `node --version`. Download from [nodejs.org](https://nodejs.org) if not installed.
+- **Claude Code** — the CLI or desktop app.
+
+---
+
+## Quick Start
+
+### Step 1 — Download and install
+
+```sh
+mkdir -p ~/.claude/mcp-servers
+git clone https://github.com/YOUR_USERNAME/simple-task-manager ~/.claude/mcp-servers/simple-task-manager
+cd ~/.claude/mcp-servers/simple-task-manager
+npm install
 ```
-# 42 Fix the auth bug
-## bug | in_progress | high
-$scope: task-manager
-$ref: #3 depends on | #9 blocked by
-Reproduction: log in with an expired token. The session is not invalidated.
-Steps to fix: check the middleware in src/auth.ts.
-```
 
-The first line is the header (`# {id} {title}`), the second line is metadata (`## {type} | {status} | {priority}`). Optional tag lines follow: `$scope:` names the tool or area the task belongs to; `$ref:` lists related tasks as `#id note | #id note …`. The rest is the free-text description. `TASKS.md` also has a `# Counter: N` line at the top that tracks the highest id ever issued.
+> On **macOS**, `~` expands to `/Users/your-name/`. On **Linux**, it's `/home/your-name/`.
 
-**Types**: `bug` · `feature` · `idea` · `tool` · `other`  
-**Priorities**: `low` · `medium` · `high` · `critical`  
-**Statuses**: `todo` · `in_progress` · `done`
+### Step 2 — Register in your project
 
-## Setup
-
-### 1. Register in a project
-
-Add `.mcp.json` to your project root (checked into git so teammates get it automatically):
+Create a file called `.mcp.json` in the **root folder of your project** (the same folder you open in Claude Code). If the file already exists, add the `task-manager` entry inside the existing `mcpServers` object.
 
 ```json
 {
   "mcpServers": {
     "task-manager": {
       "command": "node",
-      "args": ["/absolute/path/to/mcp-servers/simple-task-manager/server.js"],
+      "args": ["/home/your-name/.claude/mcp-servers/simple-task-manager/server.js"],
       "env": {
-        "TASKS_FILE": "/absolute/path/to/project/TASKS.md",
-        "TASKS_DONE_FILE": "/absolute/path/to/project/TASKS_DONE.md"
+        "TASKS_FILE": "/home/your-name/projects/my-project/TASKS.md",
+        "TASKS_DONE_FILE": "/home/your-name/projects/my-project/TASKS_DONE.md"
       }
     }
   }
 }
 ```
 
-`TASKS.md` and `TASKS_DONE.md` are created on first use — no need to pre-create them.
+Replace every path with the real absolute path on your machine:
 
-### 2. Install dependencies and git hook
+| Placeholder | What to put there |
+|---|---|
+| `…/simple-task-manager/server.js` | Full path to `server.js` inside the clone you just made |
+| `…/my-project/TASKS.md` | Full path to where you want the task file (usually inside the project) |
 
-```sh
-cd simple-task-manager
-npm install   # installs deps + wires up the pre-commit hook via prepare script
+`TASKS.md` and `TASKS_DONE.md` are created automatically on first use — you don't need to create them.
+
+**Commit `.mcp.json` to git** so teammates get the same setup automatically.
+
+### Step 3 — Start a session
+
+Open Claude Code in your project. On first launch it will show a prompt:
+
+```
+Allow MCP server "task-manager" to run?
 ```
 
-The `prepare` script writes `.git/hooks/pre-commit` so tests run automatically before every commit to this repo.
+Approve it. Claude now has access to all tools and already knows how to use them correctly.
+
+### Step 4 — Try it
+
+Say: `"Schedule a task: fix the login button on mobile"` — Claude will call `add` and confirm the ID.  
+Then ask: `"What should I work on next?"` — Claude will call `getNext` and recommend the top task.
+
+---
+
+## How Claude behaves
+
+### Scheduling discipline
+
+Claude distinguishes between *scheduling* and *implementing*. If you say "TODO X", "schedule X", "add X to the list", "BUG X", or "FEATURE X" — Claude will call `add` and stop. It will not also implement the thing. If you mention a bug or feature while working on something else, Claude will ask whether to schedule it before continuing.
+
+At the end of a task or session, Claude will suggest what to do next via `getNext`.
+
+### User prefixes
+
+You can prefix any message to signal intent:
+
+| Prefix | Task type | Default behaviour |
+|---|---|---|
+| `BUG` | `bug` | Scheduled at high priority; surfaced before features |
+| `TODO` / `SCHEDULE` | `tool` or `feature` | Scheduled as near-term work |
+| `FEATURE` | `feature` | Scheduled; requires a planning session before implementation starts |
+| `IDEA` | `idea` | Scheduled as exploratory; needs refinement before becoming a feature |
+
+### Task lifecycle
+
+Claude follows a strict order:
+
+1. Calls `setStatus(id, 'in_progress')` **before** starting any work.
+2. Calls `setStatus(id, 'done')` **after** the commit is made and you confirm it — never before.
+3. Only calls `delete` when you explicitly ask to cancel a task.
+
+### Prioritization
+
+When you ask "what's next?", Claude recommends in this order:
+
+1. `bug` — defects first
+2. `tool` — developer tooling compounds
+3. `feature` — planned work
+4. `idea` — exploratory, needs refinement
+5. `other` — case-by-case
+
+Within each type: highest priority first, newest id first.
+
+### Workflow pipeline
+
+For any task, Claude follows these steps in order and never skips them:
+
+1. **Schedule** — out-of-scope requests go to `add`, not inline implementation
+2. **Plan** — for features: write a plan document before touching any code
+3. **Implement** — reads relevant files first; no speculative changes
+4. **Build** — must succeed with zero errors
+5. **Test** — verifies end-to-end; waits for your confirmation
+6. **Commit** — stages files, writes a clear commit message
+7. **Next** — suggests what to do next
+
+---
+
+## File format
+
+```
+# 42 Fix the auth bug
+## bug | in_progress | high
+$scope: auth
+$ref: #3 depends on | #9 blocked by
+Reproduction: log in with an expired token. The session is not invalidated.
+```
+
+- Line 1: `# {id} {title}`
+- Line 2: `## {type} | {status} | {priority}`
+- Optional `$scope:` — area or tool the task belongs to
+- Optional `$ref:` — related tasks as `#id note | #id note …`
+- Remaining lines: free-text description
+
+`TASKS.md` has a `# Counter: N` header tracking the highest id ever issued. Prefer using the MCP tools over editing these files by hand. If you do edit by hand, ask Claude to run `cleanup` afterwards.
+
+**Types**: `bug` · `feature` · `idea` · `tool` · `other`  
+**Priorities**: `low` · `medium` · `high` · `critical`  
+**Statuses**: `todo` · `in_progress` · `done`
+
+---
 
 ## Tools
 
-| Tool | Description |
+These are called by Claude — you don't type them yourself.
+
+| Tool | What it does |
 |---|---|
-| `add` | Schedule a new task (type, priority, title, description, scope?, refs?). Returns `{ id }`. |
-| `update` | Patch an existing task's fields in place (title, description, priority, type, scope, refs). Omitted fields are unchanged. |
-| `getNext` | The single next recommended task — answers "what's next?". Optional `type` filter. |
-| `getAll` | All not-done tasks grouped by type, sorted by priority desc then id desc. |
-| `getByType` | All tasks of one type across all statuses. |
-| `getByScope` | All tasks tagged with a specific scope (e.g. `"eink-frame"`). |
-| `getById` | One task by numeric id (searches both active and done). |
-| `getRelated` | Tasks related to a given id — returns `outbound` (tasks it references) and `inbound` (tasks that reference it). |
-| `getOverview` | Count summary per type (total + actionable). |
-| `setStatus` | Move a task between `todo` / `in_progress` / `done`. Automatically relocates the task between files. |
-| `delete` | Permanently remove a task. Prefer `setStatus(done)` for completed work. |
-| `cleanup` | Move all done tasks from `TASKS.md` to `TASKS_DONE.md` and rewrap long description lines. |
+| `add` | Schedule a new task. Required: `type`, `priority`, `title`, `description`. Optional: `scope`, `refs`. Returns the new `id`. |
+| `update` | Edit any field of an existing task in place. Pass `null` to clear `scope` or `refs`. Works on active and done tasks. |
+| `setStatus` | Move a task: `todo` → `in_progress` → `done`. `done` automatically archives it to `TASKS_DONE.md`. |
+| `getNext` | The single recommended next task — answers "what's next?". |
+| `getAll` | All not-done tasks grouped by type. |
+| `getByType` | All tasks of one type across all statuses, including done. |
+| `getByScope` | All tasks tagged with a specific scope (exact, case-sensitive). |
+| `getById` | One task by its number — searches both active and done. |
+| `getRelated` | Tasks that reference a given id (`inbound`) and tasks it references (`outbound`). |
+| `getOverview` | Count summary per type: total and actionable. |
+| `delete` | Permanently remove a task. Only use when asked — prefer `setStatus(done)` for finished work. |
+| `cleanup` | Archive done tasks from `TASKS.md` to `TASKS_DONE.md` and rewrap long lines. |
+
+### Refs — linking related tasks
+
+Pass `refs: [{ id, note }]` to `add` or `update` to link tasks. The `note` describes the relationship: `"depends on"`, `"blocked by"`, `"see also"`, `"replaces"`. Use `getRelated(id)` to query connections.
+
+### Scope — tagging tasks to an area
+
+Set `scope` on tasks belonging to a specific tool or area (e.g. `"auth"`, `"api"`). Omit for project-wide tasks. Query with `getByScope("auth")` — exact, case-sensitive match.
+
+---
+
+## Troubleshooting
+
+**Claude doesn't see the MCP tools**  
+Make sure you approved the server when prompted. Restart the Claude Code session — the approval prompt reappears if the server isn't approved yet.
+
+**`node: command not found`**  
+Node.js isn't installed or isn't in PATH. Install from [nodejs.org](https://nodejs.org), then re-run `npm install`.
+
+**Tasks aren't persisting between sessions**  
+Check that the `TASKS_FILE` path in `.mcp.json` is absolute and points to a real location (not a placeholder).
+
+**The server fails to start**  
+Run `node server.js` directly from the `simple-task-manager` directory and read the error. The most common cause is a missing or wrong `TASKS_FILE` environment variable.
+
+---
 
 ## Development
 
 ```sh
-npm test      # run test suite once (node:test, no extra deps)
-npm start     # start the MCP server (used by Claude Code via .mcp.json)
+npm test      # run tests once (uses Node's built-in test runner — no extra deps)
+npm start     # start the server manually (Claude Code does this automatically)
 ```
 
-Tests cover `tasks.js` — the parser, writer, and sort helpers. The pre-commit hook runs `npm test` automatically.
-
-## Prioritization guidance (for Claude Code)
-
-When recommending the next task, prefer in this order:
-
-1. `bug` — defects degrade the product; fix first
-2. `tool` — developer tooling improvements compound; tackle when the bug list is clear
-3. `feature` — planned work; usually requires a planning session before implementation
-4. `idea` — exploratory; needs refinement before becoming a feature
-5. `other` — case-by-case
-
-Within each type: highest priority first, newest id first (FILO).
+Tests cover `tasks.js` — the parser, writer, and sort helpers. The `prepare` script installs a pre-commit hook so `npm test` runs automatically before every commit.

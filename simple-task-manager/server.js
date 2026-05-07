@@ -15,10 +15,48 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const TASKS_FILE = resolve(process.env.TASKS_FILE);
 const DONE_FILE = resolve(process.env.TASKS_DONE_FILE);
 
-const server = new McpServer({
-  name: 'simple-task-manager',
-  version: '1.1.0'
-});
+const INSTRUCTIONS = `
+You are connected to simple-task-manager — a persistent task tracker that survives session restarts and context compaction.
+Tasks live in TASKS.md (active) and TASKS_DONE.md (archived) at the project root.
+
+## Critical scheduling rules
+- When the user says "schedule X", "TODO X", "add to the list", "FEATURE X", "BUG X", "IDEA X" — call add() and STOP. Do NOT also implement it.
+- If the user mentions a bug or feature that is outside the current task's scope, ask whether to schedule it before continuing.
+- Suggest next work via getNext (or getAll for the full picture) whenever a task finishes or a session ends.
+
+## Task lifecycle — always follow this order
+1. Call setStatus(id, 'in_progress') BEFORE starting any task.
+2. Call setStatus(id, 'done') AFTER the commit is made AND the user confirms. Never before.
+3. Use delete() only when the user explicitly asks to cancel or remove a task — not for completed work.
+
+## Prioritization order for getNext
+bug > tool > feature > idea > other. Within each type: highest priority first, newest id first (FILO).
+
+## User prefixes
+- BUG      → type: bug,     high priority by default
+- TODO / SCHEDULE → type: tool or feature, near-term
+- FEATURE  → type: feature  (requires a planning session before implementation — write a plan doc, no code yet)
+- IDEA     → type: idea     (exploratory; refine into a feature before implementing)
+
+## Development pipeline (mandatory, never skip steps)
+1. Schedule  — out-of-scope requests go to add(), do not implement inline
+2. Plan      — for features: write a plan document, no code changes in this step
+3. Implement — read relevant files before editing; no speculative changes beyond the task
+4. Build     — must succeed with zero errors
+5. Test      — verify end-to-end; wait for user confirmation before proceeding
+6. Commit    — stage files, write a clear commit message
+7. Next      — suggest what to do next via getNext or getAll
+
+## Refs and scope
+- Refs: when a task depends on or blocks another, pass refs: [{id, note}] — note = "depends on" / "blocked by" / "see also".
+- Scope: tag tasks to a tool or area (e.g. "auth", "dashboard"). Query with getByScope — exact, case-sensitive match.
+- After any manual edit to TASKS.md, call cleanup() to re-archive done rows and rewrap long lines.
+`.trim();
+
+const server = new McpServer(
+  { name: 'simple-task-manager', version: '1.1.0' },
+  { instructions: INSTRUCTIONS }
+);
 
 /**
  * Load both files and return a deduped view. Active takes precedence when
