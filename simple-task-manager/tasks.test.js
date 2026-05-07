@@ -11,6 +11,9 @@ import {
   sortByPriority,
   sortForNext,
   wrapLines,
+  applyRefs,
+  cascadeDelete,
+  RELATIONS,
 } from './tasks.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -434,5 +437,251 @@ describe('wrapLines', () => {
     const wrapped = wrapLines(t.description, 80);
     const lines = wrapped.split('\n');
     assert.ok(lines.every(l => l.length <= 80));
+  });
+});
+
+// ── RELATIONS constant ────────────────────────────────────────────────────────
+
+describe('RELATIONS', () => {
+  test('exports a non-empty array', () => {
+    assert.ok(Array.isArray(RELATIONS));
+    assert.ok(RELATIONS.length > 0);
+  });
+
+  test('includes all expected canonical values', () => {
+    const expected = ['blocks', 'is blocked by', 'depends on', 'is depended on by',
+      'causes', 'is caused by', 'tests', 'is tested by', 'relates to'];
+    for (const r of expected) {
+      assert.ok(RELATIONS.includes(r), `Expected RELATIONS to include "${r}"`);
+    }
+  });
+});
+
+// ── refs — parse & serialize ──────────────────────────────────────────────────
+
+describe('refs field', () => {
+  test('parses canonical $ref from fixture', () => {
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const t3 = tasks.find(t => t.id === 3);
+    assert.ok(t3.refs, 'task 3 should have refs');
+    assert.equal(t3.refs.length, 1);
+    assert.equal(t3.refs[0].id, 4);
+    assert.equal(t3.refs[0].relation, 'blocks');
+    assert.equal(t3.refs[0].nonCanonical, undefined);
+  });
+
+  test('parses canonical $ref on task 4', () => {
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const t4 = tasks.find(t => t.id === 4);
+    assert.ok(t4.refs);
+    assert.equal(t4.refs[0].relation, 'is blocked by');
+    assert.equal(t4.refs[0].id, 3);
+  });
+
+  test('tasks without $ref have undefined refs', () => {
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const t2 = tasks.find(t => t.id === 2);
+    assert.equal(t2.refs, undefined);
+  });
+
+  test('description not contaminated by $ref line', () => {
+    useFixtures();
+    const { tasks } = parseTasks(tasksFile);
+    const t3 = tasks.find(t => t.id === 3);
+    assert.ok(!t3.description.includes('$ref'));
+    assert.ok(t3.description.includes('The joiner should'));
+  });
+
+  test('non-canonical ref text is preserved verbatim with nonCanonical flag', () => {
+    writeFileSync(tasksFile, [
+      '# Counter: 2',
+      '',
+      '# 2 Task B',
+      '## feature | todo | medium',
+      '$ref: #1 see also',
+      'description here',
+      '',
+    ].join('\n'));
+    const { tasks } = parseTasks(tasksFile);
+    const t = tasks.find(t => t.id === 2);
+    assert.equal(t.refs[0].relation, 'see also');
+    assert.equal(t.refs[0].nonCanonical, true);
+  });
+
+  test('empty relation text defaults to "relates to"', () => {
+    writeFileSync(tasksFile, [
+      '# Counter: 2',
+      '',
+      '# 2 Task B',
+      '## bug | todo | high',
+      '$ref: #1',
+      '',
+    ].join('\n'));
+    const { tasks } = parseTasks(tasksFile);
+    assert.equal(tasks[0].refs[0].relation, 'relates to');
+    assert.equal(tasks[0].refs[0].nonCanonical, undefined);
+  });
+
+  test('refs round-trip through write + parse (canonical)', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    writeTasks(tasksFile, counter, tasks);
+    const { tasks: reparsed } = parseTasks(tasksFile);
+    const t3 = reparsed.find(t => t.id === 3);
+    assert.deepEqual(t3.refs, [{ id: 4, relation: 'blocks' }]);
+  });
+
+  test('non-canonical ref round-trips verbatim', () => {
+    writeFileSync(tasksFile, [
+      '# Counter: 1',
+      '',
+      '# 1 Task A',
+      '## bug | todo | high',
+      '$ref: #99 custom note here',
+      '',
+    ].join('\n'));
+    const { counter, tasks } = parseTasks(tasksFile);
+    writeTasks(tasksFile, counter, tasks);
+    const { tasks: reparsed } = parseTasks(tasksFile);
+    assert.equal(reparsed[0].refs[0].relation, 'custom note here');
+    assert.equal(reparsed[0].refs[0].nonCanonical, true);
+  });
+
+  test('$ref line in written file appears after $scope and before description', () => {
+    useFixtures();
+    const { counter, tasks } = parseTasks(tasksFile);
+    writeTasks(tasksFile, counter, tasks);
+    const content = readFileSync(tasksFile, 'utf8');
+    const t3Start = content.indexOf('# 3 ');
+    const t3End = content.indexOf('\n# ', t3Start + 1);
+    const block = t3End === -1 ? content.slice(t3Start) : content.slice(t3Start, t3End);
+    const lines = block.split('\n');
+    const scopeIdx = lines.findIndex(l => l.startsWith('$scope:'));
+    const refIdx   = lines.findIndex(l => l.startsWith('$ref:'));
+    assert.ok(scopeIdx !== -1, '$scope: line must be present');
+    assert.ok(refIdx !== -1,   '$ref: line must be present');
+    assert.ok(scopeIdx < refIdx, '$scope must appear before $ref');
+  });
+});
+
+// ── applyRefs ─────────────────────────────────────────────────────────────────
+
+function makeTask(id, extra = {}) {
+  return { id, title: `Task ${id}`, type: 'bug', status: 'todo', priority: 'medium', description: '', ...extra };
+}
+
+describe('applyRefs', () => {
+  test('adds inverse on counterpart when a canonical ref is added', () => {
+    const a = makeTask(1);
+    const b = makeTask(2);
+    const all = [a, b];
+    applyRefs(all, 1, [], [{ id: 2, relation: 'blocks' }]);
+    assert.deepEqual(b.refs, [{ id: 1, relation: 'is blocked by' }]);
+  });
+
+  test('removes inverse from counterpart when ref is removed', () => {
+    const a = makeTask(1, { refs: [{ id: 2, relation: 'blocks' }] });
+    const b = makeTask(2, { refs: [{ id: 1, relation: 'is blocked by' }] });
+    const all = [a, b];
+    applyRefs(all, 1, [{ id: 2, relation: 'blocks' }], []);
+    assert.equal(b.refs, undefined);
+  });
+
+  test('updates inverse when relation changes', () => {
+    const a = makeTask(1, { refs: [{ id: 2, relation: 'blocks' }] });
+    const b = makeTask(2, { refs: [{ id: 1, relation: 'is blocked by' }] });
+    const all = [a, b];
+    applyRefs(all, 1, [{ id: 2, relation: 'blocks' }], [{ id: 2, relation: 'causes' }]);
+    assert.equal(b.refs[0].relation, 'is caused by');
+  });
+
+  test('"relates to" is its own inverse (symmetric)', () => {
+    const a = makeTask(1);
+    const b = makeTask(2);
+    const all = [a, b];
+    applyRefs(all, 1, [], [{ id: 2, relation: 'relates to' }]);
+    assert.deepEqual(b.refs, [{ id: 1, relation: 'relates to' }]);
+  });
+
+  test('non-canonical refs are not mirrored', () => {
+    const a = makeTask(1);
+    const b = makeTask(2);
+    const all = [a, b];
+    applyRefs(all, 1, [], [{ id: 2, relation: 'see also', nonCanonical: true }]);
+    assert.equal(b.refs, undefined);
+  });
+
+  test('does not add duplicate inverse if already present', () => {
+    const a = makeTask(1);
+    const b = makeTask(2, { refs: [{ id: 1, relation: 'is blocked by' }] });
+    const all = [a, b];
+    applyRefs(all, 1, [], [{ id: 2, relation: 'blocks' }]);
+    assert.equal(b.refs.length, 1);
+  });
+
+  test('does not touch the source task itself', () => {
+    const a = makeTask(1);
+    const all = [a];
+    applyRefs(all, 1, [], [{ id: 1, relation: 'relates to' }]);
+    assert.equal(a.refs, undefined);
+  });
+
+  test('handles multiple refs at once', () => {
+    const a = makeTask(1);
+    const b = makeTask(2);
+    const c = makeTask(3);
+    const all = [a, b, c];
+    applyRefs(all, 1, [], [
+      { id: 2, relation: 'blocks' },
+      { id: 3, relation: 'causes' },
+    ]);
+    assert.equal(b.refs[0].relation, 'is blocked by');
+    assert.equal(c.refs[0].relation, 'is caused by');
+  });
+
+  test('returns the mutated allTasks array (same reference)', () => {
+    const all = [makeTask(1), makeTask(2)];
+    const result = applyRefs(all, 1, [], [{ id: 2, relation: 'tests' }]);
+    assert.strictEqual(result, all);
+  });
+});
+
+// ── cascadeDelete ─────────────────────────────────────────────────────────────
+
+describe('cascadeDelete', () => {
+  test('removes all refs pointing to the deleted id', () => {
+    const a = makeTask(1, { refs: [{ id: 99, relation: 'blocks' }] });
+    const b = makeTask(2, { refs: [{ id: 99, relation: 'relates to' }, { id: 1, relation: 'depends on' }] });
+    const all = [a, b];
+    cascadeDelete(all, 99);
+    assert.equal(a.refs, undefined);
+    assert.deepEqual(b.refs, [{ id: 1, relation: 'depends on' }]);
+  });
+
+  test('sets refs to undefined when all refs are removed', () => {
+    const t = makeTask(1, { refs: [{ id: 5, relation: 'blocks' }] });
+    cascadeDelete([t], 5);
+    assert.equal(t.refs, undefined);
+  });
+
+  test('does not touch tasks with no refs to the deleted id', () => {
+    const t = makeTask(1, { refs: [{ id: 3, relation: 'relates to' }] });
+    cascadeDelete([t], 99);
+    assert.deepEqual(t.refs, [{ id: 3, relation: 'relates to' }]);
+  });
+
+  test('handles tasks with no refs gracefully', () => {
+    const t = makeTask(1);
+    assert.doesNotThrow(() => cascadeDelete([t], 1));
+    assert.equal(t.refs, undefined);
+  });
+
+  test('returns the mutated allTasks array (same reference)', () => {
+    const all = [makeTask(1, { refs: [{ id: 5, relation: 'blocks' }] })];
+    const result = cascadeDelete(all, 5);
+    assert.strictEqual(result, all);
   });
 });

@@ -8,7 +8,10 @@ import {
   writeTasks,
   writeDoneTasks,
   sortByPriority,
-  sortForNext
+  sortForNext,
+  applyRefs,
+  cascadeDelete,
+  RELATIONS,
 } from './tasks.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -47,14 +50,27 @@ bug > tool > feature > idea > other. Within each type: highest priority first, n
 6. Commit    — stage files, write a clear commit message
 7. Next      — suggest what to do next via getNext or getAll
 
-## Refs and scope
-- Refs: when a task depends on or blocks another, pass refs: [{id, note}] — note = "depends on" / "blocked by" / "see also".
-- Scope: tag tasks to a tool or area (e.g. "auth", "dashboard"). Query with getByScope — exact, case-sensitive match.
-- After any manual edit to TASKS.md, call cleanup() to re-archive done rows and rewrap long lines.
+## Refs — structured relations with automatic mirroring
+When you add a ref on task A pointing to task B, the server automatically writes the inverse on task B.
+You never need to add both sides manually.
+
+Relation vocabulary (pick the one that describes A → B):
+- blocks / is blocked by
+- depends on / is depended on by
+- causes / is caused by
+- tests / is tested by
+- relates to (symmetric — same relation appears on both sides)
+
+Default relation: "relates to".
+
+Hand-edited TASKS.md refs with unrecognised relation text are kept verbatim and never auto-mirrored.
+
+## Scope — tagging tasks to an area
+Set scope on tasks belonging to a specific tool or area (e.g. "auth", "dashboard"). Query with getByScope — exact, case-sensitive match.
 `.trim();
 
 const server = new McpServer(
-  { name: 'simple-task-manager', version: '1.1.0' },
+  { name: 'simple-task-manager', version: '1.2.0' },
   { instructions: INSTRUCTIONS }
 );
 
@@ -69,6 +85,11 @@ function loadState() {
   const done = doneRaw.filter(t => !activeIds.has(t.id));
   return { counter, active, done };
 }
+
+const refsSchema = z.array(z.object({
+  id: z.number().int().positive(),
+  relation: z.enum(/** @type {[string, ...string[]]} */(RELATIONS)).default('relates to'),
+})).optional();
 
 // ── add ────────────────────────────────────────────────────────────────────────
 server.tool(
@@ -85,11 +106,8 @@ server.tool(
       .describe('Full context the implementer will need: what is broken or needed, reproduction steps or acceptance criteria, relevant file paths, technical constraints. Be thorough — this is what the next session will read.'),
     scope: z.string().optional()
       .describe('Optional tool or area this task belongs to (e.g. "svg-path-joiner", "eink-frame", "task-manager"). Omit for project-wide tasks. Use getByScope to filter tasks by this value later.'),
-    refs: z.array(z.object({
-      id: z.number().int().positive(),
-      note: z.string().optional()
-    })).optional()
-      .describe('Optional related-task references — use when this task depends on, blocks, or is otherwise connected to existing tasks. Each entry: { id: number, note?: string } where note describes the relationship (e.g. "depends on", "blocked by", "related to"). Use getRelated to query these links later.')
+    refs: refsSchema
+      .describe('Optional related-task references — use when this task depends on, blocks, or is otherwise connected to existing tasks. Each entry: { id: number, relation?: string }. Relation must be one of: "blocks", "is blocked by", "depends on", "is depended on by", "causes", "is caused by", "tests", "is tested by", "relates to". Default: "relates to". The server automatically writes the inverse on the referenced task — you only need to specify one side.'),
   },
   async ({ type, priority, title, description, scope, refs }) => {
     const trimmedTitle = title.trim();
@@ -100,19 +118,29 @@ server.tool(
       };
     }
 
-    const { counter, tasks } = parseTasks(TASKS_FILE);
+    const { counter, active, done } = loadState();
     const newId = counter + 1;
-    tasks.unshift({
+    const canonRefs = refs?.length ? refs : undefined;
+    const newTask = {
       id: newId,
       title: trimmedTitle,
       type,
       priority,
       status: 'todo',
       scope: scope?.trim() || undefined,
-      refs: refs?.length ? refs : undefined,
+      refs: canonRefs,
       description: description.trim()
-    });
-    writeTasks(TASKS_FILE, newId, tasks);
+    };
+    active.unshift(newTask);
+
+    if (canonRefs) {
+      const all = [...active, ...done];
+      applyRefs(all, newId, [], canonRefs);
+      writeTasks(TASKS_FILE, newId, active);
+      writeDoneTasks(DONE_FILE, done);
+    } else {
+      writeTasks(TASKS_FILE, newId, active);
+    }
 
     return { content: [{ type: 'text', text: JSON.stringify({ id: newId }) }] };
   }
@@ -280,20 +308,17 @@ server.tool(
     priority: z.enum(['low', 'medium', 'high', 'critical']).optional().describe('New priority: critical = blocking; high = important soon; medium = normal; low = nice-to-have'),
     type: z.enum(['bug', 'feature', 'idea', 'tool', 'other']).optional().describe('New type — use to reclassify a task (e.g. idea → feature after refinement)'),
     scope: z.string().nullable().optional().describe('New scope tag (e.g. "eink-frame"), or null to clear the scope entirely'),
-    refs: z.array(z.object({
-      id: z.number().int().positive(),
-      note: z.string().optional()
-    })).nullable().optional()
-      .describe('Full replacement list of related-task references, or null / empty array to clear all refs. Each entry: { id, note? } where note describes the relationship (e.g. "depends on", "blocks", "see also"). This replaces the existing refs list entirely — include all refs you want to keep.'),
+    refs: refsSchema.nullable()
+      .describe('Full replacement list of related-task references, or null / empty array to clear all refs. Each entry: { id, relation? } where relation is one of the canonical values. Defaults to "relates to". The server automatically updates the inverse on each referenced task — only specify one side. This replaces the existing refs list entirely — include all refs you want to keep.'),
   },
   async ({ id, title, description, priority, type, scope, refs }) => {
     const { counter, active, done } = loadState();
-    const inActive = active.find(t => t.id === id);
-    const inDone = done.find(t => t.id === id);
-    const task = inActive ?? inDone;
+    const all = [...active, ...done];
+    const task = all.find(t => t.id === id);
+    const inActive = active.some(t => t.id === id);
 
     if (!task) {
-      const allIds = [...active.map(t => t.id), ...done.map(t => t.id)].sort((a, b) => a - b);
+      const allIds = all.map(t => t.id).sort((a, b) => a - b);
       return {
         content: [{
           type: 'text',
@@ -305,6 +330,8 @@ server.tool(
       };
     }
 
+    const oldRefs = task.refs ? [...task.refs] : [];
+
     if (title !== undefined) task.title = title.trim();
     if (description !== undefined) task.description = description.trim();
     if (priority !== undefined) task.priority = priority;
@@ -312,10 +339,14 @@ server.tool(
     if (scope !== undefined) task.scope = scope === null ? undefined : scope.trim() || undefined;
     if (refs !== undefined) task.refs = refs === null || refs.length === 0 ? undefined : refs;
 
-    if (inActive) {
-      writeTasks(TASKS_FILE, counter, active.map(t => (t.id === id ? task : t)));
+    if (refs !== undefined) {
+      applyRefs(all, id, oldRefs, task.refs ?? []);
+      writeTasks(TASKS_FILE, counter, active);
+      writeDoneTasks(DONE_FILE, done);
+    } else if (inActive) {
+      writeTasks(TASKS_FILE, counter, active);
     } else {
-      writeDoneTasks(DONE_FILE, done.map(t => (t.id === id ? task : t)));
+      writeDoneTasks(DONE_FILE, done);
     }
 
     return { content: [{ type: 'text', text: JSON.stringify({ success: true, task }) }] };
@@ -340,7 +371,7 @@ server.tool(
 // ── getRelated ────────────────────────────────────────────────────────────────
 server.tool(
   'getRelated',
-  'Get tasks related to a given task — use for "what depends on #X?", "what does #X block?", "show me connections for task #X". Returns three things: the task itself, outbound (tasks that #X references, each decorated with the refNote describing the relationship), and inbound (tasks that reference #X, i.e. tasks that listed #X in their refs). Searches both active and done tasks.',
+  'Get tasks related to a given task — use for "what depends on #X?", "what does #X block?", "show me connections for task #X". Returns three things: the task itself, outbound (tasks that #X references, decorated with the relation), and inbound (tasks that reference #X). Because mirroring keeps both sides in sync, outbound and inbound together form the complete graph for this task. Searches both active and done tasks.',
   {
     id: z.coerce.number().int().positive().describe('Task ID to find related tasks for')
   },
@@ -359,7 +390,7 @@ server.tool(
 
     const outbound = (task.refs ?? []).flatMap(ref => {
       const t = all.find(t => t.id === ref.id);
-      return t ? [{ ...t, refNote: ref.note }] : [];
+      return t ? [{ ...t, refRelation: ref.relation }] : [];
     });
 
     const inbound = all.filter(t => t.id !== id && t.refs?.some(r => r.id === id));
@@ -371,7 +402,7 @@ server.tool(
 // ── delete ────────────────────────────────────────────────────────────────────
 server.tool(
   'delete',
-  'Permanently remove a task from both TASKS.md and TASKS_DONE.md. Use ONLY when the user explicitly asks to delete, remove, drop, or cancel a task — not when work is finished (use setStatus(done) for that). This is irreversible. Returns { success: true } or { success: false, error }.',
+  'Permanently remove a task from both TASKS.md and TASKS_DONE.md. Use ONLY when the user explicitly asks to delete, remove, drop, or cancel a task — not when work is finished (use setStatus(done) for that). Also removes all refs pointing to this task from other tasks. This is irreversible. Returns { success: true } or { success: false, error }.',
   {
     id: z.coerce.number().int().positive().describe('The numeric task ID to permanently remove')
   },
@@ -394,8 +425,13 @@ server.tool(
       };
     }
 
-    if (inActive) writeTasks(TASKS_FILE, counter, active.filter(t => t.id !== id));
-    if (inDone) writeDoneTasks(DONE_FILE, done.filter(t => t.id !== id));
+    const all = [...active, ...done];
+    cascadeDelete(all, id);
+
+    const newActive = active.filter(t => t.id !== id);
+    const newDone = done.filter(t => t.id !== id);
+    writeTasks(TASKS_FILE, counter, newActive);
+    writeDoneTasks(DONE_FILE, newDone);
 
     return { content: [{ type: 'text', text: JSON.stringify({ success: true }) }] };
   }

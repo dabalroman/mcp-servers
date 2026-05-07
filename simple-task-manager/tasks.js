@@ -3,16 +3,106 @@ import { readFileSync, writeFileSync, renameSync } from 'fs';
 const PRIORITY_ORDER = { critical: 4, high: 3, medium: 2, low: 1 };
 const STATUS_ORDER = { in_progress: 2, todo: 1, done: 0 };
 
+export const RELATIONS = [
+  'blocks', 'is blocked by',
+  'depends on', 'is depended on by',
+  'causes', 'is caused by',
+  'tests', 'is tested by',
+  'relates to',
+];
+const RELATIONS_SET = new Set(RELATIONS);
+
+const INVERSE = {
+  'blocks':            'is blocked by',
+  'is blocked by':     'blocks',
+  'depends on':        'is depended on by',
+  'is depended on by': 'depends on',
+  'causes':            'is caused by',
+  'is caused by':      'causes',
+  'tests':             'is tested by',
+  'is tested by':      'tests',
+  'relates to':        'relates to',
+};
+
 function parseRefLine(raw) {
   return raw.split(' | ').flatMap(part => {
     const m = part.match(/^#(\d+)(?:\s+(.+))?$/);
     if (!m) return [];
-    return [{ id: parseInt(m[1], 10), note: m[2]?.trim() || undefined }];
+    const id = parseInt(m[1], 10);
+    const text = m[2]?.trim();
+    if (!text) return [{ id, relation: 'relates to' }];
+    if (RELATIONS_SET.has(text)) return [{ id, relation: text }];
+    return [{ id, relation: text, nonCanonical: true }];
   });
 }
 
 function serializeRefs(refs) {
-  return refs.map(r => r.note ? `#${r.id} ${r.note}` : `#${r.id}`).join(' | ');
+  return refs.map(r => `#${r.id} ${r.relation}`).join(' | ');
+}
+
+/**
+ * Mirror canonical refs bidirectionally between tasks (mutates allTasks in place).
+ *
+ * @param {object[]} allTasks - Combined active + done tasks.
+ * @param {number} sourceId - The task whose refs changed.
+ * @param {object[]} oldRefs - Previous refs of the source task (before update).
+ * @param {object[]} nextRefs - New refs of the source task (nonCanonical refs are skipped).
+ * @returns {object[]} allTasks (same reference, mutated).
+ */
+export function applyRefs(allTasks, sourceId, oldRefs, nextRefs) {
+  const canonOld = (oldRefs ?? []).filter(r => !r.nonCanonical);
+  const canonNext = (nextRefs ?? []).filter(r => !r.nonCanonical);
+
+  const added   = canonNext.filter(r => !canonOld.some(o => o.id === r.id));
+  const removed = canonOld.filter(r => !canonNext.some(n => n.id === r.id));
+  const changed = canonNext.filter(r => {
+    const old = canonOld.find(o => o.id === r.id);
+    return old && old.relation !== r.relation;
+  });
+
+  for (const task of allTasks) {
+    if (task.id === sourceId) continue;
+
+    for (const ref of added) {
+      if (task.id !== ref.id) continue;
+      const inverse = INVERSE[ref.relation] ?? ref.relation;
+      if (!task.refs) task.refs = [];
+      if (!task.refs.some(r => r.id === sourceId)) {
+        task.refs.push({ id: sourceId, relation: inverse });
+      }
+    }
+
+    for (const ref of removed) {
+      if (task.id !== ref.id || !task.refs) continue;
+      task.refs = task.refs.filter(r => r.id !== sourceId);
+      if (task.refs.length === 0) task.refs = undefined;
+    }
+
+    for (const ref of changed) {
+      if (task.id !== ref.id || !task.refs) continue;
+      const inverse = INVERSE[ref.relation] ?? ref.relation;
+      task.refs = task.refs.map(r =>
+        r.id === sourceId ? { ...r, relation: inverse } : r
+      );
+    }
+  }
+  return allTasks;
+}
+
+/**
+ * Strip all refs pointing to deletedId across every task (mutates allTasks in place).
+ *
+ * @param {object[]} allTasks - Combined active + done tasks.
+ * @param {number} deletedId - The id of the task being deleted.
+ * @returns {object[]} allTasks (same reference, mutated).
+ */
+export function cascadeDelete(allTasks, deletedId) {
+  for (const task of allTasks) {
+    if (!task.refs) continue;
+    task.refs = task.refs.filter(r => r.id !== deletedId);
+    if (task.refs.length === 0) task.refs = undefined;
+  }
+  return allTasks;
 }
 
 /**

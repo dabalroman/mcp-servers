@@ -154,9 +154,33 @@ These are called by Claude — you don't type them yourself.
 | `delete` | Permanently remove a task. Only use when asked — prefer `setStatus(done)` for finished work. |
 | `cleanup` | Archive done tasks from `TASKS.md` to `TASKS_DONE.md` and rewrap long lines. |
 
-### Refs — linking related tasks
+### Refs — structured relations with automatic mirroring
 
-Pass `refs: [{ id, note }]` to `add` or `update` to link tasks. The `note` describes the relationship: `"depends on"`, `"blocked by"`, `"see also"`, `"replaces"`. Use `getRelated(id)` to query connections.
+Pass `refs: [{ id, relation }]` to `add` or `update` to link tasks. When you add a ref on task A pointing to task B, the server **automatically writes the inverse on task B** — you never need to add both sides manually.
+
+| You set on A → B | Server writes on B → A |
+|---|---|
+| `blocks` | `is blocked by` |
+| `is blocked by` | `blocks` |
+| `depends on` | `is depended on by` |
+| `is depended on by` | `depends on` |
+| `causes` | `is caused by` |
+| `is caused by` | `causes` |
+| `tests` | `is tested by` |
+| `is tested by` | `tests` |
+| `relates to` | `relates to` (symmetric) |
+
+Default relation: `"relates to"`. Removing a ref also removes the inverse. Deleting a task cascades and strips all inbound refs.
+
+**Hand-edited refs**: if you type a relation in TASKS.md that isn't in the table above, the parser keeps it verbatim and does not mirror it. It stays as-is until you edit it via the UI or MCP.
+
+To normalize legacy notes and backfill missing inverses, run the migration script once:
+
+```sh
+node migrate-refs.js
+```
+
+Use `getRelated(id)` to query connections.
 
 ### Scope — tagging tasks to an area
 
