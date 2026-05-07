@@ -23,15 +23,13 @@ cd ~/.claude/mcp-servers/simple-task-manager
 npm install
 ```
 
-> On **macOS**, `~` expands to `/Users/your-name/`. On **Linux**, it's `/home/your-name/`.
-
 ### Step 2 — One-time global setup
 
 ```sh
 node ~/.claude/mcp-servers/simple-task-manager/install.js --global
 ```
 
-This adds one line to `~/.claude/CLAUDE.md` so Claude knows how to register the MCP in any project. You only do this once.
+This adds one line to `~/.claude/CLAUDE.md` so Claude knows how to register the MCP in any project.
 
 ### Step 3 — Register in a project
 
@@ -49,7 +47,7 @@ Restart Claude Code. On first launch it will prompt:
 Allow MCP server "task-manager" to run?
 ```
 
-Approve it. Then try it — say `"What should I work on next?"` and Claude will call `getNext`.
+Approve it. Then try it — say `"What should I work on next?"`
 
 ---
 
@@ -74,8 +72,6 @@ You can prefix any message to signal intent:
 
 ### Task lifecycle
 
-Claude follows a strict order:
-
 1. Calls `setStatus(id, 'in_progress')` **before** starting any work.
 2. Calls `setStatus(id, 'done')` **after** the commit is made and you confirm it — never before.
 3. Only calls `delete` when you explicitly ask to cancel a task.
@@ -93,8 +89,6 @@ When you ask "what's next?", Claude recommends in this order:
 Within each type: highest priority first, newest id first.
 
 ### Workflow pipeline
-
-For any task, Claude follows these steps in order and never skips them:
 
 1. **Schedule** — out-of-scope requests go to `add`, not inline implementation
 2. **Plan** — for features: write a plan document before touching any code
@@ -178,8 +172,8 @@ Run `node server.js` directly from the `simple-task-manager` directory and read 
 ## Development
 
 ```sh
-npm test      # run tests once (uses Node's built-in test runner — no extra deps)
-npm start     # start the server manually (Claude Code does this automatically)
+npm test
+npm start     # Claude Code does this automatically via .mcp.json
 ```
 
-Tests cover `tasks.js` — the parser, writer, and sort helpers. The `prepare` script installs a pre-commit hook so `npm test` runs automatically before every commit.
+The `prepare` script installs a pre-commit hook so `npm test` runs before every commit.
