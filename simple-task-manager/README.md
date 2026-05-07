@@ -49,10 +49,16 @@ Allow MCP server "task-manager" to run?
 
 Approve it. Then try some prompts:
 
+**Scheduling**
 - `"Schedule a bug, high priority: when the user closes the window, unsaved text is lost"`
-- `"What should I work on next?"`
 - `"Add an idea: dark mode support"`
 - `"TODO: write tests for the auth module"`
+
+**Working**
+- `"What should I work on next?"`
+- `"Do we have any bugs to solve?"`
+- `"Do task #15"`
+- `"List all tasks"`
 
 ---
 
