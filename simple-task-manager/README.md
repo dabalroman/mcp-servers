@@ -15,7 +15,7 @@ A persistent, file-based task manager for [Claude Code](https://claude.ai/code),
 
 ## Quick Start
 
-### Step 1 — Download and install
+### Step 1 — Clone and install
 
 ```sh
 git clone https://github.com/dabalroman/mcp-servers ~/.claude/mcp-servers
@@ -25,33 +25,31 @@ npm install
 
 > On **macOS**, `~` expands to `/Users/your-name/`. On **Linux**, it's `/home/your-name/`.
 
-### Step 2 — Register in your project
-
-Run the installer from your project root. It writes `.mcp.json` automatically with the correct paths:
+### Step 2 — One-time global setup
 
 ```sh
-cd /path/to/your-project
-node ~/.claude/mcp-servers/simple-task-manager/install.js
+node ~/.claude/mcp-servers/simple-task-manager/install.js --global
 ```
 
-That's it. The installer creates (or updates) `.mcp.json` without overwriting any other MCP servers you have registered. If `task-manager` is already registered it does nothing.
+This adds one line to `~/.claude/CLAUDE.md` so Claude knows how to register the MCP in any project. You only do this once.
 
-**Commit `.mcp.json` to git** so teammates get the same setup automatically.
+### Step 3 — Register in a project
 
-### Step 3 — Start a session
+Open Claude Code in any project and say:
 
-Open Claude Code in your project. On first launch it will show a prompt:
+> "Set up the task manager for me"
+
+Claude will run the installer, write `.mcp.json` with the correct paths, and tell you to restart. **Commit `.mcp.json` to git** so teammates get the same setup automatically.
+
+### Step 4 — Approve and go
+
+Restart Claude Code. On first launch it will prompt:
 
 ```
 Allow MCP server "task-manager" to run?
 ```
 
-Approve it. Claude now has access to all tools and already knows how to use them correctly.
-
-### Step 4 — Try it
-
-Say: `"Schedule a task: fix the login button on mobile"` — Claude will call `add` and confirm the ID.  
-Then ask: `"What should I work on next?"` — Claude will call `getNext` and recommend the top task.
+Approve it. Then try it — say `"What should I work on next?"` and Claude will call `getNext`.
 
 ---
 

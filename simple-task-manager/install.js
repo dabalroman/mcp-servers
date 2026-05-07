@@ -1,13 +1,37 @@
 #!/usr/bin/env node
 /**
- * Registers simple-task-manager in a project by writing .mcp.json.
- * Run from the project root: node /path/to/simple-task-manager/install.js
+ * Two modes:
+ *   node install.js --global   One-time setup: teaches Claude how to set up this MCP in any project.
+ *   node install.js [dir]      Per-project setup: writes .mcp.json in the project root (default: cwd).
  */
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
+import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 
 const serverDir = dirname(fileURLToPath(import.meta.url));
+
+// ── --global: register the setup instructions in ~/.claude/CLAUDE.md ──────────
+if (process.argv[2] === '--global') {
+  const claudeMd = resolve(homedir(), '.claude', 'CLAUDE.md');
+  const marker = 'simple-task-manager/CLAUDE.md';
+  const line = `@${resolve(serverDir, 'CLAUDE.md')}`;
+
+  if (existsSync(claudeMd) && readFileSync(claudeMd, 'utf8').includes(marker)) {
+    console.log(`simple-task-manager already registered in ${claudeMd} — nothing to do.`);
+    process.exit(0);
+  }
+
+  const existing = existsSync(claudeMd) ? readFileSync(claudeMd, 'utf8') : '';
+  const separator = existing.length && !existing.endsWith('\n') ? '\n' : '';
+  writeFileSync(claudeMd, existing + separator + line + '\n');
+  console.log(`Registered in ${claudeMd}`);
+  console.log(`Claude can now set up this MCP in any project.`);
+  console.log(`Start a new session and say: "setup the task manager"`);
+  process.exit(0);
+}
+
+// ── per-project: write .mcp.json ───────────────────────────────────────────────
 const projectDir = resolve(process.argv[2] ?? process.cwd());
 const mcpFile = resolve(projectDir, '.mcp.json');
 
