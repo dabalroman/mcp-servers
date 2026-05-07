@@ -27,31 +27,14 @@ npm install
 
 ### Step 2 — Register in your project
 
-Create a file called `.mcp.json` in the **root folder of your project** (the same folder you open in Claude Code). If the file already exists, add the `task-manager` entry inside the existing `mcpServers` object.
+Run the installer from your project root. It writes `.mcp.json` automatically with the correct paths:
 
-```json
-{
-  "mcpServers": {
-    "task-manager": {
-      "command": "node",
-      "args": ["/home/your-name/.claude/mcp-servers/simple-task-manager/server.js"],
-      "env": {
-        "TASKS_FILE": "/home/your-name/projects/my-project/TASKS.md",
-        "TASKS_DONE_FILE": "/home/your-name/projects/my-project/TASKS_DONE.md"
-      }
-    }
-  }
-}
+```sh
+cd /path/to/your-project
+node ~/.claude/mcp-servers/simple-task-manager/install.js
 ```
 
-Replace every path with the real absolute path on your machine:
-
-| Placeholder | What to put there |
-|---|---|
-| `…/simple-task-manager/server.js` | Full path to `server.js` inside the clone you just made |
-| `…/my-project/TASKS.md` | Full path to where you want the task file (usually inside the project) |
-
-`TASKS.md` and `TASKS_DONE.md` are created automatically on first use — you don't need to create them.
+That's it. The installer creates (or updates) `.mcp.json` without overwriting any other MCP servers you have registered. If `task-manager` is already registered it does nothing.
 
 **Commit `.mcp.json` to git** so teammates get the same setup automatically.
 
