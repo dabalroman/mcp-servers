@@ -83,9 +83,10 @@ You can prefix any message to signal intent:
 
 ### Task lifecycle
 
-1. Calls `setStatus(id, 'in_progress')` **before** starting any work.
-2. Calls `setStatus(id, 'done')` **after** the commit is made and you confirm it — never before.
-3. Only calls `delete` when you explicitly ask to cancel a task.
+1. New tasks default to `refinement`. Claude acts as project manager: asks you clarifying questions, enriches the description via `update()`, then promotes to `todo` via `setStatus` when ready.
+2. Calls `setStatus(id, 'in_progress')` **before** starting any work.
+3. Calls `setStatus(id, 'done')` **after** the commit is made and you confirm it — never before.
+4. Only calls `delete` when you explicitly ask to cancel a task.
 
 ### Prioritization
 
@@ -101,13 +102,14 @@ Within each type: highest priority first, newest id first.
 
 ### Workflow pipeline
 
-1. **Schedule** — out-of-scope requests go to `add`, not inline implementation
-2. **Plan** — for features: write a plan document before touching any code
-3. **Implement** — reads relevant files first; no speculative changes
-4. **Build** — must succeed with zero errors
-5. **Test** — verifies end-to-end; waits for your confirmation
-6. **Commit** — stages files, writes a clear commit message
-7. **Next** — suggests what to do next
+1. **Schedule** — out-of-scope requests go to `add`, not inline implementation. New tasks default to `refinement`.
+2. **Refine** — for refinement tasks: Claude asks PM questions, enriches the description, promotes to `todo`
+3. **Plan** — for features: write a plan document before touching any code
+4. **Implement** — reads relevant files first; no speculative changes
+5. **Build** — must succeed with zero errors
+6. **Test** — verifies end-to-end; waits for your confirmation
+7. **Commit** — stages files, writes a clear commit message
+8. **Next** — suggests what to do next
 
 ---
 
@@ -131,7 +133,7 @@ Reproduction: log in with an expired token. The session is not invalidated.
 
 **Types**: `bug` · `feature` · `idea` · `tool` · `other`  
 **Priorities**: `low` · `medium` · `high` · `critical`  
-**Statuses**: `todo` · `in_progress` · `done`
+**Statuses**: `refinement` · `todo` · `in_progress` · `done`
 
 ---
 
@@ -141,11 +143,11 @@ These are called by Claude — you don't type them yourself.
 
 | Tool | What it does |
 |---|---|
-| `add` | Schedule a new task. Required: `type`, `priority`, `title`, `description`. Optional: `scope`, `refs`. Returns the new `id`. |
+| `add` | Schedule a new task. Required: `type`, `priority`, `title`, `description`. Optional: `scope`, `refs`, `status` (`refinement` default; pass `todo` to skip refinement). Returns the new `id`. |
 | `update` | Edit any field of an existing task in place. Pass `null` to clear `scope` or `refs`. Works on active and done tasks. |
-| `setStatus` | Move a task: `todo` → `in_progress` → `done`. `done` automatically archives it to `TASKS_DONE.md`. |
-| `getNext` | The single recommended next task — answers "what's next?". |
-| `getAll` | All not-done tasks grouped by type. |
+| `setStatus` | Move a task: `refinement` → `todo` → `in_progress` → `done`. `done` automatically archives it to `TASKS_DONE.md`. |
+| `getNext` | The single recommended next task — answers "what's next?". Returns `refinement` tasks after `in_progress`, before `todo`. |
+| `getAll` | All not-done tasks (refinement + todo + in_progress) grouped by type. |
 | `getByType` | All tasks of one type across all statuses, including done. |
 | `getByScope` | All tasks tagged with a specific scope (exact, case-sensitive). |
 | `getById` | One task by its number — searches both active and done. |

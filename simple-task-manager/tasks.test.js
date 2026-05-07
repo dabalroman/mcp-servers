@@ -71,6 +71,34 @@ describe('parseTasks', () => {
     assert.equal(t.status, 'in_progress');
   });
 
+  test('parses refinement status', () => {
+    writeFileSync(tasksFile, [
+      '# Counter: 1',
+      '',
+      '# 1 Needs clarification',
+      '## feature | refinement | medium',
+      'Rough idea only.',
+      '',
+    ].join('\n'));
+    const { tasks } = parseTasks(tasksFile);
+    assert.equal(tasks[0].status, 'refinement');
+  });
+
+  test('refinement status round-trips through write + parse', () => {
+    writeFileSync(tasksFile, [
+      '# Counter: 1',
+      '',
+      '# 1 Rough task',
+      '## idea | refinement | low',
+      'Needs more detail.',
+      '',
+    ].join('\n'));
+    const { counter, tasks } = parseTasks(tasksFile);
+    writeTasks(tasksFile, counter, tasks);
+    const { tasks: reparsed } = parseTasks(tasksFile);
+    assert.equal(reparsed[0].status, 'refinement');
+  });
+
   test('parses multiline description', () => {
     useFixtures();
     const { tasks } = parseTasks(tasksFile);
@@ -394,6 +422,17 @@ describe('sortForNext', () => {
     const snapshot = tasks.map(t => t.id);
     sortForNext(tasks);
     assert.deepEqual(tasks.map(t => t.id), snapshot);
+  });
+
+  test('in_progress > refinement > todo ordering', () => {
+    const make = (id, status, priority = 'medium') => ({
+      id, status, priority, title: `Task ${id}`, type: 'bug', description: ''
+    });
+    const tasks = [make(1, 'todo'), make(2, 'refinement'), make(3, 'in_progress')];
+    const sorted = sortForNext(tasks);
+    assert.equal(sorted[0].status, 'in_progress');
+    assert.equal(sorted[1].status, 'refinement');
+    assert.equal(sorted[2].status, 'todo');
   });
 });
 

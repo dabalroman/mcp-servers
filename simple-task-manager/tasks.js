@@ -1,7 +1,7 @@
 import { readFileSync, writeFileSync, renameSync } from 'fs';
 
 const PRIORITY_ORDER = { critical: 4, high: 3, medium: 2, low: 1 };
-const STATUS_ORDER = { in_progress: 2, todo: 1, done: 0 };
+const STATUS_ORDER = { in_progress: 3, refinement: 2, todo: 1, done: 0 };
 
 export const RELATIONS = [
   'blocks', 'is blocked by',
@@ -159,7 +159,7 @@ export function parseTasks(filePath) {
 
     const metaLine = lines[j].trim();
     const metaMatch = metaLine.match(
-      /^##\s*(bug|feature|idea|tool|other)\s*\|\s*(todo|in_progress|done)\s*\|\s*(low|medium|high|critical)$/
+      /^##\s*(bug|feature|idea|tool|other)\s*\|\s*(todo|in_progress|done|refinement)\s*\|\s*(low|medium|high|critical)$/
     );
 
     if (!metaMatch) {

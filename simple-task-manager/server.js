@@ -28,9 +28,13 @@ Tasks live in TASKS.md (active) and TASKS_DONE.md (archived) at the project root
 - Suggest next work via getNext (or getAll for the full picture) whenever a task finishes or a session ends.
 
 ## Task lifecycle — always follow this order
-1. Call setStatus(id, 'in_progress') BEFORE starting any task.
-2. Call setStatus(id, 'done') AFTER the commit is made AND the user confirms. Never before.
-3. Use delete() only when the user explicitly asks to cancel or remove a task — not for completed work.
+1. New tasks start in 'refinement'. When getNext returns a refinement task, act as project manager: ask the user clarifying questions, enrich the description via update(), then call setStatus(id, 'todo') to promote it. Do not start implementing a refinement task.
+2. Call setStatus(id, 'in_progress') BEFORE starting any task in 'todo'.
+3. Call setStatus(id, 'done') AFTER the commit is made AND the user confirms. Never before.
+4. Use delete() only when the user explicitly asks to cancel or remove a task — not for completed work.
+
+## Refinement — acting as project manager
+When a task is in 'refinement', your job is to surface it and ask targeted questions to clarify scope, acceptance criteria, edge cases, and technical constraints. Use update() to record the answers in the task description. Only promote to 'todo' (via setStatus) once the description is specific enough that an implementer could work from it without guessing. Ask for user confirmation before promoting.
 
 ## Prioritization order for getNext
 bug > tool > feature > idea > other. Within each type: highest priority first, newest id first (FILO).
@@ -42,13 +46,14 @@ bug > tool > feature > idea > other. Within each type: highest priority first, n
 - IDEA     → type: idea     (exploratory; refine into a feature before implementing)
 
 ## Development pipeline (mandatory, never skip steps)
-1. Schedule  — out-of-scope requests go to add(), do not implement inline
-2. Plan      — for features: write a plan document, no code changes in this step
-3. Implement — read relevant files before editing; no speculative changes beyond the task
-4. Build     — must succeed with zero errors
-5. Test      — verify end-to-end; wait for user confirmation before proceeding
-6. Commit    — stage files, write a clear commit message
-7. Next      — suggest what to do next via getNext or getAll
+1. Schedule  — out-of-scope requests go to add(), do not implement inline. New tasks default to 'refinement'.
+2. Refine    — for refinement tasks: ask PM questions, update() description, setStatus('todo') when ready
+3. Plan      — for features: write a plan document, no code changes in this step
+4. Implement — read relevant files before editing; no speculative changes beyond the task
+5. Build     — must succeed with zero errors
+6. Test      — verify end-to-end; wait for user confirmation before proceeding
+7. Commit    — stage files, write a clear commit message
+8. Next      — suggest what to do next via getNext or getAll
 
 ## Refs — structured relations with automatic mirroring
 When you add a ref on task A pointing to task B, the server automatically writes the inverse on task B.
@@ -70,7 +75,7 @@ Set scope on tasks belonging to a specific tool or area (e.g. "auth", "dashboard
 `.trim();
 
 const server = new McpServer(
-  { name: 'simple-task-manager', version: '1.2.0' },
+  { name: 'simple-task-manager', version: '1.3.0' },
   { instructions: INSTRUCTIONS }
 );
 
@@ -94,7 +99,7 @@ const refsSchema = z.array(z.object({
 // ── add ────────────────────────────────────────────────────────────────────────
 server.tool(
   'add',
-  'Schedule a new task — call this whenever the user reports a bug, requests a feature, shares an idea, or says "schedule" / "TODO" / "add to the list". Do NOT implement the task inline; add it and stop. Returns { id } of the newly created task.',
+  'Schedule a new task — call this whenever the user reports a bug, requests a feature, shares an idea, or says "schedule" / "TODO" / "add to the list". Do NOT implement the task inline; add it and stop. New tasks default to status "refinement" — the next getNext call will surface it for PM-style clarification questions before it moves to "todo". Pass status: "todo" to skip refinement when the task is already fully specified. Returns { id } of the newly created task.',
   {
     type: z.enum(['bug', 'feature', 'idea', 'tool', 'other'])
       .describe('bug = defect to fix (highest priority class); feature = planned work that requires a /plan session before implementation; idea = exploratory thought, needs refinement before it becomes a feature; tool = developer-tooling improvement; other = anything that does not fit the above'),
@@ -108,8 +113,10 @@ server.tool(
       .describe('Optional tool or area this task belongs to (e.g. "svg-path-joiner", "eink-frame", "task-manager"). Omit for project-wide tasks. Use getByScope to filter tasks by this value later.'),
     refs: refsSchema
       .describe('Optional related-task references — use when this task depends on, blocks, or is otherwise connected to existing tasks. Each entry: { id: number, relation?: string }. Relation must be one of: "blocks", "is blocked by", "depends on", "is depended on by", "causes", "is caused by", "tests", "is tested by", "relates to". Default: "relates to". The server automatically writes the inverse on the referenced task — you only need to specify one side.'),
+    status: z.enum(['refinement', 'todo']).default('refinement')
+      .describe('Initial status. Default "refinement" — task needs PM clarification before work starts. Use "todo" only when the task is already fully specified and needs no further refinement.'),
   },
-  async ({ type, priority, title, description, scope, refs }) => {
+  async ({ type, priority, title, description, scope, refs, status }) => {
     const trimmedTitle = title.trim();
     if (!trimmedTitle) {
       return {
@@ -126,7 +133,7 @@ server.tool(
       title: trimmedTitle,
       type,
       priority,
-      status: 'todo',
+      status,
       scope: scope?.trim() || undefined,
       refs: canonRefs,
       description: description.trim()
@@ -177,7 +184,7 @@ server.tool(
         return {
           type,
           total: ofType.length,
-          actionable: ofType.filter(t => t.status === 'todo' || t.status === 'in_progress').length
+          actionable: ofType.filter(t => t.status === 'todo' || t.status === 'in_progress' || t.status === 'refinement').length
         };
       })
       .filter(o => o.total > 0)
@@ -190,14 +197,14 @@ server.tool(
 // ── getNext ────────────────────────────────────────────────────────────────────
 server.tool(
   'getNext',
-  'Get the single next actionable task — use for "what should I do next?", "what\'s next?", or any recommendation request. Sort order: in_progress first (resume interrupted work), then highest priority, then newest id (FILO). Only considers todo and in_progress tasks. Optional type filter narrows to one category. When no filter is given, apply the project prioritization order: bug > tool > feature > idea > other.',
+  'Get the single next actionable task — use for "what should I do next?", "what\'s next?", or any recommendation request. Sort order: in_progress first (resume interrupted work), then refinement (needs PM clarification), then todo, then highest priority, then newest id (FILO). Considers refinement, todo, and in_progress tasks. Optional type filter narrows to one category. When no filter is given, apply the project prioritization order: bug > tool > feature > idea > other. IMPORTANT: if the returned task has status "refinement", do NOT start implementing — instead ask the user clarifying questions to refine the description, then promote to "todo" via setStatus.',
   {
     type: z.enum(['bug', 'feature', 'idea', 'tool', 'other']).optional()
       .describe('Narrow to one type (optional). Omit to recommend across all types using the bug > tool > feature > idea > other order.')
   },
   async ({ type }) => {
     const { active } = loadState();
-    let actionable = active.filter(t => t.status === 'todo' || t.status === 'in_progress');
+    let actionable = active.filter(t => t.status === 'todo' || t.status === 'in_progress' || t.status === 'refinement');
     if (type) actionable = actionable.filter(t => t.type === type);
     const sorted = sortForNext(actionable);
     return { content: [{ type: 'text', text: JSON.stringify({ task: sorted[0] ?? null }) }] };
@@ -254,7 +261,7 @@ server.tool(
   'Update a task\'s status. Lifecycle rules: always call setStatus(in_progress) before starting work on a task; always call setStatus(done) after the commit is made and the user confirms. Setting done automatically moves the task from TASKS.md to TASKS_DONE.md; setting todo or in_progress on a done task moves it back to TASKS.md. Returns { success: true } or { success: false, error }.',
   {
     id: z.coerce.number().int().positive().describe('Task ID — get it from getNext, getAll, getByType, or getById'),
-    status: z.enum(['todo', 'in_progress', 'done']).describe('todo = not yet started; in_progress = actively being worked on (set this before beginning); done = completed and committed (set this after user confirms the commit)')
+    status: z.enum(['refinement', 'todo', 'in_progress', 'done']).describe('refinement = needs PM clarification before work starts; todo = ready to implement; in_progress = actively being worked on (set this before beginning); done = completed and committed (set this after user confirms the commit)')
   },
   async ({ id, status }) => {
     const { counter, active, done } = loadState();
