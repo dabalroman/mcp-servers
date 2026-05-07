@@ -47,7 +47,12 @@ Restart Claude Code. On first launch it will prompt:
 Allow MCP server "task-manager" to run?
 ```
 
-Approve it. Then try it — say `"What should I work on next?"`
+Approve it. Then try some prompts:
+
+- `"Schedule a bug, high priority: when the user closes the window, unsaved text is lost"`
+- `"What should I work on next?"`
+- `"Add an idea: dark mode support"`
+- `"TODO: write tests for the auth module"`
 
 ---
 
