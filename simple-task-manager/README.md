@@ -213,4 +213,8 @@ npm test
 npm start     # Claude Code does this automatically via .mcp.json
 ```
 
-The `prepare` script installs a pre-commit hook so `npm test` runs before every commit.
+The `prepare` script installs a pre-commit hook that:
+1. Bumps the server version in `version.js` using CalVer (`YYYY-MM-NNN`, resetting `NNN` to `001` on the first commit of a new month), then `git add`s the file so the bump is included in the commit.
+2. Runs `npm test`.
+
+The version is exposed to MCP clients under `serverInfo.version` in the `initialize` handshake.
