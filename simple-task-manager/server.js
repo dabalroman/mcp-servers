@@ -28,6 +28,13 @@ Tasks live in TASKS.md (active) and TASKS_DONE.md (archived) at the project root
 - If the user mentions a bug or feature that is outside the current task's scope, ask whether to schedule it before continuing.
 - Suggest next work via getNext (or getAll for the full picture) whenever a task finishes or a session ends.
 
+## Default status for NEW tasks — ALWAYS 'refinement'
+This is a hard rule; do not bypass it for "obvious" or "small" tasks. add() defaults status to 'refinement' for a reason.
+You may pass status: 'todo' ONLY when one of these is true:
+  (a) The user explicitly tells you to skip refinement ("schedule as todo", "ready to implement", "no refinement needed", or similar).
+  (b) The current conversation already performed refinement on this exact task — i.e. you and the user discussed the scope, acceptance criteria, and constraints just now, and the description you are about to write captures that discussion fully.
+If neither (a) nor (b) holds, omit the status field (or pass 'refinement') and let the next session do PM-style clarification. When in doubt, choose 'refinement' — it costs nothing and prevents premature implementation.
+
 ## Task lifecycle — always follow this order
 1. New tasks start in 'refinement'. When getNext returns a refinement task, act as project manager: ask the user clarifying questions, enrich the description via update(), then call setStatus(id, 'todo') to promote it. Do not start implementing a refinement task.
 2. Call setStatus(id, 'in_progress') BEFORE starting any task in 'todo'.
@@ -100,7 +107,7 @@ const refsSchema = z.array(z.object({
 // ── add ────────────────────────────────────────────────────────────────────────
 server.tool(
   'add',
-  'Schedule a new task — call this whenever the user reports a bug, requests a feature, shares an idea, or says "schedule" / "TODO" / "add to the list". Do NOT implement the task inline; add it and stop. New tasks default to status "refinement" — the next getNext call will surface it for PM-style clarification questions before it moves to "todo". Pass status: "todo" to skip refinement when the task is already fully specified. Returns { id } of the newly created task.',
+  'Schedule a new task — call this whenever the user reports a bug, requests a feature, shares an idea, or says "schedule" / "TODO" / "add to the list". Do NOT implement the task inline; add it and stop. New tasks ALWAYS default to status "refinement"; only pass status: "todo" when (a) the user explicitly asks to skip refinement, OR (b) the current conversation already refined this exact task with the user. When in doubt, omit status and let the next session run PM-style clarification. Returns { id } of the newly created task.',
   {
     type: z.enum(['bug', 'feature', 'idea', 'tool', 'other'])
       .describe('bug = defect to fix (highest priority class); feature = planned work that requires a /plan session before implementation; idea = exploratory thought, needs refinement before it becomes a feature; tool = developer-tooling improvement; other = anything that does not fit the above'),
@@ -115,7 +122,7 @@ server.tool(
     refs: refsSchema
       .describe('Optional related-task references — use when this task depends on, blocks, or is otherwise connected to existing tasks. Each entry: { id: number, relation?: string }. Relation must be one of: "blocks", "is blocked by", "depends on", "is depended on by", "causes", "is caused by", "tests", "is tested by", "relates to". Default: "relates to". The server automatically writes the inverse on the referenced task — you only need to specify one side.'),
     status: z.enum(['refinement', 'todo']).default('refinement')
-      .describe('Initial status. Default "refinement" — task needs PM clarification before work starts. Use "todo" only when the task is already fully specified and needs no further refinement.'),
+      .describe('Initial status. ALWAYS leave as default "refinement" unless one of these holds: (a) the user explicitly told you to skip refinement / mark as todo, or (b) you just refined this exact task with the user in the current conversation. Otherwise pass "refinement" (or omit the field). Choosing "todo" without one of those conditions is a rule violation — when in doubt, pick "refinement".'),
   },
   async ({ type, priority, title, description, scope, refs, status }) => {
     const trimmedTitle = title.trim();

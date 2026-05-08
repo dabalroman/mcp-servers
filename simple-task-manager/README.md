@@ -83,7 +83,7 @@ You can prefix any message to signal intent:
 
 ### Task lifecycle
 
-1. New tasks default to `refinement`. Claude acts as project manager: asks you clarifying questions, enriches the description via `update()`, then promotes to `todo` via `setStatus` when ready.
+1. New tasks **always** default to `refinement` — even when the task feels small or obvious. Claude acts as project manager: asks you clarifying questions, enriches the description via `update()`, then promotes to `todo` via `setStatus` when ready. Claude is allowed to skip refinement (pass `status: 'todo'` to `add`) **only** when (a) you explicitly ask for it ("schedule as todo", "no refinement needed"), or (b) refinement just happened in the current conversation. Otherwise the field stays at the default.
 2. Calls `setStatus(id, 'in_progress')` **before** starting any work.
 3. Calls `setStatus(id, 'done')` **after** the commit is made and you confirm it — never before.
 4. Only calls `delete` when you explicitly ask to cancel a task.
