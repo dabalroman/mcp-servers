@@ -14,6 +14,6 @@ const hooksDir = join(gitDir, 'hooks');
 mkdirSync(hooksDir, { recursive: true });
 
 const hook = join(hooksDir, 'pre-commit');
-writeFileSync(hook, '#!/bin/sh\ncd simple-task-manager && npm test\n');
+writeFileSync(hook, '#!/bin/sh\ncd simple-task-manager && node bump-version.js && npm test\n');
 chmodSync(hook, 0o755);
 console.log('pre-commit hook installed');

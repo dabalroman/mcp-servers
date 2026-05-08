@@ -3,6 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { z } from 'zod';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { VERSION } from './version.js';
 import {
   parseTasks,
   writeTasks,
@@ -75,7 +76,7 @@ Set scope on tasks belonging to a specific tool or area (e.g. "auth", "dashboard
 `.trim();
 
 const server = new McpServer(
-  { name: 'simple-task-manager', version: '1.3.0' },
+  { name: 'simple-task-manager', version: VERSION },
   { instructions: INSTRUCTIONS }
 );
 
