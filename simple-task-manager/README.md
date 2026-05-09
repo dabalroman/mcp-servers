@@ -109,7 +109,8 @@ Within each type: highest priority first, newest id first.
 5. **Build** — must succeed with zero errors
 6. **Test** — verifies end-to-end; waits for your confirmation
 7. **Commit** — stages files, writes a clear commit message
-8. **Next** — suggests what to do next
+8. **Curate** — after `setStatus(done)`: update the closest CLAUDE.md with non-obvious decisions, gotchas, new conventions, and architecture changes; prune any entries now stale. Skip if nothing worth capturing.
+9. **Next** — suggests what to do next
 
 ---
 

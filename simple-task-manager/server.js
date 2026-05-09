@@ -80,6 +80,14 @@ Hand-edited TASKS.md refs with unrecognised relation text are kept verbatim and 
 
 ## Scope — tagging tasks to an area
 Set scope on tasks belonging to a specific tool or area (e.g. "auth", "dashboard"). Query with getByScope (exact, case-sensitive) or getByStatus with a scope filter. Use getScopes to list all valid scope values.
+
+## Auto-knowledge capture
+After every task is closed (setStatus → done), curate the relevant CLAUDE.md file(s) before moving on:
+- **Add**: non-obvious decisions and their rationale, gotchas and env constraints, new conventions or patterns, significant file-layout or architecture changes.
+- **Remove / update**: any existing entries now stale, contradicted, or superseded by this task's changes. Stale knowledge is worse than missing knowledge.
+- **Target**: choose the closest appropriate file — project-root CLAUDE.md, per-tool CLAUDE.md inside the changed directory, or another file Claude already reads. Prefer proximity to the changed code; no single file is mandatory.
+- **Quality**: read the target file first and dedup — only add what is genuinely new. Keep entries terse; CLAUDE.md is dense reference material. Format to match the file's existing style.
+- **Skip**: if nothing non-obvious was learned, skip the pass entirely — no forced entries.
 `.trim();
 
 const server = new McpServer(
@@ -309,7 +317,11 @@ server.tool(
       writeDoneTasks(DONE_FILE, newDone);
     }
 
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true }) }] };
+    const result = { success: true };
+    if (status === 'done') {
+      result.knowledgeReminder = 'Task closed. Before moving on: (1) identify non-obvious decisions, gotchas, conventions, or architecture changes from this task; (2) update the closest relevant CLAUDE.md with anything genuinely new — keep entries terse and deduped; (3) prune or correct any entries now stale or contradicted. Skip if nothing worth capturing.';
+    }
+    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
   }
 );
 

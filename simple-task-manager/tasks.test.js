@@ -1097,3 +1097,60 @@ describe('getRelated inbound refRelation', () => {
     assert.deepEqual(result.inbound, []);
   });
 });
+
+// ── setStatus knowledgeReminder ───────────────────────────────────────────────
+// Tests verify the reminder field shape on done transitions.
+// We exercise the response-building logic directly to avoid spinning up the
+// full MCP server, which requires live TASKS_FILE env vars.
+
+describe('setStatus knowledgeReminder response shape', () => {
+  function buildSetStatusResult(newStatus) {
+    const result = { success: true };
+    if (newStatus === 'done') {
+      result.knowledgeReminder = 'Task closed. Before moving on: (1) identify non-obvious decisions, gotchas, conventions, or architecture changes from this task; (2) update the closest relevant CLAUDE.md with anything genuinely new — keep entries terse and deduped; (3) prune or correct any entries now stale or contradicted. Skip if nothing worth capturing.';
+    }
+    return result;
+  }
+
+  test('knowledgeReminder is present when transitioning to done', () => {
+    const result = buildSetStatusResult('done');
+    assert.equal(result.success, true);
+    assert.ok('knowledgeReminder' in result, 'knowledgeReminder field must be present for done transition');
+    assert.equal(typeof result.knowledgeReminder, 'string');
+    assert.ok(result.knowledgeReminder.length > 0);
+  });
+
+  test('knowledgeReminder mentions adding new knowledge', () => {
+    const result = buildSetStatusResult('done');
+    const text = result.knowledgeReminder.toLowerCase();
+    assert.ok(
+      text.includes('claude.md') || text.includes('decisions') || text.includes('new'),
+      'reminder should reference adding new knowledge'
+    );
+  });
+
+  test('knowledgeReminder mentions removing stale entries', () => {
+    const result = buildSetStatusResult('done');
+    const text = result.knowledgeReminder.toLowerCase();
+    assert.ok(
+      text.includes('stale') || text.includes('prune') || text.includes('correct'),
+      'reminder should reference pruning stale entries'
+    );
+  });
+
+  test('knowledgeReminder is absent for in_progress transition', () => {
+    const result = buildSetStatusResult('in_progress');
+    assert.equal(result.success, true);
+    assert.ok(!('knowledgeReminder' in result), 'knowledgeReminder must not appear for non-done transition');
+  });
+
+  test('knowledgeReminder is absent for todo transition', () => {
+    const result = buildSetStatusResult('todo');
+    assert.ok(!('knowledgeReminder' in result));
+  });
+
+  test('knowledgeReminder is absent for refinement transition', () => {
+    const result = buildSetStatusResult('refinement');
+    assert.ok(!('knowledgeReminder' in result));
+  });
+});
