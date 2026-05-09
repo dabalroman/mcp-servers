@@ -129,7 +129,7 @@ Reproduction: log in with an expired token. The session is not invalidated.
 - Optional `$ref:` — related tasks as `#id note | #id note …`
 - Remaining lines: free-text description
 
-`TASKS.md` has a `# Counter: N` header tracking the highest id ever issued. Prefer using the MCP tools over editing these files by hand. If you do edit by hand, ask Claude to run `cleanup` afterwards.
+`TASKS.md` has a `# Counter: N` header tracking the highest id ever issued. Prefer using the MCP tools over editing these files by hand.
 
 **Types**: `bug` · `feature` · `idea` · `tool` · `other`  
 **Priorities**: `low` · `medium` · `high` · `critical`  
@@ -143,18 +143,19 @@ These are called by Claude — you don't type them yourself.
 
 | Tool | What it does |
 |---|---|
-| `add` | Schedule a new task. Required: `type`, `priority`, `title`, `description`. Optional: `scope`, `refs`, `status` (`refinement` default; pass `todo` to skip refinement). Returns the new `id`. |
+| `add` | Schedule a new task. Required: `type`, `priority`, `title`, `description`. Optional: `scope`, `refs`, `status` (`refinement` default; pass `todo` to skip refinement). Returns the new `id`. Refs are auto-mirrored on the other side. |
 | `update` | Edit any field of an existing task in place. Pass `null` to clear `scope` or `refs`. Works on active and done tasks. |
-| `setStatus` | Move a task: `refinement` → `todo` → `in_progress` → `done`. `done` automatically archives it to `TASKS_DONE.md`. |
+| `setStatus` | Move a task: `refinement` → `todo` → `in_progress` → `done`. `done` automatically archives it to `TASKS_DONE.md`. Setting a non-done status on a done (archived) task restores it to `TASKS.md`. |
 | `getNext` | The single recommended next task — answers "what's next?". Returns `refinement` tasks after `in_progress`, before `todo`. |
 | `getAll` | All not-done tasks (refinement + todo + in_progress) grouped by type. |
 | `getByType` | All tasks of one type across all statuses, including done. |
-| `getByScope` | All tasks tagged with a specific scope (exact, case-sensitive). |
+| `getByScope` | All tasks tagged with a specific scope (exact, case-sensitive). Empty results may indicate a typo'd scope — use `getScopes` to discover valid values. |
+| `getByStatus` | All tasks with a specific status. `done` reads from `TASKS_DONE.md`; all other statuses read from `TASKS.md`. Optional `scope` filter. Returns `{ tasks: [] }` on empty, not an error. |
+| `getScopes` | List all scopes across active and done tasks with `total` and `open` counts. Use to discover valid scope values. |
 | `getById` | One task by its number — searches both active and done. |
-| `getRelated` | Tasks that reference a given id (`inbound`) and tasks it references (`outbound`). |
-| `getOverview` | Count summary per type: total and actionable. |
+| `getRelated` | Tasks that reference a given id (`inbound`, decorated with `refRelation`) and tasks it references (`outbound`, decorated with `refRelation`). |
+| `getOverview` | Count summary per type: `refinement`, `open` (todo + in_progress), and `done` counts. |
 | `delete` | Permanently remove a task. Only use when asked — prefer `setStatus(done)` for finished work. |
-| `cleanup` | Archive done tasks from `TASKS.md` to `TASKS_DONE.md` and rewrap long lines. |
 
 ### Refs — structured relations with automatic mirroring
 
@@ -186,7 +187,7 @@ Use `getRelated(id)` to query connections.
 
 ### Scope — tagging tasks to an area
 
-Set `scope` on tasks belonging to a specific tool or area (e.g. `"auth"`, `"api"`). Omit for project-wide tasks. Query with `getByScope("auth")` — exact, case-sensitive match.
+Set `scope` on tasks belonging to a specific tool or area (e.g. `"auth"`, `"api"`). Omit for project-wide tasks. Query with `getByScope("auth")` (exact, case-sensitive) or `getByStatus` with a `scope` filter. Use `getScopes` to list all valid scope values and their open/total counts.
 
 ---
 

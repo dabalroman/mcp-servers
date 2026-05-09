@@ -79,7 +79,7 @@ Default relation: "relates to".
 Hand-edited TASKS.md refs with unrecognised relation text are kept verbatim and never auto-mirrored.
 
 ## Scope — tagging tasks to an area
-Set scope on tasks belonging to a specific tool or area (e.g. "auth", "dashboard"). Query with getByScope — exact, case-sensitive match.
+Set scope on tasks belonging to a specific tool or area (e.g. "auth", "dashboard"). Query with getByScope (exact, case-sensitive) or getByStatus with a scope filter. Use getScopes to list all valid scope values.
 `.trim();
 
 const server = new McpServer(
@@ -107,7 +107,7 @@ const refsSchema = z.array(z.object({
 // ── add ────────────────────────────────────────────────────────────────────────
 server.tool(
   'add',
-  'Schedule a new task — call this whenever the user reports a bug, requests a feature, shares an idea, or says "schedule" / "TODO" / "add to the list". Do NOT implement the task inline; add it and stop. New tasks ALWAYS default to status "refinement"; only pass status: "todo" when (a) the user explicitly asks to skip refinement, OR (b) the current conversation already refined this exact task with the user. When in doubt, omit status and let the next session run PM-style clarification. Returns { id } of the newly created task.',
+  'Schedule a new task — call this whenever the user reports a bug, requests a feature, shares an idea, or says "schedule" / "TODO" / "add to the list". Do NOT implement the task inline; add it and stop. New tasks ALWAYS default to status "refinement"; only pass status: "todo" when (a) the user explicitly asks to skip refinement, OR (b) the current conversation already refined this exact task with the user. When in doubt, omit status and let the next session run PM-style clarification. Returns { id } of the newly created task. Refs are auto-mirrored on the other side; no need for a separate update call.',
   {
     type: z.enum(['bug', 'feature', 'idea', 'tool', 'other'])
       .describe('bug = defect to fix (highest priority class); feature = planned work that requires a /plan session before implementation; idea = exploratory thought, needs refinement before it becomes a feature; tool = developer-tooling improvement; other = anything that does not fit the above'),
@@ -180,7 +180,7 @@ server.tool(
 // ── getOverview ────────────────────────────────────────────────────────────────
 server.tool(
   'getOverview',
-  'Get a count summary per type: total tasks and how many are actionable (todo or in_progress). Use for dashboard questions like "how many tasks are there?" or "give me a backlog summary". Returns only types that have at least one task, sorted by actionable count desc. Do NOT use this to answer "what\'s next?" — use getNext for that.',
+  'Get a count summary per type: refinement, open (todo + in_progress), and done counts. Use for dashboard questions like "how many tasks are there?" or "give me a backlog summary". Returns only types that have at least one task, sorted by open count desc. Do NOT use this to answer "what\'s next?" — use getNext for that.',
   {},
   async () => {
     const { active, done } = loadState();
@@ -191,12 +191,13 @@ server.tool(
         const ofType = all.filter(t => t.type === type);
         return {
           type,
-          total: ofType.length,
-          actionable: ofType.filter(t => t.status === 'todo' || t.status === 'in_progress' || t.status === 'refinement').length
+          refinement: ofType.filter(t => t.status === 'refinement').length,
+          open: ofType.filter(t => t.status === 'todo' || t.status === 'in_progress').length,
+          done: ofType.filter(t => t.status === 'done').length,
         };
       })
-      .filter(o => o.total > 0)
-      .sort((a, b) => b.actionable - a.actionable);
+      .filter(o => o.refinement + o.open + o.done > 0)
+      .sort((a, b) => b.open - a.open);
 
     return { content: [{ type: 'text', text: JSON.stringify({ overview }) }] };
   }
@@ -222,7 +223,7 @@ server.tool(
 // ── getAll ─────────────────────────────────────────────────────────────────────
 server.tool(
   'getAll',
-  'Get every not-done task (todo + in_progress) grouped by type — use for "show me everything", "list all tasks", "full backlog". Groups appear in type order: bug, feature, idea, tool, other. Each group sorted by priority desc then id desc. Does NOT include done tasks — use getByType or getById to look up archived work. Prefer getNext for a single recommendation; prefer getByType when the user asks about one specific type.',
+  'Get every not-done task (refinement + todo + in_progress) grouped by type — use for "show me everything", "list all tasks", "full backlog". Groups appear in type order: bug, feature, idea, tool, other. Each group sorted by priority desc then id desc. Does NOT include done tasks — use getByType or getById to look up archived work. Prefer getNext for a single recommendation; prefer getByType when the user asks about one specific type.',
   {},
   async () => {
     const { active } = loadState();
@@ -266,7 +267,7 @@ server.tool(
 // ── setStatus ──────────────────────────────────────────────────────────────────
 server.tool(
   'setStatus',
-  'Update a task\'s status. Lifecycle rules: always call setStatus(in_progress) before starting work on a task; always call setStatus(done) after the commit is made and the user confirms. Setting done automatically moves the task from TASKS.md to TASKS_DONE.md; setting todo or in_progress on a done task moves it back to TASKS.md. Returns { success: true } or { success: false, error }.',
+  'Update a task\'s status. Lifecycle rules: always call setStatus(in_progress) before starting work on a task; always call setStatus(done) after the commit is made and the user confirms. Setting done automatically moves the task from TASKS.md to TASKS_DONE.md; setting todo or in_progress on a done task moves it back to TASKS.md. Setting a non-done status on a done (archived) task restores it to TASKS.md. Returns { success: true } or { success: false, error }.',
   {
     id: z.coerce.number().int().positive().describe('Task ID — get it from getNext, getAll, getByType, or getById'),
     status: z.enum(['refinement', 'todo', 'in_progress', 'done']).describe('refinement = needs PM clarification before work starts; todo = ready to implement; in_progress = actively being worked on (set this before beginning); done = completed and committed (set this after user confirms the commit)')
@@ -371,7 +372,7 @@ server.tool(
 // ── getByScope ────────────────────────────────────────────────────────────────
 server.tool(
   'getByScope',
-  'Get all tasks tagged with a specific scope — use when the user asks "what tasks are there for svg-path-joiner?" or "show me everything related to eink-frame". Includes all statuses (todo, in_progress, done). Sorted by priority desc then id desc. Scope values are set via add or update.',
+  'Get all tasks tagged with a specific scope — use when the user asks "what tasks are there for svg-path-joiner?" or "show me everything related to eink-frame". Includes all statuses (todo, in_progress, done). Sorted by priority desc then id desc. Scope values are set via add or update. Empty results may indicate a wrong/typo\'d scope; use getScopes to discover valid values.',
   {
     scope: z.string().describe('Exact scope value to filter by (e.g. "svg-path-joiner", "eink-frame", "task-manager"). Must match exactly — scope is case-sensitive.')
   },
@@ -386,7 +387,7 @@ server.tool(
 // ── getRelated ────────────────────────────────────────────────────────────────
 server.tool(
   'getRelated',
-  'Get tasks related to a given task — use for "what depends on #X?", "what does #X block?", "show me connections for task #X". Returns three things: the task itself, outbound (tasks that #X references, decorated with the relation), and inbound (tasks that reference #X). Because mirroring keeps both sides in sync, outbound and inbound together form the complete graph for this task. Searches both active and done tasks.',
+  'Get tasks related to a given task — use for "what depends on #X?", "what does #X block?", "show me connections for task #X". Returns three things: the task itself, outbound (tasks that #X references, decorated with refRelation), and inbound (tasks that reference #X, also decorated with refRelation showing the relation the inbound task has toward the queried task). Because mirroring keeps both sides in sync, outbound and inbound together form the complete graph for this task. Searches both active and done tasks.',
   {
     id: z.coerce.number().int().positive().describe('Task ID to find related tasks for')
   },
@@ -408,9 +409,59 @@ server.tool(
       return t ? [{ ...t, refRelation: ref.relation }] : [];
     });
 
-    const inbound = all.filter(t => t.id !== id && t.refs?.some(r => r.id === id));
+    const inbound = all.filter(t => t.id !== id && t.refs?.some(r => r.id === id)).map(t => {
+      const ref = t.refs.find(r => r.id === id);
+      return { ...t, refRelation: ref.relation };
+    });
 
     return { content: [{ type: 'text', text: JSON.stringify({ task, outbound, inbound }) }] };
+  }
+);
+
+// ── getByStatus ───────────────────────────────────────────────────────────────
+server.tool(
+  'getByStatus',
+  'Get all tasks with a specific status — use for "show me everything in refinement", "what\'s in progress?", "list done tasks". When status is "done", reads only TASKS_DONE.md; all other statuses read only TASKS.md. Optional scope filter narrows results to an exact scope value (case-sensitive). Returns { tasks: Task[] } sorted by priority desc then id desc. Empty results return { tasks: [] }, not an error.',
+  {
+    status: z.enum(['refinement', 'todo', 'in_progress', 'done'])
+      .describe('The status to filter by. "done" reads from the archive file; all others read from the active file.'),
+    scope: z.string().optional()
+      .describe('Optional exact scope filter (case-sensitive). Omit to return all tasks with the given status.'),
+  },
+  async ({ status, scope }) => {
+    const { active, done } = loadState();
+    const pool = status === 'done' ? done : active;
+    let filtered = pool.filter(t => t.status === status);
+    if (scope !== undefined) filtered = filtered.filter(t => t.scope === scope);
+    const sorted = sortByPriority(filtered);
+    return { content: [{ type: 'text', text: JSON.stringify({ tasks: sorted }) }] };
+  }
+);
+
+// ── getScopes ─────────────────────────────────────────────────────────────────
+server.tool(
+  'getScopes',
+  'List all scopes that exist across active and done tasks — use to discover valid scope values before calling getByScope or getByStatus with a scope filter. Returns { scopes: Array<{ scope, total, open }> } where total = all tasks carrying that scope (both files), open = non-done tasks. Tasks without a scope are excluded. Sorted: open desc, then total desc, then alphabetically. Empty: { scopes: [] }.',
+  {},
+  async () => {
+    const { active, done } = loadState();
+    const all = [...active, ...done];
+    const scopeMap = new Map();
+    for (const t of all) {
+      if (!t.scope) continue;
+      if (!scopeMap.has(t.scope)) scopeMap.set(t.scope, { total: 0, open: 0 });
+      const entry = scopeMap.get(t.scope);
+      entry.total++;
+      if (t.status !== 'done') entry.open++;
+    }
+    const scopes = [...scopeMap.entries()]
+      .map(([scope, { total, open }]) => ({ scope, total, open }))
+      .sort((a, b) => {
+        if (b.open !== a.open) return b.open - a.open;
+        if (b.total !== a.total) return b.total - a.total;
+        return a.scope.localeCompare(b.scope);
+      });
+    return { content: [{ type: 'text', text: JSON.stringify({ scopes }) }] };
   }
 );
 
@@ -449,37 +500,6 @@ server.tool(
     writeDoneTasks(DONE_FILE, newDone);
 
     return { content: [{ type: 'text', text: JSON.stringify({ success: true }) }] };
-  }
-);
-
-// ── cleanup ───────────────────────────────────────────────────────────────────
-server.tool(
-  'cleanup',
-  'Maintenance sweep — move every done task from TASKS.md to TASKS_DONE.md and rewrap long description lines at 120 chars. Safe to run anytime; call it after manual file edits or when the user asks to tidy/archive the task list. Returns { archived, activeAfter, doneAfter } counts.',
-  {},
-  async () => {
-    const { counter, active, done } = loadState();
-
-    const doneInActive = active.filter(t => t.status === 'done');
-    const remainingActive = active.filter(t => t.status !== 'done');
-    const mergedDone = done
-      .filter(d => !doneInActive.some(a => a.id === d.id))
-      .concat(doneInActive);
-
-    writeDoneTasks(DONE_FILE, mergedDone);
-    writeTasks(TASKS_FILE, counter, remainingActive);
-
-    return {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({
-          success: true,
-          archived: doneInActive.length,
-          activeAfter: remainingActive.length,
-          doneAfter: mergedDone.length
-        })
-      }]
-    };
   }
 );
 
