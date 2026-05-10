@@ -269,6 +269,27 @@ describe('refs — store-level mirroring', () => {
     store.update(id, { refs: [{ id, relation: 'relates to' }] });
     assert.equal(store.getById(id).refs, undefined);
   });
+
+  test('non-canonical refs are NOT mirrored on the target task', () => {
+    const { id: a } = makeTask({ title: 'A' });
+    const { id: c } = makeTask({ title: 'C' });
+    // Store a non-canonical mirror row directly (simulating what the server writes
+    // when task C was canonical-ref'd by some other task pointing at A).
+    const db = new Database(dbPath);
+    db.prepare('INSERT INTO refs (from_id, to_id, relation, non_canonical) VALUES (?, ?, ?, 1)')
+      .run(a, c, 'is blocked by');
+    db.close();
+    // Now add a canonical ref from A → B.  applyRefsImpl must mirror only this
+    // canonical ref on B, and must NOT create an additional mirror for the
+    // non-canonical row sitting on A already.
+    const { id: b } = makeTask({ title: 'B' });
+    store.update(a, { refs: [{ id: b, relation: 'blocks' }] });
+    // b should have exactly one mirror (is blocked by a)
+    const refsOnB = store.getById(b).refs;
+    assert.equal(refsOnB.length, 1);
+    assert.equal(refsOnB[0].relation, 'is blocked by');
+    assert.equal(refsOnB[0].id, a);
+  });
 });
 
 describe('getByStatus', () => {
@@ -287,6 +308,19 @@ describe('getByStatus', () => {
     const filtered = store.getByStatus('refinement', 'web');
     assert.equal(filtered.length, 1);
     assert.equal(filtered[0].scope, 'web');
+  });
+
+  test('scope filter is case-sensitive — "Web" does not match "web"', () => {
+    makeTask({ scope: 'web' });
+    assert.equal(store.getByStatus('refinement', 'Web').length, 0);
+    assert.equal(store.getByStatus('refinement', 'WEB').length, 0);
+    assert.equal(store.getByStatus('refinement', 'web').length, 1);
+  });
+
+  test('returns an array (not null/undefined) when nothing matches', () => {
+    const result = store.getByStatus('todo', 'ghost-scope');
+    assert.ok(Array.isArray(result));
+    assert.equal(result.length, 0);
   });
 });
 
@@ -377,6 +411,30 @@ describe('getOverview', () => {
     const ov = store.getOverview();
     assert.equal(ov.length, 1);
   });
+
+  test('each entry has actionable (open + refinement) and total fields shape', () => {
+    const { id: t1 } = makeTask({ type: 'bug' });
+    store.setStatus(t1, 'todo');
+    const { id: t2 } = makeTask({ type: 'bug' });
+    store.setStatus(t2, 'done');
+    makeTask({ type: 'bug' }); // refinement
+    const ov = store.getOverview();
+    const bug = ov.find((o) => o.type === 'bug');
+    // Verify shape: all three buckets are present as numeric fields
+    assert.equal(typeof bug.open, 'number');
+    assert.equal(typeof bug.done, 'number');
+    assert.equal(typeof bug.refinement, 'number');
+    // Derived totals: open=1 (todo), done=1, refinement=1
+    assert.equal(bug.open, 1);
+    assert.equal(bug.done, 1);
+    assert.equal(bug.refinement, 1);
+    // total = all three combined
+    const total = bug.open + bug.done + bug.refinement;
+    assert.equal(total, 3);
+    // actionable = open + refinement (tasks that need attention)
+    const actionable = bug.open + bug.refinement;
+    assert.equal(actionable, 2);
+  });
 });
 
 describe('getRelated', () => {
@@ -393,6 +451,26 @@ describe('getRelated', () => {
     const ra = store.getRelated(a);
     assert.equal(ra.inbound[0].id, b);
     assert.equal(ra.inbound[0].refRelation, 'blocks');
+  });
+
+  test('no-outbound edge — task with no refs has empty outbound array', () => {
+    const { id } = makeTask({ title: 'Lonely' });
+    const r = store.getRelated(id);
+    assert.deepEqual(r.outbound, []);
+  });
+
+  test('no-inbound edge — task nobody points to has empty inbound array', () => {
+    const { id } = makeTask({ title: 'Solo' });
+    const r = store.getRelated(id);
+    assert.deepEqual(r.inbound, []);
+  });
+
+  test('no-refs edge — task with no refs at all has both arrays empty', () => {
+    const { id } = makeTask({ title: 'Isolated' });
+    const r = store.getRelated(id);
+    assert.deepEqual(r.outbound, []);
+    assert.deepEqual(r.inbound, []);
+    assert.equal(r.task.refs, undefined);
   });
 });
 
