@@ -29,3 +29,7 @@ Tasks live in a single SQLite database. The path comes from the `TASKS_DB` env v
 - Migrating from the old markdown format: `node migrate.js <legacy-tasks.md> <legacy-tasks_done.md> <output.db>`. The migrator carries its own legacy parser so `tasks.js` is free of legacy code.
 
 The vendor mirror in `random-tools/src/server/vendor/tasks.ts` follows the same schema. Update both files together when the schema changes.
+
+## Public surface parity — tasks.js ↔ vendor/tasks.ts
+
+`tasks.js` and `random-tools/src/server/vendor/tasks.ts` must always export the same public store surface (all methods on the object returned by `createStore`). Any method added to one must be mirrored in the other in the same PR/commit. Currently that includes: `dataVersion`, `load`, `add`, `update`, `setStatus`, `delete`, `getByStatus`, `getByScope`, `getByType`, `getNext`, `getOverview`, `getRelated`, `getScopes`, `getById`, `close`. The raw `db` escape hatch in `tasks.js` has no equivalent in the vendor mirror and should stay that way.

@@ -481,7 +481,8 @@ export function createStore(dbPath) {
   }
 
   return {
-    db, // exposed for advanced cases (e.g. data_version polling); avoid using directly
+    db, // exposed for advanced cases; avoid using directly — prefer dataVersion() for polling
+    dataVersion: () => db.pragma('data_version', { simple: true }),
     load,
     add,
     update,
