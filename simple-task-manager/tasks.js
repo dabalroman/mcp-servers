@@ -2,7 +2,7 @@
 // Schema lives in schema_migrations; see CURRENT_USER_VERSION below.
 import Database from 'better-sqlite3';
 
-const CURRENT_USER_VERSION = 1;
+export const CURRENT_USER_VERSION = 2;
 
 const PRIORITY_ORDER = { critical: 4, high: 3, medium: 2, low: 1 };
 const STATUS_ORDER = { in_progress: 3, refinement: 2, todo: 1, done: 0 };
@@ -72,6 +72,18 @@ const MIGRATIONS = [
       `);
     },
   },
+  {
+    version: 2,
+    name: 'normalize-literal-newlines',
+    up(db) {
+      db.exec(`
+        UPDATE tasks SET description = replace(description, '\\n', char(10))
+        WHERE description LIKE '%\\n%';
+        UPDATE tasks SET title = replace(title, '\\n', char(10))
+        WHERE title LIKE '%\\n%';
+      `);
+    },
+  },
 ];
 
 function runMigrations(db, dbPath) {
@@ -133,6 +145,10 @@ function refRowToObj(r) {
   if (r.non_canonical) out.nonCanonical = true;
   return out;
 }
+
+// Defensive guard: Claude sometimes emits literal \n (0x5C 0x6E) as text tokens
+// in MCP tool call arguments instead of real newline bytes (0x0A).
+const normalizeNewlines = (s) => (typeof s === 'string' ? s.replace(/\\n/g, '\n') : s);
 
 // ── Helpers (pure) ────────────────────────────────────────────────────────────
 export function sortByPriority(tasks) {
@@ -276,7 +292,7 @@ export function createStore(dbPath) {
   }
 
   function add({ type, priority, title, description = '', scope, summary, refs, status = 'refinement' }) {
-    const trimmedTitle = String(title ?? '').trim();
+    const trimmedTitle = normalizeNewlines(String(title ?? '').trim());
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
 
     return db.transaction(() => {
@@ -289,7 +305,7 @@ export function createStore(dbPath) {
         priority,
         scope?.trim() || null,
         summary?.trim() || null,
-        description.trim()
+        normalizeNewlines(description.trim())
       );
       setCounter(newId);
 
@@ -306,7 +322,7 @@ export function createStore(dbPath) {
       if (!existing) return null;
 
       const next = {
-        title: patch.title !== undefined ? patch.title.trim() : existing.title,
+        title: patch.title !== undefined ? normalizeNewlines(patch.title.trim()) : existing.title,
         type: patch.type ?? existing.type,
         status: existing.status,
         priority: patch.priority ?? existing.priority,
@@ -316,7 +332,7 @@ export function createStore(dbPath) {
         summary: patch.summary === null
           ? null
           : patch.summary !== undefined ? (patch.summary.trim() || null) : existing.summary,
-        description: patch.description !== undefined ? patch.description.trim() : existing.description,
+        description: patch.description !== undefined ? normalizeNewlines(patch.description.trim()) : existing.description,
       };
 
       db.prepare(`

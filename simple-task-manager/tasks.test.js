@@ -11,6 +11,7 @@ import {
   sortByPriority,
   sortForNext,
   RELATIONS,
+  CURRENT_USER_VERSION,
 } from './tasks.js';
 
 let dir;
@@ -43,18 +44,20 @@ describe('schema', () => {
     assert.ok(existsSync(dbPath));
   });
 
-  test('sets PRAGMA user_version = 1', () => {
+  test('sets PRAGMA user_version to CURRENT_USER_VERSION', () => {
     const db = new Database(dbPath);
-    assert.equal(db.pragma('user_version', { simple: true }), 1);
+    assert.equal(db.pragma('user_version', { simple: true }), CURRENT_USER_VERSION);
     db.close();
   });
 
-  test('records the initial migration in schema_migrations', () => {
+  test('records all migrations in schema_migrations', () => {
     const db = new Database(dbPath);
-    const rows = db.prepare('SELECT version, name FROM schema_migrations').all();
-    assert.equal(rows.length, 1);
+    const rows = db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all();
+    assert.equal(rows.length, CURRENT_USER_VERSION);
     assert.equal(rows[0].version, 1);
     assert.equal(rows[0].name, 'initial-schema');
+    assert.equal(rows[1].version, 2);
+    assert.equal(rows[1].name, 'normalize-literal-newlines');
     db.close();
   });
 
@@ -82,7 +85,7 @@ describe('schema', () => {
     const reopened = createStore(dbPath);
     const db = new Database(dbPath);
     const rows = db.prepare('SELECT * FROM schema_migrations').all();
-    assert.equal(rows.length, 1);
+    assert.equal(rows.length, CURRENT_USER_VERSION);
     db.close();
     reopened.close();
   });
