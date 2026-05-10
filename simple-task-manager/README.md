@@ -125,7 +125,7 @@ Tasks live in a single SQLite database (default `tasks.db` at the project root).
 | `refs` | `(from_id, to_id, relation, non_canonical)` — directed; mirrors are written for canonical refs |
 | `schema_migrations` | Audit trail of applied schema migrations alongside `PRAGMA user_version` |
 
-Journal mode is `DELETE` (the SQLite default). WAL was tried first but its mmap'd `tasks.db-shm` region doesn't stay coherent when the writer and reader live in different VFS namespaces (e.g. host MCP + containerised reader sharing the file via a Docker bind mount) — readers kept stale snapshots until checkpoint. DELETE coordinates via POSIX advisory locks on the main DB file, which is bind-mount-safe. Write contention is a non-issue at this scale (tens of writes per session). The DB file (`tasks.db`) is committed to git; only the transient `tasks.db-journal` is gitignored.
+Journal mode is `DELETE` (the SQLite default). WAL was tried first but its mmap'd `tasks.db-shm` region doesn't stay coherent when the writer and reader live in different VFS namespaces (e.g. host MCP + containerised reader sharing the file via a Docker bind mount) — readers kept stale snapshots until checkpoint. DELETE coordinates via POSIX advisory locks on the main DB file, which is bind-mount-safe. Write contention is a non-issue at this scale (tens of writes per session). The DB file (`tasks.db` in each project using the MCP) should be committed to git — tasks are project knowledge and teammates pulling the repo see the same backlog. Only the transient `tasks.db-journal` is gitignored.
 
 ### Migrating from the legacy markdown format
 
