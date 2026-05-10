@@ -1,6 +1,6 @@
 # simple-task-manager MCP
 
-A persistent, file-based task manager for [Claude Code](https://claude.ai/code), exposed as an [MCP](https://modelcontextprotocol.io) server. Tasks live in two plain Markdown files (`TASKS.md` / `TASKS_DONE.md`) that you can read and edit by hand. Claude uses them to track work across sessions, survive context compaction, and suggest what to do next.
+A persistent task manager for [Claude Code](https://claude.ai/code), exposed as an [MCP](https://modelcontextprotocol.io) server. Tasks live in a single SQLite database (`tasks.db`) at the project root. Claude uses them to track work across sessions, survive context compaction, and suggest what to do next.
 
 **No separate Claude instructions needed** — behavioral rules are embedded in the server and loaded automatically when Claude connects.
 
@@ -114,23 +114,30 @@ Within each type: highest priority first, newest id first.
 
 ---
 
-## File format
+## Storage — SQLite
 
+Tasks live in a single SQLite database (default `tasks.db` at the project root). Schema:
+
+| Table | Purpose |
+|---|---|
+| `meta` | Key/value (currently just `counter` — last issued id) |
+| `tasks` | One row per task: `id, title, type, status, priority, scope, summary, description, created_at, updated_at` |
+| `refs` | `(from_id, to_id, relation, non_canonical)` — directed; mirrors are written for canonical refs |
+| `schema_migrations` | Audit trail of applied schema migrations alongside `PRAGMA user_version` |
+
+Journal mode is `DELETE` (the SQLite default). WAL was tried first but its mmap'd `tasks.db-shm` region doesn't stay coherent when the writer and reader live in different VFS namespaces (e.g. host MCP + containerised reader sharing the file via a Docker bind mount) — readers kept stale snapshots until checkpoint. DELETE coordinates via POSIX advisory locks on the main DB file, which is bind-mount-safe. Write contention is a non-issue at this scale (tens of writes per session). The DB file (`tasks.db`) is committed to git; only the transient `tasks.db-journal` is gitignored.
+
+### Migrating from the legacy markdown format
+
+```sh
+node ~/.claude/mcp-servers/simple-task-manager/migrate.js \
+  /path/to/TASKS.md /path/to/TASKS_DONE.md /path/to/tasks.db
 ```
-# 42 Fix the auth bug
-## bug | in_progress | high
-$scope: auth
-$ref: #3 depends on | #9 blocked by
-Reproduction: log in with an expired token. The session is not invalidated.
-```
 
-- Line 1: `# {id} {title}`
-- Line 2: `## {type} | {status} | {priority}`
-- Optional `$scope:` — area or tool the task belongs to
-- Optional `$ref:` — related tasks as `#id note | #id note …`
-- Remaining lines: free-text description
-
-`TASKS.md` has a `# Counter: N` header tracking the highest id ever issued. Prefer using the MCP tools over editing these files by hand.
+Behaviour:
+- Refuses to run if `tasks.db` already exists — rename or remove it first.
+- Writes `.bak` copies next to both legacy files before reading.
+- Parses the legacy `# id title` / `## type | status | priority` / `$scope:` / `$ref:` format using a parser bundled inside `migrate.js` (the main `tasks.js` no longer carries legacy code).
 
 **Types**: `bug` · `feature` · `idea` · `tool` · `other`  
 **Priorities**: `low` · `medium` · `high` · `critical`  
@@ -146,17 +153,17 @@ These are called by Claude — you don't type them yourself.
 |---|---|
 | `add` | Schedule a new task. Required: `type`, `priority`, `title`, `description`. Optional: `scope`, `refs`, `status` (`refinement` default; pass `todo` to skip refinement). Returns the new `id`. Refs are auto-mirrored on the other side. |
 | `update` | Edit any field of an existing task in place. Pass `null` to clear `scope` or `refs`. Works on active and done tasks. |
-| `setStatus` | Move a task: `refinement` → `todo` → `in_progress` → `done`. `done` automatically archives it to `TASKS_DONE.md`. Setting a non-done status on a done (archived) task restores it to `TASKS.md`. |
+| `setStatus` | Move a task: `refinement` → `todo` → `in_progress` → `done`. All statuses live in the same `tasks` table — moving to `done` is just an UPDATE. |
 | `getNext` | The single recommended next task — answers "what's next?". Returns `refinement` tasks after `in_progress`, before `todo`. |
 | `getAll` | All not-done tasks (refinement + todo + in_progress) grouped by type. |
 | `getByType` | All tasks of one type across all statuses, including done. |
 | `getByScope` | All tasks tagged with a specific scope (exact, case-sensitive). Empty results may indicate a typo'd scope — use `getScopes` to discover valid values. |
-| `getByStatus` | All tasks with a specific status. `done` reads from `TASKS_DONE.md`; all other statuses read from `TASKS.md`. Optional `scope` filter. Returns `{ tasks: [] }` on empty, not an error. |
+| `getByStatus` | All tasks with a specific status. Optional `scope` filter. Returns `{ tasks: [] }` on empty, not an error. |
 | `getScopes` | List all scopes across active and done tasks with `total` and `open` counts. Use to discover valid scope values. |
-| `getById` | One task by its number — searches both active and done. |
+| `getById` | One task by its number. |
 | `getRelated` | Tasks that reference a given id (`inbound`, decorated with `refRelation`) and tasks it references (`outbound`, decorated with `refRelation`). |
 | `getOverview` | Count summary per type: `refinement`, `open` (todo + in_progress), and `done` counts. |
-| `delete` | Permanently remove a task. Only use when asked — prefer `setStatus(done)` for finished work. |
+| `delete` | Permanently remove a task. Cascades to all rows in `refs` (FK ON DELETE CASCADE). Only use when asked — prefer `setStatus(done)` for finished work. |
 
 ### Refs — structured relations with automatic mirroring
 
@@ -176,13 +183,7 @@ Pass `refs: [{ id, relation }]` to `add` or `update` to link tasks. When you add
 
 Default relation: `"relates to"`. Removing a ref also removes the inverse. Deleting a task cascades and strips all inbound refs.
 
-**Hand-edited refs**: if you type a relation in TASKS.md that isn't in the table above, the parser keeps it verbatim and does not mirror it. It stays as-is until you edit it via the UI or MCP.
-
-To normalize legacy notes and backfill missing inverses, run the migration script once:
-
-```sh
-node migrate-refs.js
-```
+**Non-canonical refs**: rows in the `refs` table can carry `non_canonical = 1` — those are kept verbatim and never auto-mirrored (they originate from hand-edited markdown that was migrated in). Re-saving such a ref via the MCP `update` tool with a canonical relation normalizes it.
 
 Use `getRelated(id)` to query connections.
 
@@ -201,10 +202,10 @@ Make sure you approved the server when prompted. Restart the Claude Code session
 Node.js isn't installed or isn't in PATH. Install from [nodejs.org](https://nodejs.org), then re-run `npm install`.
 
 **Tasks aren't persisting between sessions**  
-Check that the `TASKS_FILE` path in `.mcp.json` is absolute and points to a real location (not a placeholder).
+Check that the `TASKS_DB` path in `.mcp.json` is absolute and points to a real location (not a placeholder).
 
 **The server fails to start**  
-Run `node server.js` directly from the `simple-task-manager` directory and read the error. The most common cause is a missing or wrong `TASKS_FILE` environment variable.
+Run `node server.js` directly from the `simple-task-manager` directory and read the error. The most common cause is a missing or wrong `TASKS_DB` environment variable. If you still have legacy `TASKS_FILE` / `TASKS_DONE_FILE` set, the server emits a one-time warning suggesting the rename and refuses to start without `TASKS_DB`.
 
 ---
 

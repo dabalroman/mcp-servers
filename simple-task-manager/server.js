@@ -1,27 +1,30 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { z } from 'zod';
-import { resolve, dirname } from 'path';
-import { fileURLToPath } from 'url';
+import { resolve } from 'node:path';
 import { VERSION } from './version.js';
-import {
-  parseTasks,
-  writeTasks,
-  writeDoneTasks,
-  sortByPriority,
-  sortForNext,
-  applyRefs,
-  cascadeDelete,
-  RELATIONS,
-} from './tasks.js';
+import { createStore, RELATIONS } from './tasks.js';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const TASKS_FILE = resolve(process.env.TASKS_FILE);
-const DONE_FILE = resolve(process.env.TASKS_DONE_FILE);
+if (process.env.TASKS_FILE || process.env.TASKS_DONE_FILE) {
+  process.stderr.write(
+    '[simple-task-manager] WARNING: TASKS_FILE / TASKS_DONE_FILE are no longer used. ' +
+    'Set TASKS_DB to the path of the SQLite database (e.g. /abs/path/tasks.db). ' +
+    'Run `node migrate.js <legacy-tasks.md> <legacy-tasks_done.md> <output.db>` to migrate.\n'
+  );
+}
+
+if (!process.env.TASKS_DB) {
+  throw new Error(
+    'TASKS_DB env var is required (path to the SQLite tasks database). ' +
+    'See README for migration from the legacy markdown format.'
+  );
+}
+const TASKS_DB = resolve(process.env.TASKS_DB);
+const store = createStore(TASKS_DB);
 
 const INSTRUCTIONS = `
 You are connected to simple-task-manager — a persistent task tracker that survives session restarts and context compaction.
-Tasks live in TASKS.md (active) and TASKS_DONE.md (archived) at the project root.
+Tasks live in a single SQLite database (env var \`TASKS_DB\`); they used to live in TASKS.md / TASKS_DONE.md before the SQLite migration.
 
 ## Critical scheduling rules
 - When the user says "schedule X", "TODO X", "add to the list", "FEATURE X", "BUG X", "IDEA X" — call add() and STOP. Do NOT also implement it.
@@ -76,8 +79,6 @@ Relation vocabulary (pick the one that describes A → B):
 
 Default relation: "relates to".
 
-Hand-edited TASKS.md refs with unrecognised relation text are kept verbatim and never auto-mirrored.
-
 ## Scope — tagging tasks to an area
 Set scope on tasks belonging to a specific tool or area (e.g. "auth", "dashboard"). Query with getByScope (exact, case-sensitive) or getByStatus with a scope filter. Use getScopes to list all valid scope values.
 
@@ -95,22 +96,18 @@ const server = new McpServer(
   { instructions: INSTRUCTIONS }
 );
 
-/**
- * Load both files and return a deduped view. Active takes precedence when
- * the same id appears in both (transient state after a partially-failed move).
- */
-function loadState() {
-  const { counter, tasks: active } = parseTasks(TASKS_FILE);
-  const { tasks: doneRaw } = parseTasks(DONE_FILE);
-  const activeIds = new Set(active.map(t => t.id));
-  const done = doneRaw.filter(t => !activeIds.has(t.id));
-  return { counter, active, done };
-}
-
 const refsSchema = z.array(z.object({
   id: z.number().int().positive(),
   relation: z.enum(/** @type {[string, ...string[]]} */(RELATIONS)).default('relates to'),
 })).optional();
+
+const text = (obj) => ({ content: [{ type: 'text', text: JSON.stringify(obj) }] });
+const errorText = (obj) => ({ content: [{ type: 'text', text: JSON.stringify(obj) }], isError: true });
+
+function allIdsSorted() {
+  const { active, done } = store.load();
+  return [...active.map((t) => t.id), ...done.map((t) => t.id)].sort((a, b) => a - b);
+}
 
 // ── add ────────────────────────────────────────────────────────────────────────
 server.tool(
@@ -128,44 +125,17 @@ server.tool(
     scope: z.string().optional()
       .describe('Optional tool or area this task belongs to (e.g. "svg-path-joiner", "eink-frame", "task-manager"). Omit for project-wide tasks. Use getByScope to filter tasks by this value later.'),
     refs: refsSchema
-      .describe('Optional related-task references — use when this task depends on, blocks, or is otherwise connected to existing tasks. Each entry: { id: number, relation?: string }. Relation must be one of: "blocks", "is blocked by", "depends on", "is depended on by", "causes", "is caused by", "tests", "is tested by", "relates to". Default: "relates to". The server automatically writes the inverse on the referenced task — you only need to specify one side.'),
+      .describe('Optional related-task references — use when this task depends on, blocks, or is otherwise connected to existing tasks. Each entry: { id: number, relation?: string }. Relation must be one of the canonical values; default "relates to". The server automatically writes the inverse on the referenced task — you only need to specify one side.'),
     status: z.enum(['refinement', 'todo']).default('refinement')
       .describe('Initial status. ALWAYS leave as default "refinement" unless one of these holds: (a) the user explicitly told you to skip refinement / mark as todo, or (b) you just refined this exact task with the user in the current conversation. Otherwise pass "refinement" (or omit the field). Choosing "todo" without one of those conditions is a rule violation — when in doubt, pick "refinement".'),
   },
   async ({ type, priority, title, description, scope, refs, status }) => {
-    const trimmedTitle = title.trim();
-    if (!trimmedTitle) {
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ error: 'Validation failed: title must not be empty or whitespace-only.' }) }],
-        isError: true
-      };
+    try {
+      const { id } = store.add({ type, priority, title, description, scope, refs, status });
+      return text({ id });
+    } catch (err) {
+      return errorText({ error: err.message });
     }
-
-    const { counter, active, done } = loadState();
-    const newId = counter + 1;
-    const canonRefs = refs?.length ? refs : undefined;
-    const newTask = {
-      id: newId,
-      title: trimmedTitle,
-      type,
-      priority,
-      status,
-      scope: scope?.trim() || undefined,
-      refs: canonRefs,
-      description: description.trim()
-    };
-    active.unshift(newTask);
-
-    if (canonRefs) {
-      const all = [...active, ...done];
-      applyRefs(all, newId, [], canonRefs);
-      writeTasks(TASKS_FILE, newId, active);
-      writeDoneTasks(DONE_FILE, done);
-    } else {
-      writeTasks(TASKS_FILE, newId, active);
-    }
-
-    return { content: [{ type: 'text', text: JSON.stringify({ id: newId }) }] };
   }
 );
 
@@ -173,16 +143,8 @@ server.tool(
 server.tool(
   'getByType',
   'Get all tasks of a specific type across all statuses — use for "show me all bugs", "list features", "what ideas do we have?". Includes done tasks. Sorted by priority desc then id desc. Prefer getNext when the user just wants the single recommended next task; prefer getAll for the full open backlog.',
-  {
-    type: z.enum(['bug', 'feature', 'idea', 'tool', 'other'])
-      .describe('Task type to filter: bug | feature | idea | tool | other')
-  },
-  async ({ type }) => {
-    const { active, done } = loadState();
-    const all = [...active, ...done];
-    const filtered = sortByPriority(all.filter(t => t.type === type));
-    return { content: [{ type: 'text', text: JSON.stringify({ tasks: filtered }) }] };
-  }
+  { type: z.enum(['bug', 'feature', 'idea', 'tool', 'other']).describe('Task type to filter: bug | feature | idea | tool | other') },
+  async ({ type }) => text({ tasks: store.getByType(type) })
 );
 
 // ── getOverview ────────────────────────────────────────────────────────────────
@@ -190,25 +152,7 @@ server.tool(
   'getOverview',
   'Get a count summary per type: refinement, open (todo + in_progress), and done counts. Use for dashboard questions like "how many tasks are there?" or "give me a backlog summary". Returns only types that have at least one task, sorted by open count desc. Do NOT use this to answer "what\'s next?" — use getNext for that.',
   {},
-  async () => {
-    const { active, done } = loadState();
-    const all = [...active, ...done];
-    const allTypes = ['bug', 'feature', 'idea', 'tool', 'other'];
-    const overview = allTypes
-      .map(type => {
-        const ofType = all.filter(t => t.type === type);
-        return {
-          type,
-          refinement: ofType.filter(t => t.status === 'refinement').length,
-          open: ofType.filter(t => t.status === 'todo' || t.status === 'in_progress').length,
-          done: ofType.filter(t => t.status === 'done').length,
-        };
-      })
-      .filter(o => o.refinement + o.open + o.done > 0)
-      .sort((a, b) => b.open - a.open);
-
-    return { content: [{ type: 'text', text: JSON.stringify({ overview }) }] };
-  }
+  async () => text({ overview: store.getOverview() })
 );
 
 // ── getNext ────────────────────────────────────────────────────────────────────
@@ -219,13 +163,7 @@ server.tool(
     type: z.enum(['bug', 'feature', 'idea', 'tool', 'other']).optional()
       .describe('Narrow to one type (optional). Omit to recommend across all types using the bug > tool > feature > idea > other order.')
   },
-  async ({ type }) => {
-    const { active } = loadState();
-    let actionable = active.filter(t => t.status === 'todo' || t.status === 'in_progress' || t.status === 'refinement');
-    if (type) actionable = actionable.filter(t => t.type === type);
-    const sorted = sortForNext(actionable);
-    return { content: [{ type: 'text', text: JSON.stringify({ task: sorted[0] ?? null }) }] };
-  }
+  async ({ type }) => text({ task: store.getNext(type) })
 );
 
 // ── getAll ─────────────────────────────────────────────────────────────────────
@@ -234,101 +172,55 @@ server.tool(
   'Get every not-done task (refinement + todo + in_progress) grouped by type — use for "show me everything", "list all tasks", "full backlog". Groups appear in type order: bug, feature, idea, tool, other. Each group sorted by priority desc then id desc. Does NOT include done tasks — use getByType or getById to look up archived work. Prefer getNext for a single recommendation; prefer getByType when the user asks about one specific type.',
   {},
   async () => {
-    const { active } = loadState();
-    const actionable = active.filter(t => t.status !== 'done');
     const allTypes = ['bug', 'feature', 'idea', 'tool', 'other'];
     const grouped = {};
     for (const type of allTypes) {
-      const ofType = sortByPriority(actionable.filter(t => t.type === type));
+      const ofType = store.getByType(type).filter((t) => t.status !== 'done');
       if (ofType.length > 0) grouped[type] = ofType;
     }
-    return { content: [{ type: 'text', text: JSON.stringify({ tasks: grouped }) }] };
+    return text({ tasks: grouped });
   }
 );
 
 // ── getById ────────────────────────────────────────────────────────────────────
 server.tool(
   'getById',
-  'Get a single task by its numeric ID — use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Searches both active and done files. Returns the full task object including scope, refs, and description, or an error listing valid IDs if not found.',
-  {
-    id: z.coerce.number().int().positive().describe('The numeric task ID to look up')
-  },
+  'Get a single task by its numeric ID — use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Returns the full task object including scope, refs, and description, or an error listing valid IDs if not found.',
+  { id: z.coerce.number().int().positive().describe('The numeric task ID to look up') },
   async ({ id }) => {
-    const { active, done } = loadState();
-    const all = [...active, ...done];
-    const task = all.find(t => t.id === id);
+    const task = store.getById(id);
     if (!task) {
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            error: `Task #${id} not found. Valid IDs: ${all.map(t => t.id).sort((a,b) => a-b).join(', ') || 'none'}`
-          })
-        }],
-        isError: true
-      };
+      return errorText({ error: `Task #${id} not found. Valid IDs: ${allIdsSorted().join(', ') || 'none'}` });
     }
-    return { content: [{ type: 'text', text: JSON.stringify({ task }) }] };
+    return text({ task });
   }
 );
 
 // ── setStatus ──────────────────────────────────────────────────────────────────
 server.tool(
   'setStatus',
-  'Update a task\'s status. Lifecycle rules: always call setStatus(in_progress) before starting work on a task; always call setStatus(done) after the commit is made and the user confirms. Setting done automatically moves the task from TASKS.md to TASKS_DONE.md; setting todo or in_progress on a done task moves it back to TASKS.md. Setting a non-done status on a done (archived) task restores it to TASKS.md. Returns { success: true } or { success: false, error }.',
+  'Update a task\'s status. Lifecycle rules: always call setStatus(in_progress) before starting work on a task; always call setStatus(done) after the commit is made and the user confirms. Returns { success: true } or { success: false, error }.',
   {
     id: z.coerce.number().int().positive().describe('Task ID — get it from getNext, getAll, getByType, or getById'),
     status: z.enum(['refinement', 'todo', 'in_progress', 'done']).describe('refinement = needs PM clarification before work starts; todo = ready to implement; in_progress = actively being worked on (set this before beginning); done = completed and committed (set this after user confirms the commit)')
   },
   async ({ id, status }) => {
-    const { counter, active, done } = loadState();
-    let task = active.find(t => t.id === id);
-    const wasInActive = !!task;
-    if (!task) task = done.find(t => t.id === id);
-
-    if (!task) {
-      const allIds = [...active.map(t => t.id), ...done.map(t => t.id)].sort((a, b) => a - b);
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            success: false,
-            error: `Task #${id} not found. Valid IDs are: ${allIds.join(', ') || 'none'}`
-          })
-        }]
-      };
+    const ok = store.setStatus(id, status);
+    if (!ok) {
+      return text({ success: false, error: `Task #${id} not found. Valid IDs are: ${allIdsSorted().join(', ') || 'none'}` });
     }
-
-    task.status = status;
-
-    // Desired invariants: done tasks live only in TASKS_DONE.md; non-done only in TASKS.md.
-    // Write DONE file first — if we crash mid-move we duplicate rather than lose.
-    if (status === 'done') {
-      const newActive = active.filter(t => t.id !== id);
-      const newDone = done.filter(t => t.id !== id).concat(task);
-      writeDoneTasks(DONE_FILE, newDone);
-      writeTasks(TASKS_FILE, counter, newActive);
-    } else {
-      const newDone = done.filter(t => t.id !== id);
-      const newActive = wasInActive
-        ? active.map(t => (t.id === id ? task : t))
-        : active.concat(task);
-      writeTasks(TASKS_FILE, counter, newActive);
-      writeDoneTasks(DONE_FILE, newDone);
-    }
-
     const result = { success: true };
     if (status === 'done') {
       result.knowledgeReminder = 'Task closed. Before moving on: (1) identify non-obvious decisions, gotchas, conventions, or architecture changes from this task; (2) update the closest relevant CLAUDE.md with anything genuinely new — keep entries terse and deduped; (3) prune or correct any entries now stale or contradicted. Skip if nothing worth capturing.';
     }
-    return { content: [{ type: 'text', text: JSON.stringify(result) }] };
+    return text(result);
   }
 );
 
 // ── update ────────────────────────────────────────────────────────────────────
 server.tool(
   'update',
-  'Patch any fields of an existing task in place — use when the user asks to edit, rename, reprioritize, retype, rescope, or update the refs/description of a task. Only the fields you provide are changed; omitted fields keep their current values. Works on both active and done tasks. Returns { success: true, task } with the full updated task, or { success: false, error }.',
+  'Patch any fields of an existing task in place — use when the user asks to edit, rename, reprioritize, retype, rescope, or update the refs/description of a task. Only the fields you provide are changed; omitted fields keep their current values. Returns { success: true, task } with the full updated task, or { success: false, error }.',
   {
     id: z.coerce.number().int().positive().describe('Task ID to update — get it from getNext, getAll, getById, etc.'),
     title: z.string().min(1).optional().describe('New title (replaces current). Start with a verb.'),
@@ -339,45 +231,12 @@ server.tool(
     refs: refsSchema.nullable()
       .describe('Full replacement list of related-task references, or null / empty array to clear all refs. Each entry: { id, relation? } where relation is one of the canonical values. Defaults to "relates to". The server automatically updates the inverse on each referenced task — only specify one side. This replaces the existing refs list entirely — include all refs you want to keep.'),
   },
-  async ({ id, title, description, priority, type, scope, refs }) => {
-    const { counter, active, done } = loadState();
-    const all = [...active, ...done];
-    const task = all.find(t => t.id === id);
-    const inActive = active.some(t => t.id === id);
-
-    if (!task) {
-      const allIds = all.map(t => t.id).sort((a, b) => a - b);
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            success: false,
-            error: `Task #${id} not found. Valid IDs are: ${allIds.join(', ') || 'none'}`
-          })
-        }]
-      };
+  async ({ id, ...patch }) => {
+    const result = store.update(id, patch);
+    if (!result) {
+      return text({ success: false, error: `Task #${id} not found. Valid IDs are: ${allIdsSorted().join(', ') || 'none'}` });
     }
-
-    const oldRefs = task.refs ? [...task.refs] : [];
-
-    if (title !== undefined) task.title = title.trim();
-    if (description !== undefined) task.description = description.trim();
-    if (priority !== undefined) task.priority = priority;
-    if (type !== undefined) task.type = type;
-    if (scope !== undefined) task.scope = scope === null ? undefined : scope.trim() || undefined;
-    if (refs !== undefined) task.refs = refs === null || refs.length === 0 ? undefined : refs;
-
-    if (refs !== undefined) {
-      applyRefs(all, id, oldRefs, task.refs ?? []);
-      writeTasks(TASKS_FILE, counter, active);
-      writeDoneTasks(DONE_FILE, done);
-    } else if (inActive) {
-      writeTasks(TASKS_FILE, counter, active);
-    } else {
-      writeDoneTasks(DONE_FILE, done);
-    }
-
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true, task }) }] };
+    return text({ success: true, task: result.task });
   }
 );
 
@@ -385,135 +244,61 @@ server.tool(
 server.tool(
   'getByScope',
   'Get all tasks tagged with a specific scope — use when the user asks "what tasks are there for svg-path-joiner?" or "show me everything related to eink-frame". Includes all statuses (todo, in_progress, done). Sorted by priority desc then id desc. Scope values are set via add or update. Empty results may indicate a wrong/typo\'d scope; use getScopes to discover valid values.',
-  {
-    scope: z.string().describe('Exact scope value to filter by (e.g. "svg-path-joiner", "eink-frame", "task-manager"). Must match exactly — scope is case-sensitive.')
-  },
-  async ({ scope }) => {
-    const { active, done } = loadState();
-    const all = [...active, ...done];
-    const filtered = sortByPriority(all.filter(t => t.scope === scope));
-    return { content: [{ type: 'text', text: JSON.stringify({ scope, tasks: filtered }) }] };
-  }
+  { scope: z.string().describe('Exact scope value to filter by (e.g. "svg-path-joiner"). Must match exactly — scope is case-sensitive.') },
+  async ({ scope }) => text({ scope, tasks: store.getByScope(scope) })
 );
 
 // ── getRelated ────────────────────────────────────────────────────────────────
 server.tool(
   'getRelated',
-  'Get tasks related to a given task — use for "what depends on #X?", "what does #X block?", "show me connections for task #X". Returns three things: the task itself, outbound (tasks that #X references, decorated with refRelation), and inbound (tasks that reference #X, also decorated with refRelation showing the relation the inbound task has toward the queried task). Because mirroring keeps both sides in sync, outbound and inbound together form the complete graph for this task. Searches both active and done tasks.',
-  {
-    id: z.coerce.number().int().positive().describe('Task ID to find related tasks for')
-  },
+  'Get tasks related to a given task — returns the task itself, outbound (tasks that #X references, decorated with refRelation), and inbound (tasks that reference #X). Searches all tasks regardless of status.',
+  { id: z.coerce.number().int().positive().describe('Task ID to find related tasks for') },
   async ({ id }) => {
-    const { active, done } = loadState();
-    const all = [...active, ...done];
-
-    const task = all.find(t => t.id === id);
-    if (!task) {
-      const allIds = all.map(t => t.id).sort((a, b) => a - b);
-      return {
-        content: [{ type: 'text', text: JSON.stringify({ error: `Task #${id} not found. Valid IDs: ${allIds.join(', ') || 'none'}` }) }],
-        isError: true
-      };
+    const result = store.getRelated(id);
+    if (!result) {
+      return errorText({ error: `Task #${id} not found. Valid IDs: ${allIdsSorted().join(', ') || 'none'}` });
     }
-
-    const outbound = (task.refs ?? []).flatMap(ref => {
-      const t = all.find(t => t.id === ref.id);
-      return t ? [{ ...t, refRelation: ref.relation }] : [];
-    });
-
-    const inbound = all.filter(t => t.id !== id && t.refs?.some(r => r.id === id)).map(t => {
-      const ref = t.refs.find(r => r.id === id);
-      return { ...t, refRelation: ref.relation };
-    });
-
-    return { content: [{ type: 'text', text: JSON.stringify({ task, outbound, inbound }) }] };
+    return text(result);
   }
 );
 
 // ── getByStatus ───────────────────────────────────────────────────────────────
 server.tool(
   'getByStatus',
-  'Get all tasks with a specific status — use for "show me everything in refinement", "what\'s in progress?", "list done tasks". When status is "done", reads only TASKS_DONE.md; all other statuses read only TASKS.md. Optional scope filter narrows results to an exact scope value (case-sensitive). Returns { tasks: Task[] } sorted by priority desc then id desc. Empty results return { tasks: [] }, not an error.',
+  'Get all tasks with a specific status — use for "show me everything in refinement", "what\'s in progress?", "list done tasks". Optional scope filter narrows results to an exact scope value (case-sensitive). Returns { tasks: Task[] } sorted by priority desc then id desc.',
   {
-    status: z.enum(['refinement', 'todo', 'in_progress', 'done'])
-      .describe('The status to filter by. "done" reads from the archive file; all others read from the active file.'),
-    scope: z.string().optional()
-      .describe('Optional exact scope filter (case-sensitive). Omit to return all tasks with the given status.'),
+    status: z.enum(['refinement', 'todo', 'in_progress', 'done']).describe('The status to filter by.'),
+    scope: z.string().optional().describe('Optional exact scope filter (case-sensitive).'),
   },
-  async ({ status, scope }) => {
-    const { active, done } = loadState();
-    const pool = status === 'done' ? done : active;
-    let filtered = pool.filter(t => t.status === status);
-    if (scope !== undefined) filtered = filtered.filter(t => t.scope === scope);
-    const sorted = sortByPriority(filtered);
-    return { content: [{ type: 'text', text: JSON.stringify({ tasks: sorted }) }] };
-  }
+  async ({ status, scope }) => text({ tasks: store.getByStatus(status, scope) })
 );
 
 // ── getScopes ─────────────────────────────────────────────────────────────────
 server.tool(
   'getScopes',
-  'List all scopes that exist across active and done tasks — use to discover valid scope values before calling getByScope or getByStatus with a scope filter. Returns { scopes: Array<{ scope, total, open }> } where total = all tasks carrying that scope (both files), open = non-done tasks. Tasks without a scope are excluded. Sorted: open desc, then total desc, then alphabetically. Empty: { scopes: [] }.',
+  'List all scopes that exist across active and done tasks — use to discover valid scope values before calling getByScope or getByStatus with a scope filter. Returns { scopes: Array<{ scope, total, open }> }. Sorted: open desc, then total desc, then alphabetically.',
   {},
-  async () => {
-    const { active, done } = loadState();
-    const all = [...active, ...done];
-    const scopeMap = new Map();
-    for (const t of all) {
-      if (!t.scope) continue;
-      if (!scopeMap.has(t.scope)) scopeMap.set(t.scope, { total: 0, open: 0 });
-      const entry = scopeMap.get(t.scope);
-      entry.total++;
-      if (t.status !== 'done') entry.open++;
-    }
-    const scopes = [...scopeMap.entries()]
-      .map(([scope, { total, open }]) => ({ scope, total, open }))
-      .sort((a, b) => {
-        if (b.open !== a.open) return b.open - a.open;
-        if (b.total !== a.total) return b.total - a.total;
-        return a.scope.localeCompare(b.scope);
-      });
-    return { content: [{ type: 'text', text: JSON.stringify({ scopes }) }] };
-  }
+  async () => text({ scopes: store.getScopes() })
 );
 
 // ── delete ────────────────────────────────────────────────────────────────────
 server.tool(
   'delete',
-  'Permanently remove a task from both TASKS.md and TASKS_DONE.md. Use ONLY when the user explicitly asks to delete, remove, drop, or cancel a task — not when work is finished (use setStatus(done) for that). Also removes all refs pointing to this task from other tasks. This is irreversible. Returns { success: true } or { success: false, error }.',
-  {
-    id: z.coerce.number().int().positive().describe('The numeric task ID to permanently remove')
-  },
+  'Permanently remove a task from the database. Use ONLY when the user explicitly asks to delete, remove, drop, or cancel a task — not when work is finished (use setStatus(done) for that). Cascade-removes refs from/to this task. This is irreversible.',
+  { id: z.coerce.number().int().positive().describe('The numeric task ID to permanently remove') },
   async ({ id }) => {
-    const { counter, active, done } = loadState();
-    const inActive = active.some(t => t.id === id);
-    const inDone = done.some(t => t.id === id);
-
-    if (!inActive && !inDone) {
-      const allIds = [...active.map(t => t.id), ...done.map(t => t.id)].sort((a, b) => a - b);
-      return {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({
-            success: false,
-            error: `Task #${id} not found. Valid IDs are: ${allIds.join(', ') || 'none'}`
-          })
-        }],
-        isError: true
-      };
+    const ok = store.delete(id);
+    if (!ok) {
+      return errorText({ success: false, error: `Task #${id} not found. Valid IDs are: ${allIdsSorted().join(', ') || 'none'}` });
     }
-
-    const all = [...active, ...done];
-    cascadeDelete(all, id);
-
-    const newActive = active.filter(t => t.id !== id);
-    const newDone = done.filter(t => t.id !== id);
-    writeTasks(TASKS_FILE, counter, newActive);
-    writeDoneTasks(DONE_FILE, newDone);
-
-    return { content: [{ type: 'text', text: JSON.stringify({ success: true }) }] };
+    return text({ success: true });
   }
 );
+
+// ── shutdown ──────────────────────────────────────────────────────────────────
+process.on('SIGINT',  () => { try { store.close(); } catch { /* ignore */ } process.exit(0); });
+process.on('SIGTERM', () => { try { store.close(); } catch { /* ignore */ } process.exit(0); });
+process.on('exit',    () => { try { store.close(); } catch { /* ignore */ } });
 
 // ── start ──────────────────────────────────────────────────────────────────────
 const transport = new StdioServerTransport();

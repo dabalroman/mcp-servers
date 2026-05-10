@@ -39,8 +39,7 @@ const entry = {
   command: 'node',
   args: [resolve(serverDir, 'server.js')],
   env: {
-    TASKS_FILE: resolve(projectDir, 'TASKS.md'),
-    TASKS_DONE_FILE: resolve(projectDir, 'TASKS_DONE.md'),
+    TASKS_DB: resolve(projectDir, 'tasks.db'),
   },
 };
 
@@ -64,5 +63,5 @@ config.mcpServers['task-manager'] = entry;
 writeFileSync(mcpFile, JSON.stringify(config, null, 2) + '\n');
 console.log(`Registered task-manager in ${mcpFile}`);
 console.log(`  server : ${entry.args[0]}`);
-console.log(`  tasks  : ${entry.env.TASKS_FILE}`);
+console.log(`  db     : ${entry.env.TASKS_DB}`);
 console.log(`Restart Claude Code to activate.`);
