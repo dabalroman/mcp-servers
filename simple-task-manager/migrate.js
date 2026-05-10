@@ -11,15 +11,9 @@
 
 import { readFileSync, writeFileSync, existsSync, copyFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { createStore } from './tasks.js';
+import { createStore, RELATIONS } from './tasks.js';
 
-const RELATIONS_SET = new Set([
-  'blocks', 'is blocked by',
-  'depends on', 'is depended on by',
-  'causes', 'is caused by',
-  'tests', 'is tested by',
-  'relates to',
-]);
+const RELATIONS_SET = new Set(RELATIONS);
 
 export function parseLegacyMarkdown(content) {
   const lines = content.split('\n');

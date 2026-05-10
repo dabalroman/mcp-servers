@@ -15,7 +15,6 @@ export const RELATIONS = [
   'tests', 'is tested by',
   'relates to',
 ];
-const RELATIONS_SET = new Set(RELATIONS);
 const INVERSE = {
   'blocks':            'is blocked by',
   'is blocked by':     'blocks',
@@ -206,6 +205,13 @@ export function createStore(dbPath) {
   const stmtUpdateRefRelation = db.prepare(
     'UPDATE refs SET relation = ? WHERE from_id = ? AND to_id = ?'
   );
+  const stmtDeleteMirror    = db.prepare('DELETE FROM refs WHERE from_id = ? AND to_id = ?');
+  const stmtUpdateTask      = db.prepare(`
+    UPDATE tasks
+    SET title = ?, type = ?, priority = ?, scope = ?, summary = ?, description = ?, updated_at = datetime('now')
+    WHERE id = ?
+  `);
+  const stmtSetTaskStatus   = db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`);
 
   function getCounter() {
     return parseInt(stmtGetCounter.get().value, 10);
@@ -272,7 +278,7 @@ export function createStore(dbPath) {
     for (const ref of removed) {
       // Remove any mirror on target pointing back to source. Match by (from=target, to=source);
       // relation is whatever inverse we previously wrote (not necessarily known; nuke all).
-      db.prepare('DELETE FROM refs WHERE from_id = ? AND to_id = ?').run(ref.id, sourceId);
+      stmtDeleteMirror.run(ref.id, sourceId);
     }
     for (const ref of changed) {
       const inverse = INVERSE[ref.relation] ?? ref.relation;
@@ -335,11 +341,7 @@ export function createStore(dbPath) {
         description: patch.description !== undefined ? normalizeNewlines(patch.description.trim()) : existing.description,
       };
 
-      db.prepare(`
-        UPDATE tasks
-        SET title = ?, type = ?, priority = ?, scope = ?, summary = ?, description = ?, updated_at = datetime('now')
-        WHERE id = ?
-      `).run(next.title, next.type, next.priority, next.scope, next.summary, next.description, id);
+      stmtUpdateTask.run(next.title, next.type, next.priority, next.scope, next.summary, next.description, id);
 
       if (patch.refs !== undefined) {
         const oldRefs = readRefsFor(id);
@@ -355,7 +357,7 @@ export function createStore(dbPath) {
     return db.transaction(() => {
       const existing = stmtSelectTask.get(id);
       if (!existing) return false;
-      db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`).run(status, id);
+      stmtSetTaskStatus.run(status, id);
       return true;
     })();
   }

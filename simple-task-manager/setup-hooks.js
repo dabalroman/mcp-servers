@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import { execSync } from 'child_process';
 import { writeFileSync, chmodSync, mkdirSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 let gitDir;
 try {
@@ -14,6 +17,6 @@ const hooksDir = join(gitDir, 'hooks');
 mkdirSync(hooksDir, { recursive: true });
 
 const hook = join(hooksDir, 'pre-commit');
-writeFileSync(hook, '#!/bin/sh\ncd simple-task-manager && node bump-version.js && npm test\n');
+writeFileSync(hook, `#!/bin/sh\ncd ${__dirname} && node bump-version.js && npm test\n`);
 chmodSync(hook, 0o755);
 console.log('pre-commit hook installed');
