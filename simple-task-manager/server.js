@@ -207,7 +207,7 @@ server.tool(
   async ({ id, status }) => {
     const ok = store.setStatus(id, status);
     if (!ok) {
-      return text({ success: false, error: `Task #${id} not found. Valid IDs are: ${allIdsSorted().join(', ') || 'none'}` });
+      return errorText({ error: `Task #${id} not found. Valid IDs are: ${allIdsSorted().join(', ') || 'none'}` });
     }
     const result = { success: true };
     if (status === 'done') {
@@ -234,7 +234,7 @@ server.tool(
   async ({ id, ...patch }) => {
     const result = store.update(id, patch);
     if (!result) {
-      return text({ success: false, error: `Task #${id} not found. Valid IDs are: ${allIdsSorted().join(', ') || 'none'}` });
+      return errorText({ error: `Task #${id} not found. Valid IDs are: ${allIdsSorted().join(', ') || 'none'}` });
     }
     return text({ success: true, task: result.task });
   }
@@ -289,7 +289,7 @@ server.tool(
   async ({ id }) => {
     const ok = store.delete(id);
     if (!ok) {
-      return errorText({ success: false, error: `Task #${id} not found. Valid IDs are: ${allIdsSorted().join(', ') || 'none'}` });
+      return errorText({ error: `Task #${id} not found. Valid IDs are: ${allIdsSorted().join(', ') || 'none'}` });
     }
     return text({ success: true });
   }

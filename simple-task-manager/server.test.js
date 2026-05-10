@@ -46,7 +46,7 @@ async function handleGetById(store, { id }) {
 async function handleSetStatus(store, { id, status }) {
   const ok = store.setStatus(id, status);
   if (!ok) {
-    return text({ success: false, error: `Task #${id} not found. Valid IDs are: ${allIdsSorted(store).join(', ') || 'none'}` });
+    return errorText({ error: `Task #${id} not found. Valid IDs are: ${allIdsSorted(store).join(', ') || 'none'}` });
   }
   const result = { success: true };
   if (status === 'done') {
@@ -66,7 +66,7 @@ async function handleGetRelated(store, { id }) {
 async function handleDelete(store, { id }) {
   const ok = store.delete(id);
   if (!ok) {
-    return errorText({ success: false, error: `Task #${id} not found. Valid IDs are: ${allIdsSorted(store).join(', ') || 'none'}` });
+    return errorText({ error: `Task #${id} not found. Valid IDs are: ${allIdsSorted(store).join(', ') || 'none'}` });
   }
   return text({ success: true });
 }
@@ -187,11 +187,10 @@ describe('setStatus handler — knowledgeReminder', () => {
     assert.equal(payload.knowledgeReminder, undefined);
   });
 
-  test('unknown id returns success:false (not isError)', async () => {
+  test('unknown id returns isError', async () => {
     const resp = await handleSetStatus(store, { id: 9999, status: 'done' });
     const payload = decode(resp);
-    assert.ok(!resp.isError, 'setStatus uses text() not errorText() for not-found');
-    assert.equal(payload.success, false);
+    assert.ok(resp.isError, 'setStatus uses errorText() for not-found');
     assert.ok(payload.error.includes('9999'));
   });
 });
