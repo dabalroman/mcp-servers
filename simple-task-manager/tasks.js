@@ -2,7 +2,7 @@
 // Schema lives in schema_migrations; see CURRENT_USER_VERSION below.
 import Database from 'better-sqlite3';
 
-export const CURRENT_USER_VERSION = 2;
+export const CURRENT_USER_VERSION = 3;
 
 const PRIORITY_ORDER = { critical: 4, high: 3, medium: 2, low: 1 };
 const STATUS_ORDER = { in_progress: 3, refinement: 2, todo: 1, done: 0 };
@@ -80,6 +80,27 @@ const MIGRATIONS = [
         WHERE description LIKE '%\\n%';
         UPDATE tasks SET title = replace(title, '\\n', char(10))
         WHERE title LIKE '%\\n%';
+      `);
+    },
+  },
+  {
+    version: 3,
+    name: 'refs_pk_simplify',
+    up(db) {
+      db.exec(`
+        CREATE TABLE refs_new (
+          from_id       INTEGER NOT NULL,
+          to_id         INTEGER NOT NULL,
+          relation      TEXT NOT NULL,
+          non_canonical INTEGER NOT NULL DEFAULT 0,
+          PRIMARY KEY (from_id, to_id),
+          FOREIGN KEY (from_id) REFERENCES tasks(id) ON DELETE CASCADE,
+          FOREIGN KEY (to_id)   REFERENCES tasks(id) ON DELETE CASCADE
+        );
+        INSERT OR REPLACE INTO refs_new SELECT from_id, to_id, relation, non_canonical FROM refs;
+        DROP TABLE refs;
+        ALTER TABLE refs_new RENAME TO refs;
+        CREATE INDEX IF NOT EXISTS idx_refs_to ON refs(to_id);
       `);
     },
   },
@@ -198,14 +219,14 @@ export function createStore(dbPath) {
   const stmtRefsFrom        = db.prepare('SELECT from_id, to_id, relation, non_canonical FROM refs WHERE from_id = ?');
   const stmtRefsAll         = db.prepare('SELECT from_id, to_id, relation, non_canonical FROM refs');
   const stmtInsertRef       = db.prepare(
-    'INSERT OR IGNORE INTO refs (from_id, to_id, relation, non_canonical) VALUES (?, ?, ?, ?)'
+    'INSERT OR REPLACE INTO refs (from_id, to_id, relation, non_canonical) VALUES (?, ?, ?, ?)'
   );
   const stmtDeleteRefsFrom  = db.prepare('DELETE FROM refs WHERE from_id = ?');
   const stmtDeleteOneRef    = db.prepare('DELETE FROM refs WHERE from_id = ? AND to_id = ? AND relation = ?');
   const stmtUpdateRefRelation = db.prepare(
     'UPDATE refs SET relation = ? WHERE from_id = ? AND to_id = ?'
   );
-  const stmtDeleteMirror    = db.prepare('DELETE FROM refs WHERE from_id = ? AND to_id = ?');
+  const stmtDeleteMirror    = db.prepare('DELETE FROM refs WHERE from_id = ? AND to_id = ? AND relation = ?');
   const stmtUpdateTask      = db.prepare(`
     UPDATE tasks
     SET title = ?, type = ?, priority = ?, scope = ?, summary = ?, description = ?, updated_at = datetime('now')
@@ -276,9 +297,9 @@ export function createStore(dbPath) {
       stmtInsertRef.run(ref.id, sourceId, inverse, 0);
     }
     for (const ref of removed) {
-      // Remove any mirror on target pointing back to source. Match by (from=target, to=source);
-      // relation is whatever inverse we previously wrote (not necessarily known; nuke all).
-      stmtDeleteMirror.run(ref.id, sourceId);
+      // Remove only the specific mirror: the inverse relation we wrote when this ref was added.
+      const inverse = INVERSE[ref.relation] ?? ref.relation;
+      stmtDeleteMirror.run(ref.id, sourceId, inverse);
     }
     for (const ref of changed) {
       const inverse = INVERSE[ref.relation] ?? ref.relation;

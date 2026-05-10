@@ -58,6 +58,8 @@ describe('schema', () => {
     assert.equal(rows[0].name, 'initial-schema');
     assert.equal(rows[1].version, 2);
     assert.equal(rows[1].name, 'normalize-literal-newlines');
+    assert.equal(rows[2].version, 3);
+    assert.equal(rows[2].name, 'refs_pk_simplify');
     db.close();
   });
 
@@ -268,6 +270,43 @@ describe('refs — store-level mirroring', () => {
     const { id } = makeTask();
     store.update(id, { refs: [{ id, relation: 'relates to' }] });
     assert.equal(store.getById(id).refs, undefined);
+  });
+
+  test('INSERT OR REPLACE — updating relation on existing (from, to) pair overwrites it', () => {
+    const { id: a } = makeTask({ title: 'A' });
+    const { id: b } = makeTask({ title: 'B' });
+    // First add A→B relates to
+    store.update(a, { refs: [{ id: b, relation: 'relates to' }] });
+    assert.equal(store.getById(a).refs[0].relation, 'relates to');
+    // Now change A→B to blocks — should overwrite, not keep old row
+    store.update(a, { refs: [{ id: b, relation: 'blocks' }] });
+    const refsOnA = store.getById(a).refs;
+    assert.equal(refsOnA.length, 1);
+    assert.equal(refsOnA[0].relation, 'blocks');
+    // Mirror on B must also reflect updated relation
+    const refsOnB = store.getById(b).refs;
+    assert.equal(refsOnB.length, 1);
+    assert.equal(refsOnB[0].relation, 'is blocked by');
+  });
+
+  test('mirror-delete fix — removing canonical ref deletes only its mirror, not unrelated refs on target', () => {
+    const { id: a } = makeTask({ title: 'A' });
+    const { id: b } = makeTask({ title: 'B' });
+    const { id: c } = makeTask({ title: 'C' });
+    // A→B blocks (mirror: B→A is blocked by)
+    store.update(a, { refs: [{ id: b, relation: 'blocks' }] });
+    // C→B relates to (mirror: B→C relates to)
+    store.update(c, { refs: [{ id: b, relation: 'relates to' }] });
+    // B should have two mirror refs: one from A and one from C
+    const refsOnBBefore = store.getById(b).refs;
+    assert.equal(refsOnBBefore.length, 2);
+    // Remove A→B; only B→A mirror should disappear; B→C must survive
+    store.update(a, { refs: [] });
+    assert.equal(store.getById(a).refs, undefined);
+    const refsOnBAfter = store.getById(b).refs;
+    assert.equal(refsOnBAfter.length, 1);
+    assert.equal(refsOnBAfter[0].id, c);
+    assert.equal(refsOnBAfter[0].relation, 'relates to');
   });
 
   test('non-canonical refs are NOT mirrored on the target task', () => {
