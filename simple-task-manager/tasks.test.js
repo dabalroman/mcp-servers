@@ -643,3 +643,67 @@ describe('persistence', () => {
     assert.equal(id, 2);
   });
 });
+
+describe('summary — store always returns complete data', () => {
+  test('add with summary stores it; all read methods return both summary and description', () => {
+    const { id } = store.add({
+      type: 'feature', priority: 'medium', title: 'S',
+      description: 'Full description text.', summary: 'Short gist.',
+    });
+    // getById
+    const byId = store.getById(id);
+    assert.equal(byId.summary, 'Short gist.');
+    assert.equal(byId.description, 'Full description text.');
+    // getByType (list method — store returns both; server.js strips for MCP)
+    const byType = store.getByType('feature').find((t) => t.id === id);
+    assert.equal(byType.summary, 'Short gist.');
+    assert.equal(byType.description, 'Full description text.');
+    // load
+    const { active } = store.load();
+    const loaded = active.find((t) => t.id === id);
+    assert.equal(loaded.summary, 'Short gist.');
+    assert.equal(loaded.description, 'Full description text.');
+  });
+
+  test('update sets summary; update with null clears it', () => {
+    const { id } = store.add({ type: 'bug', priority: 'low', title: 'X', description: 'D' });
+    store.update(id, { summary: 'A gist.' });
+    assert.equal(store.getById(id).summary, 'A gist.');
+    store.update(id, { summary: null });
+    assert.equal(store.getById(id).summary, undefined);
+  });
+
+  test('update with empty string clears summary', () => {
+    const { id } = store.add({ type: 'bug', priority: 'low', title: 'X', description: 'D', summary: 'gist' });
+    store.update(id, { summary: '' });
+    assert.equal(store.getById(id).summary, undefined);
+  });
+
+  test('getRelated returns both summary and description for all entries', () => {
+    const { id: a } = store.add({
+      type: 'bug', priority: 'medium', title: 'A',
+      description: 'A description.', summary: 'A gist.',
+    });
+    const { id: b } = store.add({
+      type: 'bug', priority: 'medium', title: 'B',
+      description: 'B description.', summary: 'B gist.',
+      refs: [{ id: a, relation: 'blocks' }],
+    });
+    const rb = store.getRelated(b);
+    assert.equal(rb.task.summary, 'B gist.');
+    assert.equal(rb.task.description, 'B description.');
+    assert.equal(rb.outbound[0].summary, 'A gist.');
+    assert.equal(rb.outbound[0].description, 'A description.');
+
+    const ra = store.getRelated(a);
+    assert.equal(ra.inbound[0].summary, 'B gist.');
+    assert.equal(ra.inbound[0].description, 'B description.');
+  });
+
+  test('setStatus does NOT enforce summary — enforcement is in server layer', () => {
+    const { id } = store.add({ type: 'bug', priority: 'medium', title: 'T', description: '' });
+    const ok = store.setStatus(id, 'todo');
+    assert.equal(ok, true);
+    assert.equal(store.getById(id).status, 'todo');
+  });
+});
