@@ -12,11 +12,13 @@ import {
   sortForNext,
   RELATIONS,
   CURRENT_USER_VERSION,
+  type AddInput,
+  type Store,
 } from './tasks.js';
 
-let dir;
-let dbPath;
-let store;
+let dir: string;
+let dbPath: string;
+let store: Store;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'mcp-test-'));
@@ -29,7 +31,7 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-function makeTask(overrides = {}) {
+function makeTask(overrides: Partial<AddInput> = {}): { id: number } {
   return store.add({
     type: 'bug',
     priority: 'medium',
@@ -52,14 +54,14 @@ describe('schema', () => {
 
   test('records all migrations in schema_migrations', () => {
     const db = new Database(dbPath);
-    const rows = db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all();
+    const rows = db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all() as { version: number; name: string }[];
     assert.equal(rows.length, CURRENT_USER_VERSION);
-    assert.equal(rows[0].version, 1);
-    assert.equal(rows[0].name, 'initial-schema');
-    assert.equal(rows[1].version, 2);
-    assert.equal(rows[1].name, 'normalize-literal-newlines');
-    assert.equal(rows[2].version, 3);
-    assert.equal(rows[2].name, 'refs_pk_simplify');
+    assert.equal(rows[0]?.version, 1);
+    assert.equal(rows[0]?.name, 'initial-schema');
+    assert.equal(rows[1]?.version, 2);
+    assert.equal(rows[1]?.name, 'normalize-literal-newlines');
+    assert.equal(rows[2]?.version, 3);
+    assert.equal(rows[2]?.name, 'refs_pk_simplify');
     db.close();
   });
 
@@ -107,22 +109,22 @@ describe('add', () => {
 
   test('persists task to db', () => {
     const { id } = makeTask({ title: 'Persist me' });
-    assert.equal(store.getById(id).title, 'Persist me');
+    assert.equal(store.getById(id)?.title, 'Persist me');
   });
 
   test('persists scope', () => {
     const { id } = makeTask({ scope: 'auth' });
-    assert.equal(store.getById(id).scope, 'auth');
+    assert.equal(store.getById(id)?.scope, 'auth');
   });
 
   test('persists summary', () => {
     const { id } = makeTask({ summary: 'A short gist.' });
-    assert.equal(store.getById(id).summary, 'A short gist.');
+    assert.equal(store.getById(id)?.summary, 'A short gist.');
   });
 
   test('defaults status to refinement when not given', () => {
     const { id } = store.add({ type: 'feature', priority: 'low', title: 'X', description: '' });
-    assert.equal(store.getById(id).status, 'refinement');
+    assert.equal(store.getById(id)?.status, 'refinement');
   });
 
   test('rejects empty title', () => {
@@ -132,7 +134,7 @@ describe('add', () => {
   test('persists refs', () => {
     const { id: a } = makeTask();
     const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
-    assert.deepEqual(store.getById(b).refs, [{ id: a, relation: 'blocks' }]);
+    assert.deepEqual(store.getById(b)?.refs, [{ id: a, relation: 'blocks' }]);
   });
 });
 
@@ -143,7 +145,7 @@ describe('getById', () => {
 
   test('returns the task for an existing id', () => {
     const { id } = makeTask({ title: 'Hello' });
-    assert.equal(store.getById(id).title, 'Hello');
+    assert.equal(store.getById(id)?.title, 'Hello');
   });
 });
 
@@ -155,19 +157,19 @@ describe('update', () => {
   test('patches title', () => {
     const { id } = makeTask({ title: 'Old' });
     const r = store.update(id, { title: 'New' });
-    assert.equal(r.task.title, 'New');
+    assert.equal(r?.task.title, 'New');
   });
 
   test('clears scope when null', () => {
     const { id } = makeTask({ scope: 'web' });
     store.update(id, { scope: null });
-    assert.equal(store.getById(id).scope, undefined);
+    assert.equal(store.getById(id)?.scope, undefined);
   });
 
   test('clears summary when null', () => {
     const { id } = makeTask({ summary: 'gist' });
     store.update(id, { summary: null });
-    assert.equal(store.getById(id).summary, undefined);
+    assert.equal(store.getById(id)?.summary, undefined);
   });
 
   test('replaces refs entirely', () => {
@@ -175,14 +177,14 @@ describe('update', () => {
     const { id: b } = makeTask();
     const { id: c } = store.add({ type: 'bug', priority: 'high', title: 'C', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.update(c, { refs: [{ id: b, relation: 'depends on' }] });
-    assert.deepEqual(store.getById(c).refs, [{ id: b, relation: 'depends on' }]);
+    assert.deepEqual(store.getById(c)?.refs, [{ id: b, relation: 'depends on' }]);
   });
 
   test('clears refs with null', () => {
     const { id: a } = makeTask();
     const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.update(b, { refs: null });
-    assert.equal(store.getById(b).refs, undefined);
+    assert.equal(store.getById(b)?.refs, undefined);
   });
 });
 
@@ -194,14 +196,14 @@ describe('setStatus', () => {
   test('marks task as done', () => {
     const { id } = makeTask();
     assert.equal(store.setStatus(id, 'done'), true);
-    assert.equal(store.getById(id).status, 'done');
+    assert.equal(store.getById(id)?.status, 'done');
   });
 
   test('un-dones a task back to todo', () => {
     const { id } = makeTask();
     store.setStatus(id, 'done');
     store.setStatus(id, 'todo');
-    assert.equal(store.getById(id).status, 'todo');
+    assert.equal(store.getById(id)?.status, 'todo');
   });
 
   test('load() splits active/done by status', () => {
@@ -229,7 +231,7 @@ describe('delete', () => {
     const { id: a } = makeTask();
     const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.delete(a);
-    assert.equal(store.getById(b).refs, undefined);
+    assert.equal(store.getById(b)?.refs, undefined);
   });
 });
 
@@ -237,97 +239,84 @@ describe('refs — store-level mirroring', () => {
   test('writes inverse on canonical ref', () => {
     const { id: a } = makeTask();
     const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
-    assert.deepEqual(store.getById(a).refs, [{ id: b, relation: 'is blocked by' }]);
+    assert.deepEqual(store.getById(a)?.refs, [{ id: b, relation: 'is blocked by' }]);
   });
 
   test('removes inverse when ref is removed', () => {
     const { id: a } = makeTask();
     const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.update(b, { refs: [] });
-    assert.equal(store.getById(a).refs, undefined);
+    assert.equal(store.getById(a)?.refs, undefined);
   });
 
   test('updates inverse on relation change', () => {
     const { id: a } = makeTask();
     const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.update(b, { refs: [{ id: a, relation: 'causes' }] });
-    assert.deepEqual(store.getById(a).refs, [{ id: b, relation: 'is caused by' }]);
+    assert.deepEqual(store.getById(a)?.refs, [{ id: b, relation: 'is caused by' }]);
   });
 
   test('"relates to" is symmetric on both sides', () => {
     const { id: a } = makeTask();
     const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'relates to' }] });
-    assert.equal(store.getById(a).refs[0].relation, 'relates to');
-    assert.equal(store.getById(b).refs[0].relation, 'relates to');
+    assert.equal(store.getById(a)?.refs?.[0]?.relation, 'relates to');
+    assert.equal(store.getById(b)?.refs?.[0]?.relation, 'relates to');
   });
 
   test('strips refs to nonexistent ids', () => {
     const { id } = store.add({ type: 'bug', priority: 'high', title: 'X', description: '', refs: [{ id: 9999, relation: 'blocks' }] });
-    assert.equal(store.getById(id).refs, undefined);
+    assert.equal(store.getById(id)?.refs, undefined);
   });
 
   test('strips self-refs', () => {
     const { id } = makeTask();
     store.update(id, { refs: [{ id, relation: 'relates to' }] });
-    assert.equal(store.getById(id).refs, undefined);
+    assert.equal(store.getById(id)?.refs, undefined);
   });
 
   test('INSERT OR REPLACE — updating relation on existing (from, to) pair overwrites it', () => {
     const { id: a } = makeTask({ title: 'A' });
     const { id: b } = makeTask({ title: 'B' });
-    // First add A→B relates to
     store.update(a, { refs: [{ id: b, relation: 'relates to' }] });
-    assert.equal(store.getById(a).refs[0].relation, 'relates to');
-    // Now change A→B to blocks — should overwrite, not keep old row
+    assert.equal(store.getById(a)?.refs?.[0]?.relation, 'relates to');
     store.update(a, { refs: [{ id: b, relation: 'blocks' }] });
-    const refsOnA = store.getById(a).refs;
-    assert.equal(refsOnA.length, 1);
-    assert.equal(refsOnA[0].relation, 'blocks');
-    // Mirror on B must also reflect updated relation
-    const refsOnB = store.getById(b).refs;
-    assert.equal(refsOnB.length, 1);
-    assert.equal(refsOnB[0].relation, 'is blocked by');
+    const refsOnA = store.getById(a)?.refs;
+    assert.equal(refsOnA?.length, 1);
+    assert.equal(refsOnA?.[0]?.relation, 'blocks');
+    const refsOnB = store.getById(b)?.refs;
+    assert.equal(refsOnB?.length, 1);
+    assert.equal(refsOnB?.[0]?.relation, 'is blocked by');
   });
 
   test('mirror-delete fix — removing canonical ref deletes only its mirror, not unrelated refs on target', () => {
     const { id: a } = makeTask({ title: 'A' });
     const { id: b } = makeTask({ title: 'B' });
     const { id: c } = makeTask({ title: 'C' });
-    // A→B blocks (mirror: B→A is blocked by)
     store.update(a, { refs: [{ id: b, relation: 'blocks' }] });
-    // C→B relates to (mirror: B→C relates to)
     store.update(c, { refs: [{ id: b, relation: 'relates to' }] });
-    // B should have two mirror refs: one from A and one from C
-    const refsOnBBefore = store.getById(b).refs;
-    assert.equal(refsOnBBefore.length, 2);
-    // Remove A→B; only B→A mirror should disappear; B→C must survive
+    const refsOnBBefore = store.getById(b)?.refs;
+    assert.equal(refsOnBBefore?.length, 2);
     store.update(a, { refs: [] });
-    assert.equal(store.getById(a).refs, undefined);
-    const refsOnBAfter = store.getById(b).refs;
-    assert.equal(refsOnBAfter.length, 1);
-    assert.equal(refsOnBAfter[0].id, c);
-    assert.equal(refsOnBAfter[0].relation, 'relates to');
+    assert.equal(store.getById(a)?.refs, undefined);
+    const refsOnBAfter = store.getById(b)?.refs;
+    assert.equal(refsOnBAfter?.length, 1);
+    assert.equal(refsOnBAfter?.[0]?.id, c);
+    assert.equal(refsOnBAfter?.[0]?.relation, 'relates to');
   });
 
   test('non-canonical refs are NOT mirrored on the target task', () => {
     const { id: a } = makeTask({ title: 'A' });
     const { id: c } = makeTask({ title: 'C' });
-    // Store a non-canonical mirror row directly (simulating what the server writes
-    // when task C was canonical-ref'd by some other task pointing at A).
     const db = new Database(dbPath);
     db.prepare('INSERT INTO refs (from_id, to_id, relation, non_canonical) VALUES (?, ?, ?, 1)')
       .run(a, c, 'is blocked by');
     db.close();
-    // Now add a canonical ref from A → B.  applyRefsImpl must mirror only this
-    // canonical ref on B, and must NOT create an additional mirror for the
-    // non-canonical row sitting on A already.
     const { id: b } = makeTask({ title: 'B' });
     store.update(a, { refs: [{ id: b, relation: 'blocks' }] });
-    // b should have exactly one mirror (is blocked by a)
-    const refsOnB = store.getById(b).refs;
-    assert.equal(refsOnB.length, 1);
-    assert.equal(refsOnB[0].relation, 'is blocked by');
-    assert.equal(refsOnB[0].id, a);
+    const refsOnB = store.getById(b)?.refs;
+    assert.equal(refsOnB?.length, 1);
+    assert.equal(refsOnB?.[0]?.relation, 'is blocked by');
+    assert.equal(refsOnB?.[0]?.id, a);
   });
 });
 
@@ -346,7 +335,7 @@ describe('getByStatus', () => {
     makeTask({ scope: 'cli' });
     const filtered = store.getByStatus('refinement', 'web');
     assert.equal(filtered.length, 1);
-    assert.equal(filtered[0].scope, 'web');
+    assert.equal(filtered[0]?.scope, 'web');
   });
 
   test('scope filter is case-sensitive — "Web" does not match "web"', () => {
@@ -382,7 +371,7 @@ describe('getByType', () => {
     makeTask({ type: 'feature' });
     const r = store.getByType('bug');
     assert.equal(r.length, 1);
-    assert.equal(r[0].type, 'bug');
+    assert.equal(r[0]?.type, 'bug');
   });
 });
 
@@ -397,7 +386,7 @@ describe('getNext', () => {
     const { id: t } = makeTask({ title: 'queued' });
     store.setStatus(ip, 'in_progress');
     store.setStatus(t, 'todo');
-    assert.equal(store.getNext().id, ip);
+    assert.equal(store.getNext()?.id, ip);
   });
 
   test('respects priority within same status', () => {
@@ -405,7 +394,7 @@ describe('getNext', () => {
     const { id: high } = makeTask({ priority: 'high' });
     store.setStatus(low, 'todo');
     store.setStatus(high, 'todo');
-    assert.equal(store.getNext().id, high);
+    assert.equal(store.getNext()?.id, high);
   });
 
   test('FILO within same priority — newer id wins', () => {
@@ -413,14 +402,14 @@ describe('getNext', () => {
     const { id: newer } = makeTask({ priority: 'medium' });
     store.setStatus(older, 'todo');
     store.setStatus(newer, 'todo');
-    assert.equal(store.getNext().id, newer);
+    assert.equal(store.getNext()?.id, newer);
   });
 
   test('type filter narrows', () => {
     const { id: b } = makeTask({ type: 'bug' });
     makeTask({ type: 'feature' });
     store.setStatus(b, 'todo');
-    assert.equal(store.getNext('bug').id, b);
+    assert.equal(store.getNext('bug')?.id, b);
   });
 
   test('skips done tasks', () => {
@@ -439,10 +428,10 @@ describe('getOverview', () => {
     store.setStatus(t3, 'done');
     const ov = store.getOverview();
     const bug = ov.find((o) => o.type === 'bug');
-    assert.equal(bug.open, 1);
-    assert.equal(bug.done, 1);
+    assert.equal(bug?.open, 1);
+    assert.equal(bug?.done, 1);
     const feature = ov.find((o) => o.type === 'feature');
-    assert.equal(feature.refinement, 1);
+    assert.equal(feature?.refinement, 1);
   });
 
   test('omits types with zero tasks', () => {
@@ -456,21 +445,18 @@ describe('getOverview', () => {
     store.setStatus(t1, 'todo');
     const { id: t2 } = makeTask({ type: 'bug' });
     store.setStatus(t2, 'done');
-    makeTask({ type: 'bug' }); // refinement
+    makeTask({ type: 'bug' });
     const ov = store.getOverview();
     const bug = ov.find((o) => o.type === 'bug');
-    // Verify shape: all three buckets are present as numeric fields
+    assert.ok(bug);
     assert.equal(typeof bug.open, 'number');
     assert.equal(typeof bug.done, 'number');
     assert.equal(typeof bug.refinement, 'number');
-    // Derived totals: open=1 (todo), done=1, refinement=1
     assert.equal(bug.open, 1);
     assert.equal(bug.done, 1);
     assert.equal(bug.refinement, 1);
-    // total = all three combined
     const total = bug.open + bug.done + bug.refinement;
     assert.equal(total, 3);
-    // actionable = open + refinement (tasks that need attention)
     const actionable = bug.open + bug.refinement;
     assert.equal(actionable, 2);
   });
@@ -485,31 +471,31 @@ describe('getRelated', () => {
     const { id: a } = makeTask({ title: 'A' });
     const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     const r = store.getRelated(b);
-    assert.equal(r.outbound[0].id, a);
-    assert.equal(r.outbound[0].refRelation, 'blocks');
+    assert.equal(r?.outbound[0]?.id, a);
+    assert.equal(r?.outbound[0]?.refRelation, 'blocks');
     const ra = store.getRelated(a);
-    assert.equal(ra.inbound[0].id, b);
-    assert.equal(ra.inbound[0].refRelation, 'blocks');
+    assert.equal(ra?.inbound[0]?.id, b);
+    assert.equal(ra?.inbound[0]?.refRelation, 'blocks');
   });
 
   test('no-outbound edge — task with no refs has empty outbound array', () => {
     const { id } = makeTask({ title: 'Lonely' });
     const r = store.getRelated(id);
-    assert.deepEqual(r.outbound, []);
+    assert.deepEqual(r?.outbound, []);
   });
 
   test('no-inbound edge — task nobody points to has empty inbound array', () => {
     const { id } = makeTask({ title: 'Solo' });
     const r = store.getRelated(id);
-    assert.deepEqual(r.inbound, []);
+    assert.deepEqual(r?.inbound, []);
   });
 
   test('no-refs edge — task with no refs at all has both arrays empty', () => {
     const { id } = makeTask({ title: 'Isolated' });
     const r = store.getRelated(id);
-    assert.deepEqual(r.outbound, []);
-    assert.deepEqual(r.inbound, []);
-    assert.equal(r.task.refs, undefined);
+    assert.deepEqual(r?.outbound, []);
+    assert.deepEqual(r?.inbound, []);
+    assert.equal(r?.task.refs, undefined);
   });
 });
 
@@ -523,11 +509,11 @@ describe('getScopes', () => {
 
     const scopes = store.getScopes();
     const cli = scopes.find((s) => s.scope === 'cli');
-    assert.equal(cli.total, 2);
-    assert.equal(cli.open, 1);
+    assert.equal(cli?.total, 2);
+    assert.equal(cli?.open, 1);
     const web = scopes.find((s) => s.scope === 'web');
-    assert.equal(web.total, 1);
-    assert.equal(web.open, 1);
+    assert.equal(web?.total, 1);
+    assert.equal(web?.open, 1);
   });
 
   test('orders by open desc, then total desc, then alpha', () => {
@@ -541,10 +527,10 @@ describe('getScopes', () => {
 describe('sortByPriority', () => {
   test('orders by priority desc then id desc', () => {
     const tasks = [
-      { id: 1, priority: 'low' },
-      { id: 2, priority: 'high' },
-      { id: 3, priority: 'high' },
-      { id: 4, priority: 'medium' },
+      { id: 1, priority: 'low' as const },
+      { id: 2, priority: 'high' as const },
+      { id: 3, priority: 'high' as const },
+      { id: 4, priority: 'medium' as const },
     ];
     assert.deepEqual(sortByPriority(tasks).map((t) => t.id), [3, 2, 4, 1]);
   });
@@ -553,16 +539,16 @@ describe('sortByPriority', () => {
 describe('sortForNext', () => {
   test('in_progress > refinement > todo', () => {
     const tasks = [
-      { id: 1, status: 'todo', priority: 'medium' },
-      { id: 2, status: 'in_progress', priority: 'medium' },
-      { id: 3, status: 'refinement', priority: 'medium' },
+      { id: 1, status: 'todo' as const, priority: 'medium' as const },
+      { id: 2, status: 'in_progress' as const, priority: 'medium' as const },
+      { id: 3, status: 'refinement' as const, priority: 'medium' as const },
     ];
     assert.deepEqual(sortForNext(tasks).map((t) => t.id), [2, 3, 1]);
   });
 });
 
 describe('applyRefs (in-memory helper)', () => {
-  function makeT(id, extra = {}) {
+  function makeT(id: number, extra: Partial<import('./tasks.js').Task> = {}): import('./tasks.js').Task {
     return { id, title: `T${id}`, type: 'bug', status: 'todo', priority: 'medium', description: '', ...extra };
   }
   test('adds inverse on counterpart', () => {
@@ -581,7 +567,7 @@ describe('applyRefs (in-memory helper)', () => {
     const a = makeT(1, { refs: [{ id: 2, relation: 'blocks' }] });
     const b = makeT(2, { refs: [{ id: 1, relation: 'is blocked by' }] });
     applyRefs([a, b], 1, [{ id: 2, relation: 'blocks' }], [{ id: 2, relation: 'causes' }]);
-    assert.equal(b.refs[0].relation, 'is caused by');
+    assert.equal(b.refs?.[0]?.relation, 'is caused by');
   });
   test('strips self-refs and dangling refs', () => {
     const a = makeT(1);
@@ -591,7 +577,7 @@ describe('applyRefs (in-memory helper)', () => {
 });
 
 describe('cascadeDelete (in-memory helper)', () => {
-  function makeT(id, extra = {}) {
+  function makeT(id: number, extra: Partial<import('./tasks.js').Task> = {}): import('./tasks.js').Task {
     return { id, title: `T${id}`, type: 'bug', status: 'todo', priority: 'medium', description: '', ...extra };
   }
   test('strips refs pointing to deleted id', () => {
@@ -609,8 +595,8 @@ describe('cascadeDelete (in-memory helper)', () => {
 describe('RELATIONS export', () => {
   test('contains the canonical 9-entry vocabulary', () => {
     assert.equal(RELATIONS.length, 9);
-    assert.ok(RELATIONS.includes('blocks'));
-    assert.ok(RELATIONS.includes('relates to'));
+    assert.ok((RELATIONS as readonly string[]).includes('blocks'));
+    assert.ok((RELATIONS as readonly string[]).includes('relates to'));
   });
 });
 
@@ -618,9 +604,9 @@ describe('cross-connection visibility', () => {
   test('a second connection sees writes immediately under DELETE journaling', () => {
     makeTask({ title: 'first' });
     const reader = new Database(dbPath, { readonly: true });
-    const before = reader.prepare('SELECT COUNT(*) AS n FROM tasks').get().n;
+    const before = (reader.prepare('SELECT COUNT(*) AS n FROM tasks').get() as { n: number }).n;
     makeTask({ title: 'second' });
-    const after = reader.prepare('SELECT COUNT(*) AS n FROM tasks').get().n;
+    const after = (reader.prepare('SELECT COUNT(*) AS n FROM tasks').get() as { n: number }).n;
     assert.equal(before, 1);
     assert.equal(after, 2);
     reader.close();
@@ -632,7 +618,7 @@ describe('persistence', () => {
     const { id } = makeTask({ title: 'survive' });
     store.close();
     store = createStore(dbPath);
-    assert.equal(store.getById(id).title, 'survive');
+    assert.equal(store.getById(id)?.title, 'survive');
   });
 
   test('counter survives reopen', () => {
@@ -650,33 +636,30 @@ describe('summary — store always returns complete data', () => {
       type: 'feature', priority: 'medium', title: 'S',
       description: 'Full description text.', summary: 'Short gist.',
     });
-    // getById
     const byId = store.getById(id);
-    assert.equal(byId.summary, 'Short gist.');
-    assert.equal(byId.description, 'Full description text.');
-    // getByType (list method — store returns both; server.js strips for MCP)
+    assert.equal(byId?.summary, 'Short gist.');
+    assert.equal(byId?.description, 'Full description text.');
     const byType = store.getByType('feature').find((t) => t.id === id);
-    assert.equal(byType.summary, 'Short gist.');
-    assert.equal(byType.description, 'Full description text.');
-    // load
+    assert.equal(byType?.summary, 'Short gist.');
+    assert.equal(byType?.description, 'Full description text.');
     const { active } = store.load();
     const loaded = active.find((t) => t.id === id);
-    assert.equal(loaded.summary, 'Short gist.');
-    assert.equal(loaded.description, 'Full description text.');
+    assert.equal(loaded?.summary, 'Short gist.');
+    assert.equal(loaded?.description, 'Full description text.');
   });
 
   test('update sets summary; update with null clears it', () => {
     const { id } = store.add({ type: 'bug', priority: 'low', title: 'X', description: 'D' });
     store.update(id, { summary: 'A gist.' });
-    assert.equal(store.getById(id).summary, 'A gist.');
+    assert.equal(store.getById(id)?.summary, 'A gist.');
     store.update(id, { summary: null });
-    assert.equal(store.getById(id).summary, undefined);
+    assert.equal(store.getById(id)?.summary, undefined);
   });
 
   test('update with empty string clears summary', () => {
     const { id } = store.add({ type: 'bug', priority: 'low', title: 'X', description: 'D', summary: 'gist' });
     store.update(id, { summary: '' });
-    assert.equal(store.getById(id).summary, undefined);
+    assert.equal(store.getById(id)?.summary, undefined);
   });
 
   test('getRelated returns both summary and description for all entries', () => {
@@ -690,20 +673,20 @@ describe('summary — store always returns complete data', () => {
       refs: [{ id: a, relation: 'blocks' }],
     });
     const rb = store.getRelated(b);
-    assert.equal(rb.task.summary, 'B gist.');
-    assert.equal(rb.task.description, 'B description.');
-    assert.equal(rb.outbound[0].summary, 'A gist.');
-    assert.equal(rb.outbound[0].description, 'A description.');
+    assert.equal(rb?.task.summary, 'B gist.');
+    assert.equal(rb?.task.description, 'B description.');
+    assert.equal(rb?.outbound[0]?.summary, 'A gist.');
+    assert.equal(rb?.outbound[0]?.description, 'A description.');
 
     const ra = store.getRelated(a);
-    assert.equal(ra.inbound[0].summary, 'B gist.');
-    assert.equal(ra.inbound[0].description, 'B description.');
+    assert.equal(ra?.inbound[0]?.summary, 'B gist.');
+    assert.equal(ra?.inbound[0]?.description, 'B description.');
   });
 
   test('setStatus does NOT enforce summary — enforcement is in server layer', () => {
     const { id } = store.add({ type: 'bug', priority: 'medium', title: 'T', description: '' });
     const ok = store.setStatus(id, 'todo');
     assert.equal(ok, true);
-    assert.equal(store.getById(id).status, 'todo');
+    assert.equal(store.getById(id)?.status, 'todo');
   });
 });

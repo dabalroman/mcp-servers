@@ -1,4 +1,4 @@
-export const INSTRUCTIONS = `
+export const INSTRUCTIONS: string = `
 You are connected to simple-task-manager — a persistent task tracker that survives session restarts and context compaction.
 Tasks live in a single SQLite database (env var \`TASKS_DB\`); they used to live in TASKS.md / TASKS_DONE.md before the SQLite migration.
 

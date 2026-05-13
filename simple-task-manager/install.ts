@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 /**
  * Two modes:
- *   node install.js --global   One-time setup: teaches Claude how to set up this MCP in any project.
- *   node install.js [dir]      Per-project setup: writes .mcp.json in the project root (default: cwd).
+ *   tsx install.ts --global   One-time setup: teaches Claude how to set up this MCP in any project.
+ *   tsx install.ts [dir]      Per-project setup: writes .mcp.json in the project root (default: cwd).
+ *                             If a stale task-manager entry pointing at server.ts/server.js exists,
+ *                             it is rewritten to point at dist/server.js.
  */
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, dirname } from 'path';
@@ -10,6 +12,17 @@ import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 
 const serverDir = dirname(fileURLToPath(import.meta.url));
+const serverEntry = resolve(serverDir, 'dist/server.js');
+
+type McpEntry = {
+  command: string;
+  args: string[];
+  env?: Record<string, string>;
+};
+
+type McpConfig = {
+  mcpServers: Record<string, McpEntry>;
+};
 
 // ── --global: register the setup instructions in ~/.claude/CLAUDE.md ──────────
 if (process.argv[2] === '--global') {
@@ -35,18 +48,18 @@ if (process.argv[2] === '--global') {
 const projectDir = resolve(process.argv[2] ?? process.cwd());
 const mcpFile = resolve(projectDir, '.mcp.json');
 
-const entry = {
+const entry: McpEntry = {
   command: 'node',
-  args: [resolve(serverDir, 'server.js')],
+  args: [serverEntry],
   env: {
     TASKS_DB: resolve(projectDir, 'tasks.db'),
   },
 };
 
-let config = { mcpServers: {} };
+let config: McpConfig = { mcpServers: {} };
 if (existsSync(mcpFile)) {
   try {
-    config = JSON.parse(readFileSync(mcpFile, 'utf8'));
+    config = JSON.parse(readFileSync(mcpFile, 'utf8')) as McpConfig;
     config.mcpServers ??= {};
   } catch {
     console.error(`Error: ${mcpFile} exists but is not valid JSON. Fix it manually first.`);
@@ -54,14 +67,26 @@ if (existsSync(mcpFile)) {
   }
 }
 
-if (config.mcpServers['task-manager']) {
+const existingEntry = config.mcpServers['task-manager'];
+
+// Detect a stale entry from the pre-TypeScript layout (args pointed at server.js
+// at the package root). Rewrite it to the new dist/server.js path so existing
+// installations keep working after upgrade.
+function isStaleEntry(e: McpEntry | undefined): boolean {
+  if (!e) return false;
+  const arg0 = e.args?.[0] ?? '';
+  return arg0.endsWith('/server.js') || arg0.endsWith('/server.ts');
+}
+
+if (existingEntry && !isStaleEntry(existingEntry)) {
   console.log(`task-manager is already registered in ${mcpFile} — nothing to do.`);
   process.exit(0);
 }
 
+const action = existingEntry ? 'Refreshed' : 'Registered';
 config.mcpServers['task-manager'] = entry;
 writeFileSync(mcpFile, JSON.stringify(config, null, 2) + '\n');
-console.log(`Registered task-manager in ${mcpFile}`);
+console.log(`${action} task-manager in ${mcpFile}`);
 console.log(`  server : ${entry.args[0]}`);
-console.log(`  db     : ${entry.env.TASKS_DB}`);
+console.log(`  db     : ${entry.env?.TASKS_DB ?? '(unset)'}`);
 console.log(`Restart Claude Code to activate.`);

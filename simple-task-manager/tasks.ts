@@ -1,12 +1,43 @@
 // SQLite-backed task store. Replaces the previous markdown/DSL parser.
 // Schema lives in schema_migrations; see CURRENT_USER_VERSION below.
 import Database from 'better-sqlite3';
+import type { Database as DB } from 'better-sqlite3';
 
 export const CURRENT_USER_VERSION = 3;
 
-const PRIORITY_ORDER = { critical: 4, high: 3, medium: 2, low: 1 };
-const STATUS_ORDER = { in_progress: 3, refinement: 2, todo: 1, done: 0 };
-const ALL_TYPES = ['bug', 'feature', 'idea', 'tool', 'other'];
+export type TaskType = 'bug' | 'feature' | 'idea' | 'tool' | 'other';
+export type TaskStatus = 'refinement' | 'todo' | 'in_progress' | 'done';
+export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
+
+export type Relation =
+  | 'blocks' | 'is blocked by'
+  | 'depends on' | 'is depended on by'
+  | 'causes' | 'is caused by'
+  | 'tests' | 'is tested by'
+  | 'relates to'
+  | (string & {});
+
+export type Ref = {
+  id: number;
+  relation: Relation;
+  nonCanonical?: boolean;
+};
+
+export type Task = {
+  id: number;
+  title: string;
+  type: TaskType;
+  status: TaskStatus;
+  priority: TaskPriority;
+  scope?: string;
+  summary?: string;
+  description?: string;
+  refs?: Ref[];
+};
+
+const PRIORITY_ORDER: Record<TaskPriority, number> = { critical: 4, high: 3, medium: 2, low: 1 };
+const STATUS_ORDER: Record<TaskStatus, number> = { in_progress: 3, refinement: 2, todo: 1, done: 0 };
+const ALL_TYPES: TaskType[] = ['bug', 'feature', 'idea', 'tool', 'other'];
 
 export const RELATIONS = [
   'blocks', 'is blocked by',
@@ -14,8 +45,9 @@ export const RELATIONS = [
   'causes', 'is caused by',
   'tests', 'is tested by',
   'relates to',
-];
-const INVERSE = {
+] as const;
+
+const INVERSE: Record<string, string> = {
   'blocks':            'is blocked by',
   'is blocked by':     'blocks',
   'depends on':        'is depended on by',
@@ -28,8 +60,9 @@ const INVERSE = {
 };
 
 // ── Migrations ────────────────────────────────────────────────────────────────
-// Each migration: { version, name, up(db) }. `up` runs inside a transaction.
-const MIGRATIONS = [
+type Migration = { version: number; name: string; up: (db: DB) => void };
+
+const MIGRATIONS: Migration[] = [
   {
     version: 1,
     name: 'initial-schema',
@@ -106,8 +139,8 @@ const MIGRATIONS = [
   },
 ];
 
-function runMigrations(db, dbPath) {
-  const currentVersion = db.pragma('user_version', { simple: true });
+function runMigrations(db: DB, dbPath: string): void {
+  const currentVersion = db.pragma('user_version', { simple: true }) as number;
   if (currentVersion > CURRENT_USER_VERSION) {
     throw new Error(
       `Schema version mismatch on "${dbPath}": db is at user_version=${currentVersion}, ` +
@@ -126,7 +159,7 @@ function runMigrations(db, dbPath) {
   `);
 
   const applied = new Set(
-    db.prepare('SELECT version FROM schema_migrations').all().map((r) => r.version)
+    (db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]).map((r) => r.version)
   );
 
   const insertMigration = db.prepare(
@@ -145,8 +178,21 @@ function runMigrations(db, dbPath) {
 }
 
 // ── Row mapping ───────────────────────────────────────────────────────────────
-function rowToTask(row, refs) {
-  const t = {
+type TaskRow = {
+  id: number;
+  title: string;
+  type: TaskType;
+  status: TaskStatus;
+  priority: TaskPriority;
+  scope: string | null;
+  summary: string | null;
+  description: string | null;
+};
+
+type RefRow = { from_id: number; to_id: number; relation: string; non_canonical: number };
+
+function rowToTask(row: TaskRow, refs: Ref[]): Task {
+  const t: Task = {
     id: row.id,
     title: row.title,
     type: row.type,
@@ -160,25 +206,29 @@ function rowToTask(row, refs) {
   return t;
 }
 
-function refRowToObj(r) {
-  const out = { id: r.to_id, relation: r.relation };
+function refRowToObj(r: RefRow): Ref {
+  const out: Ref = { id: r.to_id, relation: r.relation };
   if (r.non_canonical) out.nonCanonical = true;
   return out;
 }
 
 // Defensive guard: Claude sometimes emits literal \n (0x5C 0x6E) as text tokens
 // in MCP tool call arguments instead of real newline bytes (0x0A).
-const normalizeNewlines = (s) => (typeof s === 'string' ? s.replace(/\\n/g, '\n') : s);
+function normalizeNewlines(s: string): string;
+function normalizeNewlines<T>(s: T): T;
+function normalizeNewlines(s: unknown): unknown {
+  return typeof s === 'string' ? s.replace(/\\n/g, '\n') : s;
+}
 
 // ── Helpers (pure) ────────────────────────────────────────────────────────────
-export function sortByPriority(tasks) {
+export function sortByPriority<T extends { priority: TaskPriority; id: number }>(tasks: T[]): T[] {
   return [...tasks].sort((a, b) => {
     const pd = PRIORITY_ORDER[b.priority] - PRIORITY_ORDER[a.priority];
     return pd !== 0 ? pd : b.id - a.id;
   });
 }
 
-export function sortForNext(tasks) {
+export function sortForNext<T extends { status: TaskStatus; priority: TaskPriority; id: number }>(tasks: T[]): T[] {
   return [...tasks].sort((a, b) => {
     const sd = STATUS_ORDER[b.status] - STATUS_ORDER[a.status];
     if (sd !== 0) return sd;
@@ -187,8 +237,63 @@ export function sortForNext(tasks) {
   });
 }
 
+export type AddInput = {
+  type: TaskType;
+  priority: TaskPriority;
+  title: string;
+  description?: string;
+  scope?: string;
+  summary?: string;
+  refs?: Ref[];
+  status?: TaskStatus;
+};
+
+export type UpdatePatch = {
+  title?: string;
+  type?: TaskType;
+  priority?: TaskPriority;
+  description?: string;
+  scope?: string | null;
+  summary?: string | null;
+  refs?: Ref[] | null;
+};
+
+export type LoadResult = {
+  counter: number;
+  active: Task[];
+  done: Task[];
+};
+
+export type RelatedResult = {
+  task: Task;
+  outbound: (Task & { refRelation: string })[];
+  inbound: (Task & { refRelation: string })[];
+};
+
+export type OverviewEntry = { type: TaskType; refinement: number; open: number; done: number };
+export type ScopeEntry = { scope: string; total: number; open: number };
+
+export type Store = {
+  readonly db: DB;
+  dataVersion(): number;
+  load(): LoadResult;
+  add(input: AddInput): { id: number };
+  update(id: number, patch: UpdatePatch): { task: Task } | null;
+  setStatus(id: number, status: TaskStatus): boolean;
+  delete(id: number): boolean;
+  getByStatus(status: TaskStatus, scope?: string): Task[];
+  getByScope(scope: string): Task[];
+  getByType(type: TaskType): Task[];
+  getNext(type?: TaskType): Task | null;
+  getOverview(): OverviewEntry[];
+  getRelated(id: number): RelatedResult | null;
+  getScopes(): ScopeEntry[];
+  getById(id: number): Task | null;
+  close(): void;
+};
+
 // ── Store factory ─────────────────────────────────────────────────────────────
-export function createStore(dbPath) {
+export function createStore(dbPath: string): Store {
   if (!dbPath) throw new Error('createStore: dbPath is required');
 
   const db = new Database(dbPath);
@@ -211,7 +316,6 @@ export function createStore(dbPath) {
   const stmtInsertTask      = db.prepare(
     'INSERT INTO tasks (id, title, type, status, priority, scope, summary, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   );
-  const stmtUpdateTaskTouch = db.prepare(`UPDATE tasks SET updated_at = datetime('now') WHERE id = ?`);
   const stmtSelectTask      = db.prepare('SELECT * FROM tasks WHERE id = ?');
   const stmtSelectAllTasks  = db.prepare('SELECT * FROM tasks');
   const stmtSelectAllIds    = db.prepare('SELECT id FROM tasks ORDER BY id');
@@ -222,7 +326,6 @@ export function createStore(dbPath) {
     'INSERT OR REPLACE INTO refs (from_id, to_id, relation, non_canonical) VALUES (?, ?, ?, ?)'
   );
   const stmtDeleteRefsFrom  = db.prepare('DELETE FROM refs WHERE from_id = ?');
-  const stmtDeleteOneRef    = db.prepare('DELETE FROM refs WHERE from_id = ? AND to_id = ? AND relation = ?');
   const stmtUpdateRefRelation = db.prepare(
     'UPDATE refs SET relation = ? WHERE from_id = ? AND to_id = ?'
   );
@@ -234,26 +337,27 @@ export function createStore(dbPath) {
   `);
   const stmtSetTaskStatus   = db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`);
 
-  function getCounter() {
-    return parseInt(stmtGetCounter.get().value, 10);
+  function getCounter(): number {
+    const row = stmtGetCounter.get() as { value: string } | undefined;
+    return parseInt(row?.value ?? '0', 10);
   }
-  function setCounter(n) { stmtSetCounter.run(String(n)); }
+  function setCounter(n: number): void { stmtSetCounter.run(String(n)); }
 
-  function readRefsFor(id) {
-    return stmtRefsFrom.all(id).map(refRowToObj);
+  function readRefsFor(id: number): Ref[] {
+    return (stmtRefsFrom.all(id) as RefRow[]).map(refRowToObj);
   }
 
-  function readTask(id) {
-    const row = stmtSelectTask.get(id);
+  function readTask(id: number): Task | null {
+    const row = stmtSelectTask.get(id) as TaskRow | undefined;
     if (!row) return null;
     return rowToTask(row, readRefsFor(id));
   }
 
-  function readAllTasks() {
-    const rows = stmtSelectAllTasks.all();
+  function readAllTasks(): Task[] {
+    const rows = stmtSelectAllTasks.all() as TaskRow[];
     if (rows.length === 0) return [];
-    const refsByFrom = new Map();
-    for (const r of stmtRefsAll.all()) {
+    const refsByFrom = new Map<number, Ref[]>();
+    for (const r of stmtRefsAll.all() as RefRow[]) {
       const arr = refsByFrom.get(r.from_id) ?? [];
       arr.push(refRowToObj(r));
       refsByFrom.set(r.from_id, arr);
@@ -261,14 +365,14 @@ export function createStore(dbPath) {
     return rows.map((row) => rowToTask(row, refsByFrom.get(row.id) ?? []));
   }
 
-  function getValidIds() {
-    return new Set(stmtSelectAllIds.all().map((r) => r.id));
+  function getValidIds(): Set<number> {
+    return new Set((stmtSelectAllIds.all() as { id: number }[]).map((r) => r.id));
   }
 
   // Apply refs change for a single source task. Mirrors canonical refs and removes
   // mirrors when refs are removed/changed. Mutates the refs table; callers wrap
   // in a transaction.
-  function applyRefsImpl(sourceId, oldRefs, nextRefs) {
+  function applyRefsImpl(sourceId: number, oldRefs: Ref[], nextRefs: Ref[] | null | undefined): Ref[] {
     const validIds = getValidIds();
     const cleanedNext = (nextRefs ?? []).filter((r) => {
       if (r.id === sourceId) return false;
@@ -293,16 +397,16 @@ export function createStore(dbPath) {
     });
 
     for (const ref of added) {
-      const inverse = INVERSE[ref.relation] ?? ref.relation;
+      const inverse = INVERSE[ref.relation as string] ?? ref.relation;
       stmtInsertRef.run(ref.id, sourceId, inverse, 0);
     }
     for (const ref of removed) {
       // Remove only the specific mirror: the inverse relation we wrote when this ref was added.
-      const inverse = INVERSE[ref.relation] ?? ref.relation;
+      const inverse = INVERSE[ref.relation as string] ?? ref.relation;
       stmtDeleteMirror.run(ref.id, sourceId, inverse);
     }
     for (const ref of changed) {
-      const inverse = INVERSE[ref.relation] ?? ref.relation;
+      const inverse = INVERSE[ref.relation as string] ?? ref.relation;
       stmtUpdateRefRelation.run(inverse, ref.id, sourceId);
     }
 
@@ -310,7 +414,7 @@ export function createStore(dbPath) {
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
-  function load() {
+  function load(): LoadResult {
     const all = readAllTasks();
     const counter = getCounter();
     const active = all.filter((t) => t.status !== 'done');
@@ -318,7 +422,8 @@ export function createStore(dbPath) {
     return { counter, active, done };
   }
 
-  function add({ type, priority, title, description = '', scope, summary, refs, status = 'refinement' }) {
+  function add(input: AddInput): { id: number } {
+    const { type, priority, title, description = '', scope, summary, refs, status = 'refinement' } = input;
     const trimmedTitle = normalizeNewlines(String(title ?? '').trim());
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
 
@@ -343,15 +448,14 @@ export function createStore(dbPath) {
     })();
   }
 
-  function update(id, patch) {
+  function update(id: number, patch: UpdatePatch): { task: Task } | null {
     return db.transaction(() => {
-      const existing = stmtSelectTask.get(id);
+      const existing = stmtSelectTask.get(id) as TaskRow | undefined;
       if (!existing) return null;
 
       const next = {
         title: patch.title !== undefined ? normalizeNewlines(patch.title.trim()) : existing.title,
         type: patch.type ?? existing.type,
-        status: existing.status,
         priority: patch.priority ?? existing.priority,
         scope: patch.scope === null
           ? null
@@ -366,15 +470,16 @@ export function createStore(dbPath) {
 
       if (patch.refs !== undefined) {
         const oldRefs = readRefsFor(id);
-        const nextRefs = patch.refs === null || patch.refs.length === 0 ? [] : patch.refs;
+        const nextRefs: Ref[] = patch.refs === null || patch.refs.length === 0 ? [] : patch.refs;
         applyRefsImpl(id, oldRefs, nextRefs);
       }
 
-      return { task: readTask(id) };
+      const task = readTask(id);
+      return task ? { task } : null;
     })();
   }
 
-  function setStatus(id, status) {
+  function setStatus(id: number, status: TaskStatus): boolean {
     return db.transaction(() => {
       const existing = stmtSelectTask.get(id);
       if (!existing) return false;
@@ -383,7 +488,7 @@ export function createStore(dbPath) {
     })();
   }
 
-  function deleteTask(id) {
+  function deleteTask(id: number): boolean {
     return db.transaction(() => {
       const existing = stmtSelectTask.get(id);
       if (!existing) return false;
@@ -393,49 +498,49 @@ export function createStore(dbPath) {
     })();
   }
 
-  function getByStatus(status, scope) {
-    let rows;
+  function getByStatus(status: TaskStatus, scope?: string): Task[] {
+    let rows: TaskRow[];
     if (scope !== undefined) {
-      rows = db.prepare('SELECT * FROM tasks WHERE status = ? AND scope = ?').all(status, scope);
+      rows = db.prepare('SELECT * FROM tasks WHERE status = ? AND scope = ?').all(status, scope) as TaskRow[];
     } else {
-      rows = db.prepare('SELECT * FROM tasks WHERE status = ?').all(status);
+      rows = db.prepare('SELECT * FROM tasks WHERE status = ?').all(status) as TaskRow[];
     }
     const tasks = rows.map((row) => rowToTask(row, readRefsFor(row.id)));
     return sortByPriority(tasks);
   }
 
-  function getByScope(scope) {
-    const rows = db.prepare('SELECT * FROM tasks WHERE scope = ?').all(scope);
+  function getByScope(scope: string): Task[] {
+    const rows = db.prepare('SELECT * FROM tasks WHERE scope = ?').all(scope) as TaskRow[];
     const tasks = rows.map((row) => rowToTask(row, readRefsFor(row.id)));
     return sortByPriority(tasks);
   }
 
-  function getByType(type) {
-    const rows = db.prepare('SELECT * FROM tasks WHERE type = ?').all(type);
+  function getByType(type: TaskType): Task[] {
+    const rows = db.prepare('SELECT * FROM tasks WHERE type = ?').all(type) as TaskRow[];
     const tasks = rows.map((row) => rowToTask(row, readRefsFor(row.id)));
     return sortByPriority(tasks);
   }
 
-  function getNext(type) {
-    let rows;
+  function getNext(type?: TaskType): Task | null {
+    let rows: TaskRow[];
     if (type) {
       rows = db.prepare(`
         SELECT * FROM tasks
         WHERE status IN ('todo', 'in_progress', 'refinement')
         AND type = ?
-      `).all(type);
+      `).all(type) as TaskRow[];
     } else {
       rows = db.prepare(`
         SELECT * FROM tasks
         WHERE status IN ('todo', 'in_progress', 'refinement')
-      `).all();
+      `).all() as TaskRow[];
     }
     const tasks = rows.map((row) => rowToTask(row, readRefsFor(row.id)));
     const sorted = sortForNext(tasks);
     return sorted[0] ?? null;
   }
 
-  function getOverview() {
+  function getOverview(): OverviewEntry[] {
     const rows = db.prepare(`
       SELECT type,
              SUM(CASE WHEN status = 'refinement' THEN 1 ELSE 0 END) AS refinement,
@@ -443,34 +548,34 @@ export function createStore(dbPath) {
              SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done
       FROM tasks
       GROUP BY type
-    `).all();
+    `).all() as { type: TaskType; refinement: number; open: number; done: number }[];
     return ALL_TYPES
-      .map((type) => {
+      .map((type): OverviewEntry | null => {
         const r = rows.find((x) => x.type === type);
         return r ? { type, refinement: r.refinement, open: r.open, done: r.done } : null;
       })
-      .filter((o) => o !== null && (o.refinement + o.open + o.done > 0))
+      .filter((o): o is OverviewEntry => o !== null && (o.refinement + o.open + o.done > 0))
       .sort((a, b) => b.open - a.open);
   }
 
-  function getById(id) {
+  function getById(id: number): Task | null {
     return readTask(id);
   }
 
-  function getRelated(id) {
+  function getRelated(id: number): RelatedResult | null {
     const task = readTask(id);
     if (!task) return null;
 
     // Outbound = task's own refs (already on task.refs after readTask).
     const outbound = (task.refs ?? []).flatMap((ref) => {
       const t = readTask(ref.id);
-      return t ? [{ ...t, refRelation: ref.relation }] : [];
+      return t ? [{ ...t, refRelation: ref.relation as string }] : [];
     });
 
     // Inbound = other tasks pointing at this task.
     const inboundRefs = db.prepare(
       'SELECT from_id, relation FROM refs WHERE to_id = ? AND from_id != ?'
-    ).all(id, id);
+    ).all(id, id) as { from_id: number; relation: string }[];
     const inbound = inboundRefs.flatMap((r) => {
       const t = readTask(r.from_id);
       return t ? [{ ...t, refRelation: r.relation }] : [];
@@ -479,7 +584,7 @@ export function createStore(dbPath) {
     return { task, outbound, inbound };
   }
 
-  function getScopes() {
+  function getScopes(): ScopeEntry[] {
     const rows = db.prepare(`
       SELECT scope,
              COUNT(*) AS total,
@@ -487,7 +592,7 @@ export function createStore(dbPath) {
       FROM tasks
       WHERE scope IS NOT NULL
       GROUP BY scope
-    `).all();
+    `).all() as { scope: string; total: number; open: number }[];
     return rows
       .map((r) => ({ scope: r.scope, total: r.total, open: r.open }))
       .sort((a, b) => {
@@ -497,13 +602,13 @@ export function createStore(dbPath) {
       });
   }
 
-  function close() {
+  function close(): void {
     db.close();
   }
 
   return {
     db, // exposed for advanced cases; avoid using directly — prefer dataVersion() for polling
-    dataVersion: () => db.pragma('data_version', { simple: true }),
+    dataVersion: () => db.pragma('data_version', { simple: true }) as number,
     load,
     add,
     update,
@@ -521,9 +626,9 @@ export function createStore(dbPath) {
   };
 }
 
-// ── Pure helpers exported for tests / migrate.js ──────────────────────────────
+// ── Pure helpers exported for tests / migrate.ts ──────────────────────────────
 // Mutates allTasks in place — preserved for backward-compat with random-tools' vendor mirror.
-export function applyRefs(allTasks, sourceId, oldRefs, nextRefs) {
+export function applyRefs(allTasks: Task[], sourceId: number, oldRefs: Ref[] | undefined, nextRefs: Ref[] | undefined): Task[] {
   const validIds = new Set(allTasks.map((t) => t.id));
   const canonOld = (oldRefs ?? []).filter((r) => !r.nonCanonical);
   const canonNext = (nextRefs ?? []).filter((r) => {
@@ -551,7 +656,7 @@ export function applyRefs(allTasks, sourceId, oldRefs, nextRefs) {
 
     for (const ref of added) {
       if (task.id !== ref.id) continue;
-      const inverse = INVERSE[ref.relation] ?? ref.relation;
+      const inverse = INVERSE[ref.relation as string] ?? ref.relation;
       if (!task.refs) task.refs = [];
       if (!task.refs.some((r) => r.id === sourceId)) {
         task.refs.push({ id: sourceId, relation: inverse });
@@ -564,14 +669,14 @@ export function applyRefs(allTasks, sourceId, oldRefs, nextRefs) {
     }
     for (const ref of changed) {
       if (task.id !== ref.id || !task.refs) continue;
-      const inverse = INVERSE[ref.relation] ?? ref.relation;
+      const inverse = INVERSE[ref.relation as string] ?? ref.relation;
       task.refs = task.refs.map((r) => (r.id === sourceId ? { ...r, relation: inverse } : r));
     }
   }
   return allTasks;
 }
 
-export function cascadeDelete(allTasks, deletedId) {
+export function cascadeDelete(allTasks: Task[], deletedId: number): Task[] {
   for (const task of allTasks) {
     if (!task.refs) continue;
     task.refs = task.refs.filter((r) => r.id !== deletedId);

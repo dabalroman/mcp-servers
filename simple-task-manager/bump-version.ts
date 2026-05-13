@@ -4,9 +4,9 @@ import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
 
-const versionFile = join(dirname(fileURLToPath(import.meta.url)), 'version.js');
+const versionFile = join(dirname(fileURLToPath(import.meta.url)), 'version.ts');
 
-let seq;
+let seq: string;
 const now = new Date();
 const curYear = String(now.getFullYear());
 const curMonth = String(now.getMonth() + 1).padStart(2, '0');
@@ -14,7 +14,7 @@ const curMonth = String(now.getMonth() + 1).padStart(2, '0');
 try {
   const content = readFileSync(versionFile, 'utf8');
   const m = content.match(/VERSION = '(\d{4})-(\d{2})-(\d{3})'/);
-  if (m && m[1] === curYear && m[2] === curMonth) {
+  if (m && m[1] === curYear && m[2] === curMonth && m[3]) {
     seq = String(parseInt(m[3], 10) + 1).padStart(3, '0');
   } else {
     seq = '001';

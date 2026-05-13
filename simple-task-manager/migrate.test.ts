@@ -6,10 +6,10 @@ import { tmpdir } from 'node:os';
 import { migrateToSqlite, parseLegacyMarkdown } from './migrate.js';
 import { createStore } from './tasks.js';
 
-let dir;
-let legacyTasks;
-let legacyDone;
-let outputDb;
+let dir: string;
+let legacyTasks: string;
+let legacyDone: string;
+let outputDb: string;
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'mcp-migrate-test-'));
@@ -42,10 +42,10 @@ describe('parseLegacyMarkdown', () => {
     assert.equal(counter, 5);
     assert.equal(tasks.length, 2);
     const five = tasks.find((t) => t.id === 5);
-    assert.equal(five.title, 'Hello');
-    assert.equal(five.scope, 'web');
-    assert.deepEqual(five.refs, [{ id: 2, relation: 'blocks' }]);
-    assert.equal(five.description, 'Body line.');
+    assert.equal(five?.title, 'Hello');
+    assert.equal(five?.scope, 'web');
+    assert.deepEqual(five?.refs, [{ id: 2, relation: 'blocks' }]);
+    assert.equal(five?.description, 'Body line.');
   });
 
   test('preserves non-canonical relations', () => {
@@ -58,8 +58,8 @@ describe('parseLegacyMarkdown', () => {
       '',
     ].join('\n');
     const { tasks } = parseLegacyMarkdown(md);
-    assert.equal(tasks[0].refs[0].nonCanonical, true);
-    assert.equal(tasks[0].refs[0].relation, 'see also');
+    assert.equal(tasks[0]?.refs?.[0]?.nonCanonical, true);
+    assert.equal(tasks[0]?.refs?.[0]?.relation, 'see also');
   });
 });
 
@@ -88,9 +88,9 @@ describe('migrateToSqlite', () => {
     assert.equal(result.doneCount, 1);
 
     const store = createStore(outputDb);
-    assert.equal(store.getById(3).title, 'Active');
-    assert.equal(store.getById(2).title, 'Archived');
-    assert.equal(store.getById(2).status, 'done');
+    assert.equal(store.getById(3)?.title, 'Active');
+    assert.equal(store.getById(2)?.title, 'Archived');
+    assert.equal(store.getById(2)?.status, 'done');
     store.close();
   });
 
@@ -105,7 +105,7 @@ describe('migrateToSqlite', () => {
   test('refuses to overwrite an existing output db', () => {
     writeFileSync(legacyTasks, '# Counter: 0\n');
     writeFileSync(legacyDone, '# Done tasks\n');
-    writeFileSync(outputDb, ''); // pre-existing
+    writeFileSync(outputDb, '');
     assert.throws(() => migrateToSqlite({ legacyTasks, legacyDone, outputDb }), /already exists/);
   });
 
@@ -124,8 +124,7 @@ describe('migrateToSqlite', () => {
     writeFileSync(legacyDone, '# Done tasks\n');
     migrateToSqlite({ legacyTasks, legacyDone, outputDb });
     const store = createStore(outputDb);
-    // The migrate inserts only authored refs (not mirrors). Check the canonical ref survived.
-    assert.deepEqual(store.getById(2).refs, [{ id: 1, relation: 'blocks' }]);
+    assert.deepEqual(store.getById(2)?.refs, [{ id: 1, relation: 'blocks' }]);
     store.close();
   });
 
@@ -147,8 +146,6 @@ describe('migrateToSqlite', () => {
   });
 });
 
-// Reference legacy fixture round-trip — keeps a sanity check that .bak content
-// is the verbatim input.
 describe('backup contents', () => {
   test('.bak matches the original byte-for-byte', () => {
     const content = '# Counter: 0\n# Done tasks\n';

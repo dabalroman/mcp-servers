@@ -23,10 +23,14 @@ cd ~/.claude/mcp-servers/simple-task-manager
 npm install
 ```
 
+`npm install` builds the package automatically via the `prepare` script — `dist/server.js` is the production entrypoint.
+
+**Upgrading from a pre-TypeScript install?** Re-run the installer in each project (see Step 3) — Claude will refresh the stale `args` path in `.mcp.json` from `server.js` to `dist/server.js`.
+
 ### Step 2 — One-time global setup
 
 ```sh
-node ~/.claude/mcp-servers/simple-task-manager/install.js --global
+npx tsx ~/.claude/mcp-servers/simple-task-manager/install.ts --global
 ```
 
 This adds one line to `~/.claude/CLAUDE.md` so Claude knows how to register the MCP in any project.
@@ -130,14 +134,14 @@ Journal mode is `DELETE` (the SQLite default). WAL was tried first but its mmap'
 ### Migrating from the legacy markdown format
 
 ```sh
-node ~/.claude/mcp-servers/simple-task-manager/migrate.js \
+npx tsx ~/.claude/mcp-servers/simple-task-manager/migrate.ts \
   /path/to/TASKS.md /path/to/TASKS_DONE.md /path/to/tasks.db
 ```
 
 Behaviour:
 - Refuses to run if `tasks.db` already exists — rename or remove it first.
 - Writes `.bak` copies next to both legacy files before reading.
-- Parses the legacy `# id title` / `## type | status | priority` / `$scope:` / `$ref:` format using a parser bundled inside `migrate.js` (the main `tasks.js` no longer carries legacy code).
+- Parses the legacy `# id title` / `## type | status | priority` / `$scope:` / `$ref:` format using a parser bundled inside `migrate.ts` (the main `tasks.ts` no longer carries legacy code).
 
 **Types**: `bug` · `feature` · `idea` · `tool` · `other`  
 **Priorities**: `low` · `medium` · `high` · `critical`  
@@ -205,31 +209,38 @@ Node.js isn't installed or isn't in PATH. Install from [nodejs.org](https://node
 Check that the `TASKS_DB` path in `.mcp.json` is absolute and points to a real location (not a placeholder).
 
 **The server fails to start**  
-Run `node server.js` directly from the `simple-task-manager` directory and read the error. The most common cause is a missing or wrong `TASKS_DB` environment variable. If you still have legacy `TASKS_FILE` / `TASKS_DONE_FILE` set, the server emits a one-time warning suggesting the rename and refuses to start without `TASKS_DB`.
+Run `node dist/server.js` directly from the `simple-task-manager` directory and read the error. If `dist/` doesn't exist, run `npm install` (or `npm run build`) first — `dist/` is generated, not committed. The most common cause is a missing or wrong `TASKS_DB` environment variable. If you still have legacy `TASKS_FILE` / `TASKS_DONE_FILE` set, the server emits a one-time warning suggesting the rename and refuses to start without `TASKS_DB`.
 
 ---
 
 ## Development
 
+The package is **TypeScript** (strict mode). Source files live at the package root; the production build is compiled to `dist/`.
+
 ```sh
-npm test
-npm start     # Claude Code does this automatically via .mcp.json
+npm install      # builds dist/ via prepare; installs the pre-commit hook
+npm run build    # tsc → dist/
+npm run typecheck
+npm test         # node --import tsx --test on *.test.ts (no precompile)
+npm run verify   # typecheck + test + build
+npm start        # node dist/server.js — Claude Code does this automatically via .mcp.json
 ```
 
 ### File layout
 
-- `server.js` — bootstrap only (env validation, `createStore`, `new McpServer`, `registerTools`, shutdown handlers, transport).
-- `instructions.js` — the `INSTRUCTIONS` string surfaced to MCP clients on connect.
-- `tasks.js` — SQLite storage layer (schema, migrations, queries). Always returns complete task objects.
-- `mcp/shared.js` — `text` / `errorText`, `toListTask` (description-stripping for list responses), `allIdsSorted`, `notFoundError`, zod `refsSchema`.
-- `mcp/queryHandlers.js` — pure `(store, args)` handlers for the 9 read tools.
-- `mcp/mutationHandlers.js` — pure handlers for `add`, `update`, `setStatus`, `delete`.
-- `mcp/registerTools.js` — `registerTools(server, store)` declares each tool's name, description, and zod input schema, then wires it to its handler.
+- `server.ts` — bootstrap only (env validation, `createStore`, `new McpServer`, `registerTools`, shutdown handlers, transport).
+- `instructions.ts` — the `INSTRUCTIONS` string surfaced to MCP clients on connect.
+- `tasks.ts` — SQLite storage layer (schema, migrations, queries) and all exported types (`Task`, `Ref`, `Store`, `TaskType`, `TaskStatus`, `TaskPriority`, `AddInput`, `UpdatePatch`). Always returns complete task objects.
+- `mcp/shared.ts` — `text` / `errorText`, `toListTask` (description-stripping for list responses), `allIdsSorted`, `notFoundError`, `MCPContent` type, zod `refsSchema`.
+- `mcp/queryHandlers.ts` — pure `(store, args)` handlers for the 9 read tools.
+- `mcp/mutationHandlers.ts` — pure handlers for `add`, `update`, `setStatus`, `delete`.
+- `mcp/registerTools.ts` — `registerTools(server, store)` declares each tool's name, description, and zod input schema, then wires it to its handler.
 
-Adding a new tool: write the handler in `mcp/{query,mutation}Handlers.js`, declare it in `mcp/registerTools.js`, and test it in `server.test.js` by importing the handler directly.
+Adding a new tool: write the handler in `mcp/{query,mutation}Handlers.ts`, declare it in `mcp/registerTools.ts`, and test it in `server.test.ts` by importing the handler directly.
 
-The `prepare` script installs a pre-commit hook that:
-1. Bumps the server version in `version.js` using CalVer (`YYYY-MM-NNN`, resetting `NNN` to `001` on the first commit of a new month), then `git add`s the file so the bump is included in the commit.
+The `prepare` script (auto-run on `npm install`) installs a pre-commit hook that:
+1. Bumps the server version in `version.ts` using CalVer (`YYYY-MM-NNN`, resetting `NNN` to `001` on the first commit of a new month), then `git add`s the file so the bump is included in the commit.
 2. Runs `npm test`.
+3. Runs `npm run build` so `dist/` reflects the committed source.
 
 The version is exposed to MCP clients under `serverInfo.version` in the `initialize` handshake.
