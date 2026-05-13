@@ -28,8 +28,11 @@ app.get('*', (req, res) => {
 
 const server = app.listen(port, () => {
   const url = `http://localhost:${port}`;
-  // Logs go to stderr — when spawned by the MCP, stdout is reserved for JSON-RPC.
-  process.stderr.write(`[task-manager-ui] listening on ${url} (db: ${TASKS_DB})\n`);
+  // The MCP parent pipes our stdout/stderr separately (its own JSON-RPC
+  // stdout is on a different fd) and forwards each line as an MCP logging
+  // notification — stdout = info, stderr = warning. So use stdout for the
+  // normal "listening" line; reserve stderr for real errors.
+  process.stdout.write(`[task-manager-ui] listening on ${url} (db: ${TASKS_DB})\n`);
   if (process.env.AUTO_OPEN_TASK_UI === '1') {
     openBrowser(url);
   }

@@ -31,6 +31,10 @@ After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.t
 
 `server.test.ts` imports the real handlers directly — there is no copied handler logic in tests. Adding a new handler: add it to `mcp/{query,mutation}Handlers.ts`, register it in `mcp/registerTools.ts`, write tests against the imported handler in `server.test.ts`.
 
+## tsconfig — excluding the UI sub-package
+
+`tsconfig.json` and `tsconfig.test.json` both list `task-manager-ui` in `exclude`. Without that, the MCP's `tsc` walks into the sub-package and tries to compile its `@/*`-aliased / DOM-typed sources with the MCP's NodeNext config, which fails. The sub-package has its own tsconfig (bundler resolution, JSX, DOM lib) and runs its own typecheck in its own `npm run verify`. Keep these worlds separate.
+
 ## Toolchain
 
 - TypeScript 5.6+, strict + `noUncheckedIndexedAccess` + `noImplicitOverride` + `noFallthroughCasesInSwitch`. `tsconfig.json` excludes tests from emit; `tsconfig.test.json` extends it and includes them for typecheck only.

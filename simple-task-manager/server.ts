@@ -9,11 +9,30 @@ import { createStore } from './tasks.js';
 import { INSTRUCTIONS } from './instructions.js';
 import { registerTools } from './mcp/registerTools.js';
 
+// Buffered log queue — anything emitted before the JSON-RPC transport is
+// connected is held here and flushed once `server.connect()` resolves. All
+// runtime messages (startup warnings, UI child stdout/stderr, spawn errors)
+// go through this path so the MCP's own stderr stays empty — otherwise
+// Claude Code surfaces it as a red "MCP error" indicator.
+type LogLevel = 'debug' | 'info' | 'notice' | 'warning' | 'error';
+const logQueue: Array<{ level: LogLevel; data: string }> = [];
+let logFlushed = false;
+function logToClient(level: LogLevel, data: string): void {
+  const trimmed = data.replace(/\s+$/, '');
+  if (!trimmed) return;
+  if (!logFlushed) {
+    logQueue.push({ level, data: trimmed });
+    return;
+  }
+  void server.server.sendLoggingMessage({ level, data: trimmed }).catch(() => { /* ignore */ });
+}
+
 if (process.env.TASKS_FILE || process.env.TASKS_DONE_FILE) {
-  process.stderr.write(
-    '[simple-task-manager] WARNING: TASKS_FILE / TASKS_DONE_FILE are no longer used. ' +
+  logToClient(
+    'warning',
+    '[simple-task-manager] TASKS_FILE / TASKS_DONE_FILE are no longer used. ' +
     'Set TASKS_DB to the path of the SQLite database (e.g. /abs/path/tasks.db). ' +
-    'Run `node migrate.js <legacy-tasks.md> <legacy-tasks_done.md> <output.db>` to migrate.\n'
+    'Run `node migrate.js <legacy-tasks.md> <legacy-tasks_done.md> <output.db>` to migrate.'
   );
 }
 
@@ -28,7 +47,7 @@ const store = createStore(TASKS_DB);
 
 const server = new McpServer(
   { name: 'simple-task-manager', version: VERSION },
-  { instructions: INSTRUCTIONS }
+  { instructions: INSTRUCTIONS, capabilities: { logging: {} } }
 );
 
 registerTools(server, store);
@@ -60,10 +79,28 @@ const uiPkgDir = uiCandidates.find((p) => existsSync(resolve(p, 'server.ts'))) ?
 const uiServerEntry = resolve(uiPkgDir, 'server.ts');
 let uiChild: ChildProcess | null = null;
 
+function pipeChildLines(
+  stream: NodeJS.ReadableStream | null | undefined,
+  level: LogLevel,
+): void {
+  if (!stream) return;
+  let buf = '';
+  stream.on('data', (chunk: Buffer) => {
+    buf += chunk.toString('utf8');
+    let nl: number;
+    while ((nl = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, nl);
+      buf = buf.slice(nl + 1);
+      if (line.length) logToClient(level, line);
+    }
+  });
+  stream.on('end', () => { if (buf.length) logToClient(level, buf); });
+}
+
 if (process.env.TASK_UI_DISABLE === '1') {
-  process.stderr.write('[simple-task-manager] task-manager-ui spawn disabled via TASK_UI_DISABLE=1\n');
+  logToClient('info', '[simple-task-manager] task-manager-ui spawn disabled via TASK_UI_DISABLE=1');
 } else if (!existsSync(uiServerEntry)) {
-  process.stderr.write(`[simple-task-manager] task-manager-ui not found at ${uiPkgDir} — UI will not be available\n`);
+  logToClient('warning', `[simple-task-manager] task-manager-ui not found at ${uiPkgDir} — UI will not be available`);
 } else {
   try {
     uiChild = spawn(process.execPath, ['--import', 'tsx', uiServerEntry], {
@@ -72,14 +109,14 @@ if (process.env.TASK_UI_DISABLE === '1') {
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
     });
-    uiChild.stdout?.on('data', (b: Buffer) => { process.stderr.write(b); });
-    uiChild.stderr?.on('data', (b: Buffer) => { process.stderr.write(b); });
+    pipeChildLines(uiChild.stdout, 'info');
+    pipeChildLines(uiChild.stderr, 'warning');
     uiChild.on('exit', (code, signal) => {
-      process.stderr.write(`[simple-task-manager] task-manager-ui exited (code=${code} signal=${signal})\n`);
+      logToClient('warning', `[simple-task-manager] task-manager-ui exited (code=${code} signal=${signal})`);
       uiChild = null;
     });
   } catch (err) {
-    process.stderr.write(`[simple-task-manager] failed to spawn task-manager-ui: ${String(err)}\n`);
+    logToClient('error', `[simple-task-manager] failed to spawn task-manager-ui: ${String(err)}`);
     uiChild = null;
   }
 }
@@ -96,3 +133,8 @@ process.on('exit',    () => { killUi(); try { store.close(); } catch { /* ignore
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+logFlushed = true;
+for (const entry of logQueue.splice(0)) {
+  void server.server.sendLoggingMessage(entry).catch(() => { /* ignore */ });
+}
