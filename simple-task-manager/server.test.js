@@ -1,11 +1,11 @@
 /**
  * server.test.js — handler-level tests for the simple-task-manager MCP server.
  *
- * server.js cannot be imported directly because it has top-level side-effects
- * (reads TASKS_DB env var, throws if absent, connects a StdioServerTransport).
- * Instead, we instantiate the store directly and replicate the handler bodies
- * verbatim from server.js — the handlers are thin wrappers and this approach
- * lets us test the observable behaviour without mocking the MCP SDK.
+ * server.js itself is bootstrap-only and cannot be imported directly because it
+ * has top-level side-effects (reads TASKS_DB, connects a StdioServerTransport).
+ * The handlers it wires up are pure (store, args) => MCPContent fns in
+ * mcp/queryHandlers.js and mcp/mutationHandlers.js — we import and exercise
+ * those directly here, so the tests cover the real production code path.
  */
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
@@ -13,100 +13,22 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createStore, RELATIONS } from './tasks.js';
-
-// ── Helpers that mirror server.js exactly ────────────────────────────────────
-const text      = (obj) => ({ content: [{ type: 'text', text: JSON.stringify(obj) }] });
-const errorText = (obj) => ({ content: [{ type: 'text', text: JSON.stringify(obj) }], isError: true });
-
-function toListTask(task) {
-  if (!task.summary) return task;
-  const { description: _desc, ...rest } = task;
-  return rest;
-}
-
-function allIdsSorted(store) {
-  const { active, done } = store.load();
-  return [...active.map((t) => t.id), ...done.map((t) => t.id)].sort((a, b) => a - b);
-}
-
-// Handler implementations copied from server.js (unchanged)
-async function handleAdd(store, args) {
-  const { type, priority, title, description, scope, refs, status } = args;
-  try {
-    const { id } = store.add({ type, priority, title, description, scope, refs, status });
-    return text({ id });
-  } catch (err) {
-    return errorText({ error: err.message });
-  }
-}
-
-async function handleGetById(store, { id }) {
-  const task = store.getById(id);
-  if (!task) {
-    return errorText({ error: `Task #${id} not found. Valid IDs: ${allIdsSorted(store).join(', ') || 'none'}` });
-  }
-  return text({ task });
-}
-
-async function handleSetStatus(store, { id, status }) {
-  const ok = store.setStatus(id, status);
-  if (!ok) {
-    return errorText({ error: `Task #${id} not found. Valid IDs are: ${allIdsSorted(store).join(', ') || 'none'}` });
-  }
-  const result = { success: true };
-  if (status === 'done') {
-    result.knowledgeReminder = 'Task closed. Before moving on: (1) identify non-obvious decisions, gotchas, conventions, or architecture changes from this task; (2) update the closest relevant CLAUDE.md with anything genuinely new — keep entries terse and deduped; (3) prune or correct any entries now stale or contradicted. Skip if nothing worth capturing.';
-  }
-  return text(result);
-}
-
-async function handleDelete(store, { id }) {
-  const ok = store.delete(id);
-  if (!ok) {
-    return errorText({ error: `Task #${id} not found. Valid IDs are: ${allIdsSorted(store).join(', ') || 'none'}` });
-  }
-  return text({ success: true });
-}
-
-async function handleGetAll(store) {
-  const allTypes = ['bug', 'feature', 'idea', 'tool', 'other'];
-  const grouped = {};
-  for (const type of allTypes) {
-    const ofType = store.getByType(type).filter((t) => t.status !== 'done').map(toListTask);
-    if (ofType.length > 0) grouped[type] = ofType;
-  }
-  return text({ tasks: grouped });
-}
-
-async function handleGetByStatus(store, { status, scope }) {
-  return text({ tasks: store.getByStatus(status, scope).map(toListTask) });
-}
-
-async function handleGetByScope(store, { scope }) {
-  return text({ scope, tasks: store.getByScope(scope).map(toListTask) });
-}
-
-async function handleGetByType(store, { type }) {
-  return text({ tasks: store.getByType(type).map(toListTask) });
-}
-
-async function handleGetNext(store, { type } = {}) {
-  const task = store.getNext(type);
-  return text({ task: task ? toListTask(task) : null });
-}
-
-async function handleGetRelated(store, { id }) {
-  const result = store.getRelated(id);
-  if (!result) {
-    return errorText({ error: `Task #${id} not found. Valid IDs: ${allIdsSorted(store).join(', ') || 'none'}` });
-  }
-  return text({
-    task: result.task,
-    outbound: result.outbound.map((t) => ({ ...toListTask(t), refRelation: t.refRelation })),
-    inbound:  result.inbound.map((t)  => ({ ...toListTask(t), refRelation: t.refRelation })),
-  });
-}
+import { createStore } from './tasks.js';
+import {
+  handleGetByType,
+  handleGetNext,
+  handleGetAll,
+  handleGetById,
+  handleGetByScope,
+  handleGetRelated,
+  handleGetByStatus,
+} from './mcp/queryHandlers.js';
+import {
+  handleAdd,
+  handleUpdate,
+  handleSetStatus,
+  handleDelete,
+} from './mcp/mutationHandlers.js';
 
 // ── Test infrastructure ───────────────────────────────────────────────────────
 let dir;
@@ -198,7 +120,7 @@ describe('setStatus handler — knowledgeReminder', () => {
   });
 
   test('setting status to todo does NOT include knowledgeReminder', async () => {
-    const { id } = addTask();
+    const { id } = addTask({ summary: 'gist' });
     const resp = await handleSetStatus(store, { id, status: 'todo' });
     const payload = decode(resp);
     assert.ok(payload.success);
@@ -301,7 +223,7 @@ describe('list-mode stripping (server layer)', () => {
 
   test('getNext strips description when summary present', async () => {
     addWithSummary({ type: 'bug', priority: 'high', status: 'todo' });
-    const { task } = decode(await handleGetNext(store));
+    const { task } = decode(await handleGetNext(store, {}));
     assert.equal(task.summary, 'Short gist.');
     assert.equal(task.description, undefined);
   });
@@ -348,41 +270,10 @@ describe('delete handler', () => {
   });
 });
 
-// ── Summary enforcement handlers (mirror server.js logic) ────────────────────
-async function handleSetStatusWithSummaryCheck(store, { id, status }) {
-  if (status === 'todo') {
-    const task = store.getById(id);
-    if (task && task.status === 'refinement' && !task.summary) {
-      return errorText({ error: `Task #${id} must have a summary before being promoted to todo. Call update({ id: ${id}, summary: "2–3 line gist" }) first, then retry setStatus.` });
-    }
-  }
-  const ok = store.setStatus(id, status);
-  if (!ok) {
-    return errorText({ error: `Task #${id} not found. Valid IDs are: ${allIdsSorted(store).join(', ') || 'none'}` });
-  }
-  const result = { success: true };
-  if (status === 'done') {
-    result.knowledgeReminder = 'Task closed. Before moving on: (1) identify non-obvious decisions, gotchas, conventions, or architecture changes from this task; (2) update the closest relevant CLAUDE.md with anything genuinely new — keep entries terse and deduped; (3) prune or correct any entries now stale or contradicted. Skip if nothing worth capturing.';
-  }
-  return text(result);
-}
-
-async function handleUpdate(store, { id, ...patch }) {
-  const result = store.update(id, patch);
-  if (!result) {
-    return errorText({ error: `Task #${id} not found. Valid IDs are: ${allIdsSorted(store).join(', ') || 'none'}` });
-  }
-  const response = { success: true, task: result.task };
-  if (result.task.status === 'refinement' && !result.task.summary) {
-    response.summaryReminder = 'This task is in refinement. Before promoting to todo, add a 2–3 line summary via update({ id, summary: "..." }).';
-  }
-  return text(response);
-}
-
 describe('setStatus handler — summary enforcement', () => {
   test('refinement→todo without summary returns isError', async () => {
     const { id } = addTask({ status: 'refinement' });
-    const resp = await handleSetStatusWithSummaryCheck(store, { id, status: 'todo' });
+    const resp = await handleSetStatus(store, { id, status: 'todo' });
     assert.ok(resp.isError, 'should be an error');
     assert.ok(decode(resp).error.includes('summary'), 'error should mention summary');
     assert.ok(decode(resp).error.includes(String(id)));
@@ -391,7 +282,7 @@ describe('setStatus handler — summary enforcement', () => {
   test('refinement→todo WITH summary succeeds', async () => {
     const { id } = addTask({ status: 'refinement' });
     store.update(id, { summary: 'A proper gist.' });
-    const resp = await handleSetStatusWithSummaryCheck(store, { id, status: 'todo' });
+    const resp = await handleSetStatus(store, { id, status: 'todo' });
     assert.ok(!resp.isError);
     assert.equal(decode(resp).success, true);
   });
@@ -399,7 +290,7 @@ describe('setStatus handler — summary enforcement', () => {
   test('todo→done does NOT require summary', async () => {
     const { id } = addTask({ status: 'refinement' });
     store.setStatus(id, 'todo');
-    const resp = await handleSetStatusWithSummaryCheck(store, { id, status: 'done' });
+    const resp = await handleSetStatus(store, { id, status: 'done' });
     assert.ok(!resp.isError);
     assert.equal(decode(resp).success, true);
   });
@@ -407,7 +298,7 @@ describe('setStatus handler — summary enforcement', () => {
   test('in_progress→todo is not blocked by summary check', async () => {
     const { id } = addTask({ status: 'refinement' });
     store.setStatus(id, 'in_progress');
-    const resp = await handleSetStatusWithSummaryCheck(store, { id, status: 'todo' });
+    const resp = await handleSetStatus(store, { id, status: 'todo' });
     assert.ok(!resp.isError, 'in_progress→todo should not be blocked');
   });
 });

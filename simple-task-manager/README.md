@@ -216,6 +216,18 @@ npm test
 npm start     # Claude Code does this automatically via .mcp.json
 ```
 
+### File layout
+
+- `server.js` — bootstrap only (env validation, `createStore`, `new McpServer`, `registerTools`, shutdown handlers, transport).
+- `instructions.js` — the `INSTRUCTIONS` string surfaced to MCP clients on connect.
+- `tasks.js` — SQLite storage layer (schema, migrations, queries). Always returns complete task objects.
+- `mcp/shared.js` — `text` / `errorText`, `toListTask` (description-stripping for list responses), `allIdsSorted`, `notFoundError`, zod `refsSchema`.
+- `mcp/queryHandlers.js` — pure `(store, args)` handlers for the 9 read tools.
+- `mcp/mutationHandlers.js` — pure handlers for `add`, `update`, `setStatus`, `delete`.
+- `mcp/registerTools.js` — `registerTools(server, store)` declares each tool's name, description, and zod input schema, then wires it to its handler.
+
+Adding a new tool: write the handler in `mcp/{query,mutation}Handlers.js`, declare it in `mcp/registerTools.js`, and test it in `server.test.js` by importing the handler directly.
+
 The `prepare` script installs a pre-commit hook that:
 1. Bumps the server version in `version.js` using CalVer (`YYYY-MM-NNN`, resetting `NNN` to `001` on the first commit of a new month), then `git add`s the file so the bump is included in the commit.
 2. Runs `npm test`.
