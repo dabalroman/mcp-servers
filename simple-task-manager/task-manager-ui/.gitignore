@@ -1,0 +1,5 @@
+node_modules/
+*.log
+# dist/ is intentionally tracked — it contains the Vite-bundled client assets
+# that the Express server hands to the browser. The pre-commit hook rebuilds
+# and stages it before every commit so the tree always has a fresh bundle.

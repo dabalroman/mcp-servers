@@ -21,7 +21,7 @@ After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.t
 
 ## File layout
 
-- `server.ts` — bootstrap only: env validation, `createStore`, `new McpServer`, `registerTools`, shutdown handlers, `StdioServerTransport`.
+- `server.ts` — bootstrap only: env validation, `createStore`, `new McpServer`, `registerTools`, shutdown handlers, `StdioServerTransport`. Also spawns the sibling `task-manager-ui` web app as a child process (see §task-manager-ui spawn below).
 - `instructions.ts` — the `INSTRUCTIONS` string surfaced to MCP clients on connect. Edit this when changing user-facing behavioural rules; the prose is reflected in the agent's system prompt.
 - `tasks.ts` — SQLite storage layer plus all exported types (`Task`, `Ref`, `Store`, `TaskType`, `TaskStatus`, `TaskPriority`, `AddInput`, `UpdatePatch`, `LoadResult`, `RelatedResult`, `OverviewEntry`, `ScopeEntry`).
 - `mcp/shared.ts` — `text` / `errorText`, `toListTask` (list-mode description stripping), `allIdsSorted`, `notFoundError`, the `MCPContent` type, and the zod `refsSchema`.
@@ -56,13 +56,11 @@ Tasks live in a single SQLite database. The path comes from the `TASKS_DB` env v
 1. Create a new file in `migrations/` named `YYYYMMDDHHMMSS_kebab-slug.ts`.
 2. Export `export const name = 'YYYYMMDDHHMMSS_kebab-slug'` (must match filename stem exactly — the runner enforces this).
 3. Export `export function up(db: Database): void` with the forward-only SQL.
-4. Add the migration name to `EXPECTED_MIGRATIONS` in `random-tools/src/server/vendor/tasks.ts` **in the same commit**.
-5. Update `random-tools/src/test/bootstrapTaskDb.ts` to apply the new SQL so tests keep working.
-6. Run `npm run verify` in both repos before committing.
+4. Run `npm run verify` in both `simple-task-manager` and `task-manager-ui` before committing.
 
 The runner automatically detects new files, sorts them by name (chronological), and applies any not yet in `schema_migrations`. It rejects DBs that have applied names not found on disk (downgrade guard).
 
-The vendor mirror in `random-tools/src/server/vendor/tasks.ts` follows the same schema. Update both files together when the schema changes.
+The sibling `task-manager-ui` imports `tasks.ts` directly via a relative path — no vendor mirror, no `EXPECTED_MIGRATIONS` list to update. Schema changes live in this package only.
 
 ## Summary field — architecture
 
@@ -74,8 +72,23 @@ The `summary` column exists in the schema (version 1). The token-saving behaviou
 - `handleSetStatus` blocks `refinement → todo` if the task has no summary. `handleUpdate` on a refinement task without summary returns a `summaryReminder` field.
 - The refine skill (`~/.claude/commands/refine.md`) generates the summary as step 3b before promoting.
 
-## Public surface parity — tasks.ts ↔ vendor/tasks.ts
+## task-manager-ui spawn
 
-`tasks.ts` and `random-tools/src/server/vendor/tasks.ts` must always export the same public store surface (all methods on the object returned by `createStore`). Any method added to one must be mirrored in the other in the same PR/commit. Currently that includes: `dataVersion`, `load`, `add`, `update`, `setStatus`, `delete`, `getByStatus`, `getByScope`, `getByType`, `getNext`, `getOverview`, `getRelated`, `getScopes`, `getById`, `close`. The raw `db` escape hatch is present in both files; keep it that way.
+`server.ts` spawns `./task-manager-ui/server.ts` as a child process after `createStore` returns. The UI dies with the MCP (SIGTERM on shutdown handlers).
 
-Both files now share the same language (TypeScript), so type signatures should align too — when adding a method, copy the type declaration on the `Store` interface verbatim. The exported row/input/patch types may diverge in name (e.g. this package exports `Task` from `tasks.ts`; the vendor mirror imports `Task` from `@/types/task`) but the *shape* must match.
+- Spawn command: `node --import tsx server.ts` with `cwd` set to `task-manager-ui/` so node resolves the `tsx` loader from that package's `node_modules`.
+- `stdio: ['ignore', 'pipe', 'pipe']` — child's stdout and stderr are piped into the MCP's **stderr** (the MCP's own stdout is owned by JSON-RPC).
+- Env vars forwarded: `TASKS_DB` plus the parent's full env (so `TASK_UI_PORT`, `AUTO_OPEN_TASK_UI` flow through).
+- Disable the spawn with `TASK_UI_DISABLE=1`. Useful in tests, when running the UI from a separate terminal, or when the sibling package is missing.
+- Missing sibling: if `./task-manager-ui/server.ts` doesn't exist (e.g. fresh checkout where the sibling isn't installed yet), the MCP logs a warning and continues without the UI.
+
+The UI imports the store directly from `./tasks.js` via a relative path (`../simple-task-manager/tasks.js`) — there is **no vendor mirror**. Schema changes affect only this package; the UI picks them up at the next tsx import.
+
+## Consumers of the `Store` surface
+
+`tasks.ts` is the only source of the SQLite store. Two consumers:
+
+- `mcp/*` — JSON-RPC tools registered onto the McpServer. Imports `createStore`, `Store`, and the typed inputs/outputs directly.
+- `./task-manager-ui/src/server/taskStore.ts` — thin async wrapper used by the web UI. Imports `createStore`, `AddInput`, `UpdatePatch`, `LoadResult`, `Store` via `'../../../tasks.js'` (climbs out of `task-manager-ui/` to the parent package root).
+
+When you add/rename/remove a method on `Store`, the UI wrapper in `task-manager-ui/src/server/taskStore.ts` may need a corresponding edit. There is no compile-time link between the two packages, so it pays to grep `task-manager-ui` for the old method name before declaring done.

@@ -9,7 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
     "test": "node --import tsx --test \"tasks.test.ts\" \"migrate.test.ts\" \"migrations.test.ts\" \"server.test.ts\"",
     "migrate": "tsx migrate.ts",
-    "prepare": "tsx setup-hooks.ts && tsc",
+    "prepare": "tsx setup-hooks.ts && tsc && tsx install-sibling.ts && tsx install.ts --global",
     "verify": "npm run typecheck && npm test && npm run build"
   },
   "dependencies": {

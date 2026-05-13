@@ -4,6 +4,8 @@ A persistent task manager for [Claude Code](https://claude.ai/code), exposed as 
 
 **No separate Claude instructions needed** — behavioral rules are embedded in the server and loaded automatically when Claude connects.
 
+**Web UI included.** When Claude starts the MCP, it also spawns a bundled web app (`simple-task-manager/task-manager-ui/`) at <http://localhost:7374>. It's a live browser view of the same SQLite database — edits in either direction sync within ~1s. Optional; the MCP starts fine without it.
+
 ---
 
 ## Prerequisites
@@ -19,23 +21,20 @@ A persistent task manager for [Claude Code](https://claude.ai/code), exposed as 
 
 ```sh
 git clone https://github.com/dabalroman/mcp-servers ~/.claude/mcp-servers
-cd ~/.claude/mcp-servers/simple-task-manager
-npm install
+cd ~/.claude/mcp-servers/simple-task-manager && npm install
 ```
 
-`npm install` builds the package automatically via the `prepare` script — `dist/server.js` is the production entrypoint.
+That single install does everything:
+- Installs MCP dependencies and builds `dist/server.js`.
+- Descends into `task-manager-ui/` (the bundled sub-package) and runs `npm install` there too, which builds the UI bundle. The MCP will auto-spawn the UI on startup.
+- Installs the pre-commit hook that keeps both `dist/`s in sync with source.
+- Registers an `@-include` in `~/.claude/CLAUDE.md` so Claude knows how to set up the MCP in any project. Idempotent — safe to re-run.
 
-**Upgrading from a pre-TypeScript install?** Re-run the installer in each project (see Step 3) — Claude will refresh the stale `args` path in `.mcp.json` from `server.js` to `dist/server.js`.
+To skip the UI entirely, delete or rename `task-manager-ui/` before running `npm install` — the bundled installer no-ops when the directory is missing, and the MCP detects the absence and starts without it. You can also disable it at runtime with `TASK_UI_DISABLE=1`.
 
-### Step 2 — One-time global setup
+**Upgrading from a pre-TypeScript install?** Re-run the installer in each project (see Step 2) — Claude will refresh the stale `args` path in `.mcp.json` from `server.js` to `dist/server.js`.
 
-```sh
-npx tsx ~/.claude/mcp-servers/simple-task-manager/install.ts --global
-```
-
-This adds one line to `~/.claude/CLAUDE.md` so Claude knows how to register the MCP in any project.
-
-### Step 3 — Register in a project
+### Step 2 — Register in a project
 
 Open Claude Code in any project and say:
 
@@ -43,7 +42,7 @@ Open Claude Code in any project and say:
 
 Claude will run the installer, write `.mcp.json` with the correct paths, and tell you to restart. **Commit `.mcp.json` to git** so teammates get the same setup automatically.
 
-### Step 4 — Approve and go
+### Step 3 — Approve and go
 
 Restart Claude Code. On first launch it will prompt:
 
@@ -115,6 +114,46 @@ Within each type: highest priority first, newest id first.
 7. **Commit** — stages files, writes a clear commit message
 8. **Curate** — after `setStatus(done)`: update the closest CLAUDE.md with non-obvious decisions, gotchas, new conventions, and architecture changes; prune any entries now stale. Skip if nothing worth capturing.
 9. **Next** — suggests what to do next
+
+---
+
+## Web UI
+
+When the MCP starts, it tries to spawn `./task-manager-ui/server.ts` (bundled sub-package) as a child process. The UI is a small Express app that:
+
+- Serves a React SPA at <http://localhost:7374> showing the same tasks the MCP sees.
+- Pushes live updates (SSE) when the MCP writes — no manual refresh.
+- Lets you add, edit, re-prioritize, set status, link refs, and delete tasks from the browser. Edits flow back through the same SQLite file.
+
+The UI dies with the MCP (SIGTERM on shutdown). One MCP per project = one UI per project.
+
+### Env vars
+
+| Variable | Default | Effect |
+|---|---|---|
+| `TASKS_DB` | required | Path to the SQLite database. Forwarded to the UI so both processes open the same file. |
+| `TASK_UI_PORT` | `7374` | HTTP port for the UI. Change if 7374 is taken. |
+| `AUTO_OPEN_TASK_UI` | unset | When `1`, the UI opens its URL in the system browser on startup. Off by default — the URL is always printed to stderr. |
+| `TASK_UI_DISABLE` | unset | When `1`, the MCP skips spawning the UI entirely. Useful in tests or when you want to run the UI manually from a separate terminal. |
+
+### Run the UI manually
+
+```sh
+cd ~/.claude/mcp-servers/simple-task-manager/task-manager-ui
+TASKS_DB=/abs/path/to/project/tasks.db npm start
+```
+
+Useful for testing or for hosting the UI on a server (set `TASK_UI_PORT`, expose the port).
+
+### Behaviour when the UI is missing
+
+If `~/.claude/mcp-servers/simple-task-manager/task-manager-ui/server.ts` doesn't exist (e.g. you removed the sub-package), the MCP writes:
+
+```
+[simple-task-manager] task-manager-ui not found at … — UI will not be available
+```
+
+…and continues normally. JSON-RPC tools still work as before.
 
 ---
 
@@ -211,6 +250,17 @@ Check that the `TASKS_DB` path in `.mcp.json` is absolute and points to a real l
 **The server fails to start**  
 Run `node dist/server.js` directly from the `simple-task-manager` directory and read the error. If `dist/` doesn't exist, run `npm install` (or `npm run build`) first — `dist/` is generated, not committed. The most common cause is a missing or wrong `TASKS_DB` environment variable. If you still have legacy `TASKS_FILE` / `TASKS_DONE_FILE` set, the server emits a one-time warning suggesting the rename and refuses to start without `TASKS_DB`.
 
+**The web UI doesn't open at <http://localhost:7374>**  
+Reconnect the MCP (`/mcp` in Claude Code) and watch the MCP's stderr for one of:
+
+- `task-manager-ui not found at … — UI will not be available` — the sub-package is missing or wasn't built. Run `cd ~/.claude/mcp-servers/simple-task-manager && npm install` to rebuild, then reconnect the MCP.
+- `task-manager-ui spawn disabled via TASK_UI_DISABLE=1` — unset the env var.
+- `failed to spawn task-manager-ui: …` — usually means `node_modules/tsx` is missing in `task-manager-ui/`. Run `npm install` there.
+- Port already in use (the listening line never prints) — set `TASK_UI_PORT` to a free port in the MCP's `.mcp.json` env block.
+
+**The UI shows tasks but the MCP doesn't see new ones (or vice versa)**  
+Both processes must point at the same `TASKS_DB`. The MCP forwards its own `TASKS_DB` to the UI when spawning, so this should be automatic — but if you start the UI manually, double-check the path matches the one in `.mcp.json`.
+
 ---
 
 ## Development
@@ -240,7 +290,13 @@ Adding a new tool: write the handler in `mcp/{query,mutation}Handlers.ts`, decla
 
 The `prepare` script (auto-run on `npm install`) installs a pre-commit hook that:
 1. Bumps the server version in `version.ts` using CalVer (`YYYY-MM-NNN`, resetting `NNN` to `001` on the first commit of a new month), then `git add`s the file so the bump is included in the commit.
-2. Runs `npm test`.
-3. Runs `npm run build` so `dist/` reflects the committed source.
+2. Runs `npm test` and `npm run build` for this package.
+3. If the sibling `task-manager-ui/` exists, runs `npm test` and `npm run build` there too so both `dist/`s stay in sync with the committed source.
 
 The version is exposed to MCP clients under `serverInfo.version` in the `initialize` handshake.
+
+### Sub-package — `task-manager-ui/`
+
+The web UI is a self-contained npm sub-package at `simple-task-manager/task-manager-ui/`. It imports `tasks.ts` directly from the parent (`../tasks.js`) — **no vendor mirror, no `EXPECTED_MIGRATIONS` array** to keep in sync. Schema changes touch only the MCP package; the UI picks them up at the next tsx import.
+
+See `task-manager-ui/CLAUDE.md` for its file layout and conventions.

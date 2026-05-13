@@ -6,7 +6,7 @@
  *                             If a stale task-manager entry pointing at server.ts/server.js exists,
  *                             it is rewritten to point at dist/server.js.
  */
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -37,6 +37,7 @@ if (process.argv[2] === '--global') {
 
   const existing = existsSync(claudeMd) ? readFileSync(claudeMd, 'utf8') : '';
   const separator = existing.length && !existing.endsWith('\n') ? '\n' : '';
+  mkdirSync(dirname(claudeMd), { recursive: true });
   writeFileSync(claudeMd, existing + separator + line + '\n');
   console.log(`Registered in ${claudeMd}`);
   console.log(`Claude can now set up this MCP in any project.`);

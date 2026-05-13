@@ -1,0 +1,87 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    font-size: 16px;
+
+    --background: 215 30% 6%;
+    --foreground: 36 22% 88%;
+
+    --card: 215 28% 9%;
+    --card-foreground: 36 22% 88%;
+
+    --popover: 215 28% 9%;
+    --popover-foreground: 36 22% 88%;
+
+    --primary: 192 80% 62%;
+    --primary-foreground: 215 60% 8%;
+
+    --secondary: 215 22% 18%;
+    --secondary-foreground: 36 22% 88%;
+
+    --muted: 215 22% 14%;
+    --muted-foreground: 215 12% 56%;
+
+    --accent: 192 50% 14%;
+    --accent-foreground: 192 80% 72%;
+
+    --destructive: 22 92% 60%;
+    --destructive-foreground: 22 60% 8%;
+
+    --warning: 38 85% 58%;
+    --warning-foreground: 38 60% 8%;
+
+    --border: 215 22% 18%;
+    --input: 215 22% 18%;
+    --ring: 192 80% 62%;
+
+    --radius: 0px;
+  }
+
+  * { @apply border-border; }
+
+  body {
+    @apply bg-background text-foreground font-mono text-sm leading-relaxed min-h-screen antialiased;
+    background-image:
+      linear-gradient(rgba(120, 180, 210, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(120, 180, 210, 0.035) 1px, transparent 1px);
+    background-size: 38px 38px, 38px 38px;
+    background-position: -1px -1px;
+  }
+
+  ::selection { background: hsl(var(--destructive) / 0.4); color: hsl(var(--foreground)); }
+}
+
+@layer components {
+  .tick-rule {
+    height: 1px;
+    background: hsl(var(--border));
+    position: relative;
+  }
+  .tick-rule::before,
+  .tick-rule::after {
+    content: '';
+    position: absolute;
+    width: 1px;
+    height: 7px;
+    background: hsl(var(--border));
+    top: -3px;
+  }
+  .tick-rule::before { left: 0; }
+  .tick-rule::after  { right: 0; }
+
+  .prose-task p { margin: 0 0 0.4em; }
+  .prose-task p:last-child { margin-bottom: 0; }
+  .prose-task strong { color: hsl(var(--foreground)); font-weight: 600; }
+  .prose-task em { font-style: italic; }
+  .prose-task code { font-family: monospace; font-size: 0.875em; background: hsl(var(--accent)/0.3); padding: 0 0.25em; }
+  .prose-task ul, .prose-task ol { margin: 0.25em 0 0.4em 1.25em; }
+  .prose-task li { margin-bottom: 0.15em; }
+  .prose-task input[type="checkbox"] { margin-right: 0.4em; accent-color: hsl(var(--primary)); }
+  .prose-task del { opacity: 0.5; }
+  .prose-task table { border-collapse: collapse; margin: 0.4em 0; font-size: 0.875em; }
+  .prose-task th, .prose-task td { border: 1px solid hsl(var(--border)); padding: 0.2em 0.5em; }
+  .prose-task th { background: hsl(var(--accent)/0.2); font-weight: 600; }
+}
