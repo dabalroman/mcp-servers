@@ -11,10 +11,15 @@ import {
   sortByPriority,
   sortForNext,
   RELATIONS,
-  CURRENT_USER_VERSION,
   type AddInput,
   type Store,
 } from './tasks.js';
+
+const MIGRATION_NAMES = [
+  '20260101000000_initial-schema',
+  '20260513000000_normalize-literal-newlines',
+  '20260513000001_refs-pk-simplify',
+];
 
 let dir: string;
 let dbPath: string;
@@ -46,22 +51,20 @@ describe('schema', () => {
     assert.ok(existsSync(dbPath));
   });
 
-  test('sets PRAGMA user_version to CURRENT_USER_VERSION', () => {
+  test('sets PRAGMA user_version to the number of applied migrations', () => {
     const db = new Database(dbPath);
-    assert.equal(db.pragma('user_version', { simple: true }), CURRENT_USER_VERSION);
+    assert.equal(db.pragma('user_version', { simple: true }), MIGRATION_NAMES.length);
     db.close();
   });
 
   test('records all migrations in schema_migrations', () => {
     const db = new Database(dbPath);
     const rows = db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all() as { version: number; name: string }[];
-    assert.equal(rows.length, CURRENT_USER_VERSION);
-    assert.equal(rows[0]?.version, 1);
-    assert.equal(rows[0]?.name, 'initial-schema');
-    assert.equal(rows[1]?.version, 2);
-    assert.equal(rows[1]?.name, 'normalize-literal-newlines');
-    assert.equal(rows[2]?.version, 3);
-    assert.equal(rows[2]?.name, 'refs_pk_simplify');
+    assert.equal(rows.length, MIGRATION_NAMES.length);
+    for (let i = 0; i < MIGRATION_NAMES.length; i++) {
+      assert.equal(rows[i]?.version, i + 1);
+      assert.equal(rows[i]?.name, MIGRATION_NAMES[i]);
+    }
     db.close();
   });
 
@@ -76,12 +79,12 @@ describe('schema', () => {
     db.close();
   });
 
-  test('refuses to open a db created by a newer code version', () => {
+  test('refuses to open a db that has unknown applied migrations (downgrade guard)', () => {
     store.close();
     const db = new Database(dbPath);
-    db.pragma('user_version = 999');
+    db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(99, 'future-migration');
     db.close();
-    assert.throws(() => createStore(dbPath), /Schema version mismatch/);
+    assert.throws(() => createStore(dbPath), /downgrade not supported/);
   });
 
   test('migrations are idempotent — re-opening does not re-run', () => {
@@ -89,7 +92,7 @@ describe('schema', () => {
     const reopened = createStore(dbPath);
     const db = new Database(dbPath);
     const rows = db.prepare('SELECT * FROM schema_migrations').all();
-    assert.equal(rows.length, CURRENT_USER_VERSION);
+    assert.equal(rows.length, MIGRATION_NAMES.length);
     db.close();
     reopened.close();
   });

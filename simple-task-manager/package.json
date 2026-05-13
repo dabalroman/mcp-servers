@@ -7,7 +7,7 @@
     "build": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "test": "node --import tsx --test \"tasks.test.ts\" \"migrate.test.ts\" \"server.test.ts\"",
+    "test": "node --import tsx --test \"tasks.test.ts\" \"migrate.test.ts\" \"migrations.test.ts\" \"server.test.ts\"",
     "migrate": "tsx migrate.ts",
     "prepare": "tsx setup-hooks.ts && tsc",
     "verify": "npm run typecheck && npm test && npm run build"

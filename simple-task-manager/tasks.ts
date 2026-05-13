@@ -1,9 +1,13 @@
 // SQLite-backed task store. Replaces the previous markdown/DSL parser.
-// Schema lives in schema_migrations; see CURRENT_USER_VERSION below.
+// Schema is managed by file-per-migration in ./migrations/.
+import { createRequire } from 'node:module';
+import { readdirSync } from 'node:fs';
+import { join, basename } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import type { Database as DB } from 'better-sqlite3';
 
-export const CURRENT_USER_VERSION = 3;
+const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 export type TaskType = 'bug' | 'feature' | 'idea' | 'tool' | 'other';
 export type TaskStatus = 'refinement' | 'todo' | 'in_progress' | 'done';
@@ -59,97 +63,50 @@ const INVERSE: Record<string, string> = {
   'relates to':        'relates to',
 };
 
-// ── Migrations ────────────────────────────────────────────────────────────────
-type Migration = { version: number; name: string; up: (db: DB) => void };
+// ── Migration runner ──────────────────────────────────────────────────────────
+//
+// Each migration is a .ts/.js file in ./migrations/ named YYYYMMDDHHMMSS_slug.
+// It must export:
+//   export const name: string   — must equal filename stem (copy-paste guard)
+//   export function up(db: DB): void
+//
+// The authoritative key is `name`; `version` in schema_migrations is the
+// 1-based ordinal of applied migrations, kept for backward compat with existing rows.
+//
+// One-time backfills: rows written by the old inline-MIGRATIONS code used short
+// names (no timestamp prefix). On first open after upgrading, each old name is
+// renamed to its timestamp-prefixed equivalent. All three UPDATE statements are
+// no-ops on new DBs and on already-upgraded DBs.
 
-const MIGRATIONS: Migration[] = [
-  {
-    version: 1,
-    name: 'initial-schema',
-    up(db) {
-      db.exec(`
-        CREATE TABLE IF NOT EXISTS meta (
-          key TEXT PRIMARY KEY,
-          value TEXT NOT NULL
-        );
+type MigrationModule = { name: string; up: (db: DB) => void };
 
-        CREATE TABLE IF NOT EXISTS tasks (
-          id          INTEGER PRIMARY KEY,
-          title       TEXT NOT NULL,
-          type        TEXT NOT NULL CHECK (type IN ('bug','feature','idea','tool','other')),
-          status      TEXT NOT NULL CHECK (status IN ('refinement','todo','in_progress','done')),
-          priority    TEXT NOT NULL CHECK (priority IN ('low','medium','high','critical')),
-          scope       TEXT,
-          summary     TEXT,
-          description TEXT,
-          created_at  TEXT NOT NULL DEFAULT (datetime('now')),
-          updated_at  TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status);
-        CREATE INDEX IF NOT EXISTS idx_tasks_scope  ON tasks(scope);
-        CREATE INDEX IF NOT EXISTS idx_tasks_type   ON tasks(type);
+function loadMigrations(): MigrationModule[] {
+  // In dev, tsx sets __dirname to the source directory (where tasks.ts lives),
+  // so path.join(__dirname, 'migrations') finds ./migrations/ next to tasks.ts.
+  // In prod, tsc compiles to dist/ with migrations/ copied alongside, so
+  // path.join(__dirname, 'migrations') finds dist/migrations/ correctly.
+  const migrationsDir = join(__dirname, 'migrations');
+  const requireModule = createRequire(import.meta.url);
 
-        CREATE TABLE IF NOT EXISTS refs (
-          from_id        INTEGER NOT NULL,
-          to_id          INTEGER NOT NULL,
-          relation       TEXT NOT NULL,
-          non_canonical  INTEGER NOT NULL DEFAULT 0,
-          PRIMARY KEY (from_id, to_id, relation),
-          FOREIGN KEY (from_id) REFERENCES tasks(id) ON DELETE CASCADE,
-          FOREIGN KEY (to_id)   REFERENCES tasks(id) ON DELETE CASCADE
-        );
-        CREATE INDEX IF NOT EXISTS idx_refs_to ON refs(to_id);
+  const files = readdirSync(migrationsDir)
+    .filter((f) => f.endsWith('.ts') || f.endsWith('.js'))
+    .sort(); // ascending by filename = chronological order
 
-        INSERT OR IGNORE INTO meta (key, value) VALUES ('counter', '0');
-      `);
-    },
-  },
-  {
-    version: 2,
-    name: 'normalize-literal-newlines',
-    up(db) {
-      db.exec(`
-        UPDATE tasks SET description = replace(description, '\\n', char(10))
-        WHERE description LIKE '%\\n%';
-        UPDATE tasks SET title = replace(title, '\\n', char(10))
-        WHERE title LIKE '%\\n%';
-      `);
-    },
-  },
-  {
-    version: 3,
-    name: 'refs_pk_simplify',
-    up(db) {
-      db.exec(`
-        CREATE TABLE refs_new (
-          from_id       INTEGER NOT NULL,
-          to_id         INTEGER NOT NULL,
-          relation      TEXT NOT NULL,
-          non_canonical INTEGER NOT NULL DEFAULT 0,
-          PRIMARY KEY (from_id, to_id),
-          FOREIGN KEY (from_id) REFERENCES tasks(id) ON DELETE CASCADE,
-          FOREIGN KEY (to_id)   REFERENCES tasks(id) ON DELETE CASCADE
-        );
-        INSERT OR REPLACE INTO refs_new SELECT from_id, to_id, relation, non_canonical FROM refs;
-        DROP TABLE refs;
-        ALTER TABLE refs_new RENAME TO refs;
-        CREATE INDEX IF NOT EXISTS idx_refs_to ON refs(to_id);
-      `);
-    },
-  },
-];
+  return files.map((file) => {
+    const stem = basename(file, file.endsWith('.ts') ? '.ts' : '.js');
+    const mod = requireModule(join(migrationsDir, file)) as MigrationModule;
+    if (mod.name !== stem) {
+      throw new Error(
+        `Migration file mismatch: file "${file}" exports name="${mod.name}" but expected "${stem}". ` +
+        `Rename the export or the file to match.`
+      );
+    }
+    return mod;
+  });
+}
 
-function runMigrations(db: DB, dbPath: string): void {
-  const currentVersion = db.pragma('user_version', { simple: true }) as number;
-  if (currentVersion > CURRENT_USER_VERSION) {
-    throw new Error(
-      `Schema version mismatch on "${dbPath}": db is at user_version=${currentVersion}, ` +
-      `code expects ${CURRENT_USER_VERSION}. The database was created by a newer version of this code. ` +
-      `Update the package or restore from backup.`
-    );
-  }
-
-  // The schema_migrations table predates the per-migration `up` so it's created here, not in a migration.
+function runMigrations(db: DB): void {
+  // Ensure schema_migrations table exists — it's the authoritative record.
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
       version    INTEGER PRIMARY KEY,
@@ -158,23 +115,49 @@ function runMigrations(db: DB, dbPath: string): void {
     );
   `);
 
-  const applied = new Set(
-    (db.prepare('SELECT version FROM schema_migrations').all() as { version: number }[]).map((r) => r.version)
-  );
+  // One-time backfills: rename old inline-array names to timestamp-prefixed file names.
+  // These run on first open after upgrading from the inline-MIGRATIONS code and are
+  // no-ops on new or already-upgraded DBs.
+  db.prepare(`UPDATE schema_migrations SET name='20260101000000_initial-schema' WHERE version=1 AND name='initial-schema'`).run();
+  db.prepare(`UPDATE schema_migrations SET name='20260513000000_normalize-literal-newlines' WHERE version=2 AND name='normalize-literal-newlines'`).run();
+  db.prepare(`UPDATE schema_migrations SET name='20260513000001_refs-pk-simplify' WHERE version=3 AND name='refs_pk_simplify'`).run();
+
+  const migrations = loadMigrations();
+  const onDiskNames = new Set(migrations.map((m) => m.name));
+
+  const appliedRows = db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all() as
+    { version: number; name: string }[];
+  const appliedNames = new Set(appliedRows.map((r) => r.name));
+
+  // Downgrade guard: applied name not present on disk means a newer code version ran.
+  const missing = [...appliedNames].filter((n) => !onDiskNames.has(n));
+  if (missing.length > 0) {
+    throw new Error(
+      `DB was migrated by newer code; downgrade not supported. Missing migration files: ${missing.join(', ')}`
+    );
+  }
 
   const insertMigration = db.prepare(
     'INSERT INTO schema_migrations (version, name) VALUES (?, ?)'
   );
 
-  for (const migration of MIGRATIONS) {
-    if (applied.has(migration.version)) continue;
+  // version = 1-based ordinal of all applied migrations after this run
+  let nextVersion = appliedRows.length + 1;
+
+  for (const migration of migrations) {
+    if (appliedNames.has(migration.name)) continue;
     db.transaction(() => {
       migration.up(db);
-      insertMigration.run(migration.version, migration.name);
+      insertMigration.run(nextVersion, migration.name);
     })();
+    appliedNames.add(migration.name);
+    nextVersion++;
   }
 
-  db.pragma(`user_version = ${CURRENT_USER_VERSION}`);
+  // Keep user_version in sync with total number of applied migrations for
+  // backward compatibility with tooling that reads it.
+  const finalCount = (db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number }).n;
+  db.pragma(`user_version = ${finalCount}`);
 }
 
 // ── Row mapping ───────────────────────────────────────────────────────────────
@@ -308,7 +291,7 @@ export function createStore(dbPath: string): Store {
   db.pragma('journal_mode = DELETE');
   db.pragma('foreign_keys = ON');
 
-  runMigrations(db, dbPath);
+  runMigrations(db);
 
   // Prepared statements
   const stmtGetCounter      = db.prepare("SELECT value FROM meta WHERE key = 'counter'");
