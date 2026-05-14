@@ -19,6 +19,7 @@ const MIGRATION_NAMES = [
   '20260101000000_initial-schema',
   '20260513000000_normalize-literal-newlines',
   '20260513000001_refs-pk-simplify',
+  '20260514120000_add-plan-field',
 ];
 
 let dir: string;
@@ -188,6 +189,36 @@ describe('update', () => {
     const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.update(b, { refs: null });
     assert.equal(store.getById(b)?.refs, undefined);
+  });
+});
+
+describe('plan field', () => {
+  test('add with plan persists it; getById returns it', () => {
+    const { id } = makeTask({ plan: '# My Plan\n\n- step 1\n- step 2' });
+    assert.equal(store.getById(id)?.plan, '# My Plan\n\n- step 1\n- step 2');
+  });
+
+  test('update with new plan replaces existing plan', () => {
+    const { id } = makeTask({ plan: 'old plan' });
+    store.update(id, { plan: 'new plan' });
+    assert.equal(store.getById(id)?.plan, 'new plan');
+  });
+
+  test('update with plan: null clears the plan', () => {
+    const { id } = makeTask({ plan: 'some plan' });
+    store.update(id, { plan: null });
+    assert.equal(store.getById(id)?.plan, undefined);
+  });
+
+  test('update with empty string clears the plan', () => {
+    const { id } = makeTask({ plan: 'some plan' });
+    store.update(id, { plan: '' });
+    assert.equal(store.getById(id)?.plan, undefined);
+  });
+
+  test('task without plan has plan undefined', () => {
+    const { id } = makeTask();
+    assert.equal(store.getById(id)?.plan, undefined);
   });
 });
 

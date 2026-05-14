@@ -51,6 +51,7 @@ The git repository root is `~/.claude/mcp-servers/`, **not** `~/.claude/mcp-serv
 
 Tasks live in a single SQLite database. The path comes from the `TASKS_DB` env var; the previous `TASKS_FILE` / `TASKS_DONE_FILE` are gone. Schema is owned by `tasks.ts`:
 - Tables: `meta`, `tasks`, `refs`, `schema_migrations`
+- The `tasks` table has an optional `plan TEXT` column (added by migration `20260514120000_add-plan-field`). Agents write plans here via `update({ id, plan })` and read them back via `getById` before implementing.
 - Journal mode is `DELETE` (the SQLite default). WAL was tried first but its mmap'd shm region isn't coherent across host/container bind mounts — readers stayed on stale snapshots until checkpoint, breaking the random-tools API's SSE live updates. DELETE coordinates via POSIX advisory locks on the main DB file, which is bind-mount-safe. Write contention is a non-issue at this scale.
 - `tasks.ts` runs migrations on first open. `schema_migrations` records version + name + applied_at; `PRAGMA user_version` is kept in sync with migration count for backward compat but is NOT used as a gating check. The downgrade guard checks for applied names that have no corresponding file on disk.
 - Migrating from the old markdown format: `npx tsx migrate.ts <legacy-tasks.md> <legacy-tasks_done.md> <output.db>`. The migrator carries its own legacy parser so `tasks.ts` is free of legacy code.
@@ -71,7 +72,7 @@ The sibling `task-manager-ui` imports `tasks.ts` directly via a relative path �
 The `summary` column exists in the schema (version 1). The token-saving behaviour lives entirely in the **MCP layer** (`mcp/`), not in `tasks.ts`:
 
 - `tasks.ts` always returns complete task objects (both `summary` and `description`). No stripping in the storage layer.
-- `mcp/shared.ts` exports a `toListTask(task)` helper that drops `description` when `summary` is present. Applied to every list-method result in `mcp/queryHandlers.ts` (getAll, getByStatus, getByScope, getByType, getNext, getRelated outbound/inbound). `getById` and the `getRelated` anchor task always return both fields.
+- `mcp/shared.ts` exports a `toListTask(task)` helper that **always drops `plan`** (plans can be long markdown; only `getById` needs them), and additionally drops `description` when `summary` is present. Applied to every list-method result in `mcp/queryHandlers.ts` (getAll, getByStatus, getByScope, getByType, getNext, getRelated outbound/inbound). `getById` and the `getRelated` anchor task always return all fields.
 - Adding a new list tool: always apply `.map(toListTask)` to its results inside the handler.
 - `handleSetStatus` blocks `refinement → todo` if the task has no summary. `handleUpdate` on a refinement task without summary returns a `summaryReminder` field.
 - The refine skill (`~/.claude/commands/refine.md`) generates the summary as step 3b before promoting.

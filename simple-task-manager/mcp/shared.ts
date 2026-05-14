@@ -12,10 +12,13 @@ export const errorText = (obj: unknown): MCPContent => ({ content: [{ type: 'tex
 
 // Token-saving for list responses: when a task has a summary, the full description
 // adds noise without value. Agents that need the body call getById.
-export function toListTask<T extends Task>(task: T): T | Omit<T, 'description'> {
-  if (!task.summary) return task;
-  const { description: _desc, ...rest } = task;
-  return rest;
+// plan is always stripped from list responses regardless of summary — plans can be
+// long markdown documents and are only needed during /implement (use getById).
+export function toListTask<T extends Task>(task: T): Omit<T, 'plan'> | Omit<T, 'plan' | 'description'> {
+  const { plan: _plan, ...withoutPlan } = task;
+  if (!withoutPlan.summary) return withoutPlan as Omit<T, 'plan'>;
+  const { description: _desc, ...rest } = withoutPlan;
+  return rest as Omit<T, 'plan' | 'description'>;
 }
 
 export function allIdsSorted(store: Store): number[] {

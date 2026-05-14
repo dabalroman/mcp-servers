@@ -340,6 +340,70 @@ describe('update handler — summaryReminder', () => {
   });
 });
 
+describe('plan field — MCP layer', () => {
+  test('add handler accepts plan and persists it; getById returns it', () => {
+    const resp = handleAdd(store, {
+      type: 'feature',
+      priority: 'medium',
+      title: 'Planned task',
+      description: '',
+      plan: '# My Plan\n\n- step 1',
+    });
+    const { id } = decode(resp) as { id: number };
+    const task = store.getById(id);
+    assert.equal(task?.plan, '# My Plan\n\n- step 1');
+  });
+
+  test('getById returns plan intact', () => {
+    const { id } = store.add({ type: 'bug', priority: 'medium', title: 'T', description: '', plan: '## Plan\n\nDo the thing.' });
+    const resp = handleGetById(store, { id });
+    const { task } = decode(resp) as { task: { plan?: string } };
+    assert.equal(task.plan, '## Plan\n\nDo the thing.');
+  });
+
+  test('getByStatus strips plan from list responses', () => {
+    store.add({ type: 'bug', priority: 'medium', title: 'T', description: '', plan: 'secret plan', status: 'todo' });
+    const { tasks } = decode(handleGetByStatus(store, { status: 'todo' })) as { tasks: { plan?: string }[] };
+    assert.ok(tasks.every((t) => t.plan === undefined), 'plan must not appear in getByStatus results');
+  });
+
+  test('getByScope strips plan from list responses', () => {
+    store.add({ type: 'bug', priority: 'medium', title: 'T', description: '', plan: 'secret plan', scope: 'myapp' });
+    const { tasks } = decode(handleGetByScope(store, { scope: 'myapp' })) as { tasks: { plan?: string }[] };
+    assert.ok(tasks.every((t) => t.plan === undefined), 'plan must not appear in getByScope results');
+  });
+
+  test('getByType strips plan from list responses', () => {
+    store.add({ type: 'idea', priority: 'low', title: 'T', description: '', plan: 'secret plan' });
+    const { tasks } = decode(handleGetByType(store, { type: 'idea' })) as { tasks: { plan?: string }[] };
+    assert.ok(tasks.every((t) => t.plan === undefined), 'plan must not appear in getByType results');
+  });
+
+  test('getNext strips plan from list response', () => {
+    store.add({ type: 'bug', priority: 'high', title: 'T', description: '', plan: 'secret plan', status: 'todo' });
+    const { task } = decode(handleGetNext(store, {})) as { task: { plan?: string } };
+    assert.equal(task.plan, undefined, 'plan must not appear in getNext result');
+  });
+
+  test('getAll strips plan from list responses', () => {
+    store.add({ type: 'bug', priority: 'medium', title: 'T', description: '', plan: 'secret plan' });
+    const { tasks } = decode(handleGetAll(store)) as { tasks: Record<string, { plan?: string }[]> };
+    const all = Object.values(tasks).flat();
+    assert.ok(all.every((t) => t.plan === undefined), 'plan must not appear in getAll results');
+  });
+
+  test('getRelated: anchor task retains plan, outbound/inbound strip it', () => {
+    const { id: a } = store.add({ type: 'bug', priority: 'medium', title: 'A', description: '', plan: 'plan A' });
+    const { id: b } = store.add({ type: 'bug', priority: 'medium', title: 'B', description: '', plan: 'plan B', refs: [{ id: a, relation: 'blocks' }] });
+    const payload = decode(handleGetRelated(store, { id: b })) as {
+      task: { plan?: string };
+      outbound: { plan?: string }[];
+    };
+    assert.equal(payload.task.plan, 'plan B', 'anchor task should include plan');
+    assert.equal(payload.outbound[0]?.plan, undefined, 'outbound should not include plan');
+  });
+});
+
 describe('getAll handler', () => {
   test('excludes done tasks', async () => {
     addTask({ type: 'bug', title: 'Active bug' });

@@ -13,6 +13,7 @@ export type NewTaskInput = {
   priority: TaskPriority;
   description?: string;
   summary?: string;
+  plan?: string;
   scope?: string;
   refs?: TaskRef[];
   status?: TaskStatus;
@@ -25,6 +26,7 @@ export type TaskPatch = Partial<{
   status: TaskStatus;
   description: string;
   summary: string | null;
+  plan: string | null;
   scope: string | null;
   refs: TaskRef[] | null;
 }>;

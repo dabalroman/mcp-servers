@@ -36,6 +36,7 @@ export type Task = {
   scope?: string;
   summary?: string;
   description?: string;
+  plan?: string;
   refs?: Ref[];
 };
 
@@ -170,6 +171,7 @@ type TaskRow = {
   scope: string | null;
   summary: string | null;
   description: string | null;
+  plan: string | null;
 };
 
 type RefRow = { from_id: number; to_id: number; relation: string; non_canonical: number };
@@ -185,6 +187,7 @@ function rowToTask(row: TaskRow, refs: Ref[]): Task {
   if (row.scope) t.scope = row.scope;
   if (row.summary) t.summary = row.summary;
   t.description = row.description ?? '';
+  if (row.plan) t.plan = row.plan;
   if (refs && refs.length) t.refs = refs;
   return t;
 }
@@ -227,6 +230,7 @@ export type AddInput = {
   description?: string;
   scope?: string;
   summary?: string;
+  plan?: string;
   refs?: Ref[];
   status?: TaskStatus;
 };
@@ -238,6 +242,7 @@ export type UpdatePatch = {
   description?: string;
   scope?: string | null;
   summary?: string | null;
+  plan?: string | null;
   refs?: Ref[] | null;
 };
 
@@ -297,7 +302,7 @@ export function createStore(dbPath: string): Store {
   const stmtGetCounter      = db.prepare("SELECT value FROM meta WHERE key = 'counter'");
   const stmtSetCounter      = db.prepare("UPDATE meta SET value = ? WHERE key = 'counter'");
   const stmtInsertTask      = db.prepare(
-    'INSERT INTO tasks (id, title, type, status, priority, scope, summary, description) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO tasks (id, title, type, status, priority, scope, summary, description, plan) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
   );
   const stmtSelectTask      = db.prepare('SELECT * FROM tasks WHERE id = ?');
   const stmtSelectAllTasks  = db.prepare('SELECT * FROM tasks');
@@ -315,7 +320,7 @@ export function createStore(dbPath: string): Store {
   const stmtDeleteMirror    = db.prepare('DELETE FROM refs WHERE from_id = ? AND to_id = ? AND relation = ?');
   const stmtUpdateTask      = db.prepare(`
     UPDATE tasks
-    SET title = ?, type = ?, priority = ?, scope = ?, summary = ?, description = ?, updated_at = datetime('now')
+    SET title = ?, type = ?, priority = ?, scope = ?, summary = ?, description = ?, plan = ?, updated_at = datetime('now')
     WHERE id = ?
   `);
   const stmtSetTaskStatus   = db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`);
@@ -406,7 +411,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function add(input: AddInput): { id: number } {
-    const { type, priority, title, description = '', scope, summary, refs, status = 'refinement' } = input;
+    const { type, priority, title, description = '', scope, summary, plan, refs, status = 'refinement' } = input;
     const trimmedTitle = normalizeNewlines(String(title ?? '').trim());
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
 
@@ -420,7 +425,8 @@ export function createStore(dbPath: string): Store {
         priority,
         scope?.trim() || null,
         summary?.trim() || null,
-        normalizeNewlines(description.trim())
+        normalizeNewlines(description.trim()),
+        plan?.trim() || null
       );
       setCounter(newId);
 
@@ -447,9 +453,12 @@ export function createStore(dbPath: string): Store {
           ? null
           : patch.summary !== undefined ? (patch.summary.trim() || null) : existing.summary,
         description: patch.description !== undefined ? normalizeNewlines(patch.description.trim()) : existing.description,
+        plan: patch.plan === null
+          ? null
+          : patch.plan !== undefined ? (patch.plan.trim() || null) : existing.plan,
       };
 
-      stmtUpdateTask.run(next.title, next.type, next.priority, next.scope, next.summary, next.description, id);
+      stmtUpdateTask.run(next.title, next.type, next.priority, next.scope, next.summary, next.description, next.plan, id);
 
       if (patch.refs !== undefined) {
         const oldRefs = readRefsFor(id);

@@ -30,6 +30,7 @@ export type Task = {
   title: string;
   description?: string;
   summary?: string;
+  plan?: string;
   scope?: string;
   refs?: TaskRef[];
 };

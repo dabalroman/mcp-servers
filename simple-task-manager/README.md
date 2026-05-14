@@ -164,7 +164,7 @@ Tasks live in a single SQLite database (default `tasks.db` at the project root).
 | Table | Purpose |
 |---|---|
 | `meta` | Key/value (currently just `counter` — last issued id) |
-| `tasks` | One row per task: `id, title, type, status, priority, scope, summary, description, created_at, updated_at` |
+| `tasks` | One row per task: `id, title, type, status, priority, scope, summary, description, plan, created_at, updated_at` |
 | `refs` | `(from_id, to_id, relation, non_canonical)` — directed; mirrors are written for canonical refs |
 | `schema_migrations` | Audit trail of applied schema migrations alongside `PRAGMA user_version` |
 
@@ -194,8 +194,8 @@ These are called by Claude — you don't type them yourself.
 
 | Tool | What it does |
 |---|---|
-| `add` | Schedule a new task. Required: `type`, `priority`, `title`, `description`. Optional: `scope`, `refs`, `status` (`refinement` default; pass `todo` to skip refinement). Returns the new `id`. Refs are auto-mirrored on the other side. |
-| `update` | Edit any field of an existing task in place. Pass `null` to clear `scope` or `refs`. Works on active and done tasks. |
+| `add` | Schedule a new task. Required: `type`, `priority`, `title`, `description`. Optional: `scope`, `plan`, `refs`, `status` (`refinement` default; pass `todo` to skip refinement). Returns the new `id`. Refs are auto-mirrored on the other side. |
+| `update` | Edit any field of an existing task in place. Pass `null` to clear `scope`, `plan`, or `refs`. Works on active and done tasks. |
 | `setStatus` | Move a task: `refinement` → `todo` → `in_progress` → `done`. All statuses live in the same `tasks` table — moving to `done` is just an UPDATE. |
 | `getNext` | The single recommended next task — answers "what's next?". Returns `refinement` tasks after `in_progress`, before `todo`. |
 | `getAll` | All not-done tasks (refinement + todo + in_progress) grouped by type. |

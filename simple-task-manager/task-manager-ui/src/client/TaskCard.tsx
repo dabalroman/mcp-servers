@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { ChevronDown, ChevronUp, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { TYPE_LABELS, PRIORITY_CLASSES, STATUS_LABELS, STATUS_CLASSES } from './constants';
 import type { Task, TaskStatus } from '@/types/task';
@@ -20,6 +21,7 @@ export type TaskCardProps = {
 
 export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = false, showReopen = false }: TaskCardProps) {
   const [expanded, setExpanded] = useState(false);
+  const [planOpen, setPlanOpen] = useState(false);
   const hasSummary = Boolean(task.summary);
 
   return (
@@ -31,9 +33,20 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
         highlighted ? 'border-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.4)]' : 'border-border',
       )}
     >
-      <div className="flex items-baseline gap-2 px-3 pt-3 pb-2">
+      <div className="flex items-center gap-2 px-3 pt-3 pb-2">
         <span className="text-muted-foreground/50 text-xs shrink-0">#{task.id}</span>
         <span className="flex-1 text-base text-foreground leading-snug">{task.title}</span>
+
+        {task.plan && (
+          <button
+            type="button"
+            onClick={() => setPlanOpen(true)}
+            className="inline-flex items-center text-muted-foreground hover:text-primary cursor-pointer transition-colors shrink-0"
+            title="View plan"
+          >
+            <FileText className="w-4 h-4" strokeWidth={1.5} />
+          </button>
+        )}
 
         {task.scope && (
           <span className="text-xs tracking-widest text-primary/70 border border-primary/30 px-2 py-1 shrink-0">
@@ -152,6 +165,17 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
           Edit
         </Button>
       </div>
+
+      {task.plan && (
+        <Dialog open={planOpen} onOpenChange={setPlanOpen}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogTitle>Plan</DialogTitle>
+            <div className="prose-task text-sm text-muted-foreground leading-relaxed">
+              <Markdown remarkPlugins={[remarkGfm]}>{task.plan}</Markdown>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   );
 }
