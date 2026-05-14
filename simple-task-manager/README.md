@@ -35,7 +35,7 @@ cd ~/.claude/mcp-servers/simple-task-manager && npm install
 Open Claude Code in any project and say:
 
 ```
-Set up the task manager for me
+Set up the task manager for me.
 ```
 
 Claude will run the installer, write `.mcp.json` with the correct paths, and tell you to restart.
@@ -47,6 +47,11 @@ Restart Claude Code. On first launch it will prompt:
 
 ```
 Allow MCP server "task-manager" to run?
+```
+
+Then ask if everyting is nice and tasty:
+```
+Use mcp health tool to check if everything is set up.
 ```
 
 Approve it. Then try some prompts:
@@ -62,6 +67,23 @@ Approve it. Then try some prompts:
 - `"Do task #15"`
 - `"List all tasks"`
 
+
+&nbsp;
+&nbsp;
+&nbsp;
+
+## Skills included 
+
+### /refine
+Use this skill to refine any task. Claude will act as a PM and ask great questions about your task, and then update the description with refined version.
+- `"/refine #143"`
+- `"Let's /refine mcp tasks"`
+
+### /implement
+Use this skill to implement tasks. Claude will use all knowledge from simple-task-manager and it's ability to judge on the scope to run implementation inline, async or via available agents. 
+It will try to write and run tests to ensure code quality.
+- `"/implement #143"`
+- `"Go on, fix that data-fetching bug"`
 
 &nbsp;
 &nbsp;
