@@ -58,7 +58,7 @@ export function handleGetScopes(store: Store): MCPContent {
   return text({ scopes: store.getScopes() });
 }
 
-// ── ui-health ──────────────────────────────────────────────────────────────────
+// ── health ─────────────────────────────────────────────────────────────────────
 
 type CheckResult = { symbol: '✓' | '⚠' | '✗'; line: string };
 
@@ -105,7 +105,7 @@ function probeHttp(url: string, timeoutMs: number): Promise<number> {
   });
 }
 
-export async function handleUiHealth(): Promise<MCPContent> {
+export async function handleHealth(): Promise<MCPContent> {
   const sections: string[] = [];
 
   // ── Config section ───────────────────────────────────────────────────────────
@@ -282,7 +282,7 @@ function checkSkills(): CheckResult[] {
 function buildOutput(sections: string[]): MCPContent {
   const divider = '─'.repeat(9);
   const body = sections.join('\n\n');
-  const report = `ui-health\n${divider}\n${body}`;
+  const report = `health\n${divider}\n${body}`;
   return text({
     report,
     displayInstruction: 'Present this health report to the user as a markdown table with three columns: Status (✓/⚠/✗), Category (Config / Runtime / Skills), and Message. Each indented check line is one table row.',
