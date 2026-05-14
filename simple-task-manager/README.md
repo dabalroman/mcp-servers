@@ -146,24 +146,36 @@ The UI dies with the MCP (SIGTERM on shutdown). One MCP per project = one UI per
 
 These are called by Claude — you don't type them yourself.
 
+**Writing**
+
 | Tool | What it does |
 |---|---|
-| `add` | Schedule a new task. Required: `type`, `priority`, `title`, `description`. Optional: `scope`, `plan`, `refs`, `status` (`refinement` default; pass `todo` to skip refinement). Returns the new `id`. Refs are auto-mirrored on the other side. |
-| `update` | Edit any field of an existing task in place. Pass `null` to clear `scope`, `plan`, or `refs`. Works on active and done tasks. |
-| `setStatus` | Move a task: `refinement` → `todo` → `in_progress` → `done`. All statuses live in the same `tasks` table — moving to `done` is just an UPDATE. |
-| `getNext` | The single recommended next task — answers "what's next?". Returns `refinement` tasks after `in_progress`, before `todo`. |
-| `getAll` | All not-done tasks (refinement + todo + in_progress) grouped by type. |
-| `getByType` | All tasks of one type across all statuses, including done. |
-| `getByScope` | All tasks tagged with a specific scope (exact, case-sensitive). Empty results may indicate a typo'd scope — use `getScopes` to discover valid values. |
-| `getByStatus` | All tasks with a specific status. Optional `scope` filter. Returns `{ tasks: [] }` on empty, not an error. |
-| `getScopes` | List all scopes across active and done tasks with `total` and `open` counts. Use to discover valid scope values. |
-| `getById` | One task by its number. |
-| `getRelated` | Tasks that reference a given id (`inbound`, decorated with `refRelation`) and tasks it references (`outbound`, decorated with `refRelation`). |
-| `getOverview` | Count summary per type: `refinement`, `open` (todo + in_progress), and `done` counts. |
-| `delete` | Permanently remove a task. Cascades to all rows in `refs` (FK ON DELETE CASCADE). Only use when asked — prefer `setStatus(done)` for finished work. |
-| `health` | Check the task-manager setup AND get the UI URL. Reports `.mcp.json` config, UI reachability (both `localhost` and LAN-IP URLs), DB migration status, and `/refine`+`/implement` install. Use when something seems off or when the user asks where the UI is. |
-| `ui-start` | Start the UI server if it isn't already running. Idempotent — no-op if the port is already in use. Respects `TASK_UI_DISABLE`. |
-| `ui-stop` | Stop the UI server if it was spawned by this MCP. No-op if down; warns if the UI is running but was started externally (then stop it via the source). |
+| `add` | Schedule a new task. |
+| `update` | Edit any field in place. |
+| `setStatus` | Move a task through `refinement` → `todo` → `in_progress` → `done`. |
+| `delete` | Permanently remove a task. |
+
+**Reading**
+
+| Tool | What it does |
+|---|---|
+| `getNext` | The single recommended next task. |
+| `getAll` | All not-done tasks, grouped by type. |
+| `getById` | One task by number. |
+| `getByType` | All tasks of one type. |
+| `getByScope` | All tasks tagged with a scope. |
+| `getByStatus` | All tasks with a given status. |
+| `getScopes` | All scope tags with counts. |
+| `getRelated` | Tasks linked to a given id. |
+| `getOverview` | Per-type counts (refinement / open / done). |
+
+**Diagnostics & UI control**
+
+| Tool | What it does |
+|---|---|
+| `health` | Sanity-check the setup; also reports the UI URL. |
+| `ui-start` | Start the UI server (idempotent). |
+| `ui-stop` | Stop the UI server. |
 
 ### Refs — structured relations with automatic mirroring
 
