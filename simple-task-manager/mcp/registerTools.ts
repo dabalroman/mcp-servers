@@ -19,6 +19,8 @@ import {
   handleUpdate,
   handleSetStatus,
   handleDelete,
+  handleUiStart,
+  handleUiStop,
 } from './mutationHandlers.js';
 
 export function registerTools(server: McpServer, store: Store): void {
@@ -169,5 +171,21 @@ export function registerTools(server: McpServer, store: Store): void {
     'Permanently remove a task from the database. Use ONLY when the user explicitly asks to delete, remove, drop, or cancel a task — not when work is finished (use setStatus(done) for that). Cascade-removes refs from/to this task. This is irreversible.',
     { id: z.coerce.number().int().positive().describe('The numeric task ID to permanently remove') },
     async (args: unknown): Promise<MCPContent> => handleDelete(store, args as { id: number })
+  );
+
+  // ── ui-start ──────────────────────────────────────────────────────────────────
+  server.tool(
+    'ui-start',
+    'Start the task-manager-ui if not already running. Idempotent — returns alreadyRunning if the port is already in use. Respects TASK_UI_DISABLE.',
+    {},
+    async (): Promise<MCPContent> => handleUiStart()
+  );
+
+  // ── ui-stop ───────────────────────────────────────────────────────────────────
+  server.tool(
+    'ui-stop',
+    'Stop the task-manager-ui if running and owned by this MCP process. No-op if already down. Returns a warning if the UI is running but was started externally.',
+    {},
+    async (): Promise<MCPContent> => handleUiStop()
   );
 }

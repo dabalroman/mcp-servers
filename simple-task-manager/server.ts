@@ -75,9 +75,13 @@ const uiCandidates = [
   resolve(here, '../task-manager-ui'),
   resolve(here, '../../task-manager-ui'),
 ];
-const uiPkgDir = uiCandidates.find((p) => existsSync(resolve(p, 'server.ts'))) ?? uiCandidates[0]!;
-const uiServerEntry = resolve(uiPkgDir, 'server.ts');
+export const uiPkgDir = uiCandidates.find((p) => existsSync(resolve(p, 'server.ts'))) ?? uiCandidates[0]!;
+export const uiServerEntry = resolve(uiPkgDir, 'server.ts');
+export const resolvedTasksDb = TASKS_DB;
 let uiChild: ChildProcess | null = null;
+
+export function getUiChild(): ChildProcess | null { return uiChild; }
+export function setUiChild(child: ChildProcess | null): void { uiChild = child; }
 
 function pipeChildLines(
   stream: NodeJS.ReadableStream | null | undefined,
@@ -97,28 +101,35 @@ function pipeChildLines(
   stream.on('end', () => { if (buf.length) logToClient(level, buf); });
 }
 
-if (process.env.TASK_UI_DISABLE === '1') {
-  logToClient('info', '[simple-task-manager] task-manager-ui spawn disabled via TASK_UI_DISABLE=1');
-} else if (!existsSync(uiServerEntry)) {
-  logToClient('warning', `[simple-task-manager] task-manager-ui not found at ${uiPkgDir} — UI will not be available`);
-} else {
+export function spawnUi(): void {
+  if (!existsSync(uiServerEntry)) {
+    logToClient('warning', `[simple-task-manager] task-manager-ui not found at ${uiPkgDir} — UI will not be available`);
+    return;
+  }
   try {
-    uiChild = spawn(process.execPath, ['--import', 'tsx', uiServerEntry], {
+    const child = spawn(process.execPath, ['--import', 'tsx', uiServerEntry], {
       cwd: uiPkgDir,
-      env: { ...process.env, TASKS_DB },
+      env: { ...process.env, TASKS_DB: resolvedTasksDb },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
     });
-    pipeChildLines(uiChild.stdout, 'info');
-    pipeChildLines(uiChild.stderr, 'warning');
-    uiChild.on('exit', (code, signal) => {
+    pipeChildLines(child.stdout, 'info');
+    pipeChildLines(child.stderr, 'warning');
+    child.on('exit', (code, signal) => {
       logToClient('warning', `[simple-task-manager] task-manager-ui exited (code=${code} signal=${signal})`);
       uiChild = null;
     });
+    uiChild = child;
   } catch (err) {
     logToClient('error', `[simple-task-manager] failed to spawn task-manager-ui: ${String(err)}`);
     uiChild = null;
   }
+}
+
+if (process.env.TASK_UI_DISABLE === '1') {
+  logToClient('info', '[simple-task-manager] task-manager-ui spawn disabled via TASK_UI_DISABLE=1');
+} else {
+  spawnUi();
 }
 
 function killUi() {

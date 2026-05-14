@@ -1,5 +1,23 @@
-import { text, errorText, notFoundError, type MCPContent } from './shared.js';
+import { text, errorText, notFoundError, probeTcp, type MCPContent } from './shared.js';
+import { existsSync } from 'node:fs';
 import type { AddInput, Store, TaskStatus, UpdatePatch } from '../tasks.js';
+
+// Resolved lazily to avoid a circular import at module load time: server.ts
+// imports registerTools → mutationHandlers, so we import server.ts only when
+// the handler is actually invoked (post-startup).
+async function getServerExports() {
+  const mod = await import('../server.js');
+  return mod as {
+    uiPkgDir: string;
+    uiServerEntry: string;
+    resolvedTasksDb: string;
+    getUiChild: () => import('node:child_process').ChildProcess | null;
+    setUiChild: (child: import('node:child_process').ChildProcess | null) => void;
+    spawnUi: () => void;
+  };
+}
+
+const UI_PORT = parseInt(process.env['TASK_UI_PORT'] ?? '7374', 10);
 
 export function handleAdd(store: Store, args: AddInput): MCPContent {
   try {
@@ -43,4 +61,53 @@ export function handleDelete(store: Store, { id }: { id: number }): MCPContent {
   const ok = store.delete(id);
   if (!ok) return notFoundError(id, store, { withAre: true });
   return text({ success: true });
+}
+
+export async function handleUiStart(): Promise<MCPContent> {
+  if (process.env['TASK_UI_DISABLE'] === '1') {
+    return errorText({ error: 'TASK_UI_DISABLE=1 — UI spawn is disabled. Unset the env var and restart the MCP to enable it.' });
+  }
+
+  const running = await probeTcp(UI_PORT, 1000);
+  if (running) {
+    return text({ started: false, alreadyRunning: true, port: UI_PORT });
+  }
+
+  const srv = await getServerExports();
+  if (!existsSync(srv.uiServerEntry)) {
+    return errorText({ error: `task-manager-ui not found at ${srv.uiPkgDir} — the sub-package may not be installed.` });
+  }
+
+  srv.spawnUi();
+
+  // Give the process ~1 s to bind its port before confirming
+  await new Promise<void>((r) => setTimeout(r, 1000));
+  const confirmed = await probeTcp(UI_PORT, 1000);
+
+  return text({ started: true, confirmed, port: UI_PORT });
+}
+
+export async function handleUiStop(): Promise<MCPContent> {
+  const running = await probeTcp(UI_PORT, 1000);
+  if (!running) {
+    return text({ stopped: false, notRunning: true });
+  }
+
+  const srv = await getServerExports();
+  const child = srv.getUiChild();
+
+  if (child === null) {
+    return text({
+      stopped: false,
+      externalProcess: true,
+      message: `UI is running on port ${UI_PORT} but was not started by this MCP — stop it manually.`,
+    });
+  }
+
+  if (child.pid !== undefined && !child.killed) {
+    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+  }
+  srv.setUiChild(null);
+
+  return text({ stopped: true, port: UI_PORT });
 }

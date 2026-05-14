@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import * as net from 'node:net';
 import { RELATIONS, type Task, type Store } from '../tasks.js';
 
 export type MCPContent = {
@@ -25,6 +26,24 @@ export function allIdsSorted(store: Store): number[] {
 export function notFoundError(id: number, store: Store, { withAre = false }: { withAre?: boolean } = {}): MCPContent {
   const verb = withAre ? 'Valid IDs are' : 'Valid IDs';
   return errorText({ error: `Task #${id} not found. ${verb}: ${allIdsSorted(store).join(', ') || 'none'}` });
+}
+
+export function probeTcp(port: number, timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = new net.Socket();
+    let settled = false;
+    const done = (result: boolean) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      resolve(result);
+    };
+    socket.setTimeout(timeoutMs);
+    socket.on('connect', () => done(true));
+    socket.on('timeout', () => done(false));
+    socket.on('error', () => done(false));
+    socket.connect(port, '127.0.0.1');
+  });
 }
 
 export const refsSchema = z.array(z.object({
