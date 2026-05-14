@@ -54,6 +54,9 @@ const entry: McpEntry = {
   args: [serverEntry],
   env: {
     TASKS_DB: resolve(projectDir, 'tasks.db'),
+    TASK_UI_PORT: '7374',
+    TASK_UI_DISABLE: '0',
+    AUTO_OPEN_TASK_UI: '0',
   },
 };
 
