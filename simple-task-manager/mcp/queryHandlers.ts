@@ -2,6 +2,7 @@ import { readdirSync, existsSync, accessSync, constants as fsConstants, readFile
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as http from 'node:http';
+import { networkInterfaces } from 'node:os';
 import Database from 'better-sqlite3';
 import { text, toListTask, notFoundError, type MCPContent } from './shared.js';
 import type { Store, Task, TaskStatus, TaskType } from '../tasks.js';
@@ -82,6 +83,15 @@ function findMcpJson(startDir: string): string | null {
     if (parent === current) return null;
     current = parent;
   }
+}
+
+function getLanIp(): string {
+  for (const ifaces of Object.values(networkInterfaces())) {
+    for (const iface of ifaces ?? []) {
+      if (iface.family === 'IPv4' && !iface.internal) return iface.address;
+    }
+  }
+  return 'localhost';
 }
 
 function probeHttp(url: string, timeoutMs: number): Promise<number> {
@@ -193,17 +203,18 @@ export async function handleUiHealth(): Promise<MCPContent> {
   // ── Runtime section ──────────────────────────────────────────────────────────
   const runtimeChecks: CheckResult[] = [];
   const resolvedPort = uiPort || '7374';
-  const uiUrl = `http://localhost:${resolvedPort}/`;
+  const probeUrl = `http://localhost:${resolvedPort}/`;
+  const displayUrl = `http://${getLanIp()}:${resolvedPort}/`;
 
   try {
-    const statusCode = await probeHttp(uiUrl, 2000);
+    const statusCode = await probeHttp(probeUrl, 2000);
     if (statusCode >= 200 && statusCode < 400) {
-      runtimeChecks.push(check('✓', `UI reachable at ${uiUrl}`));
+      runtimeChecks.push(check('✓', `UI reachable at ${displayUrl}`));
     } else {
-      runtimeChecks.push(check('✗', `UI at ${uiUrl} returned HTTP ${statusCode} — is the MCP running?`));
+      runtimeChecks.push(check('✗', `UI at ${displayUrl} returned HTTP ${statusCode} — is the MCP running?`));
     }
   } catch {
-    runtimeChecks.push(check('✗', `UI not reachable at ${uiUrl} — is the MCP running?`));
+    runtimeChecks.push(check('✗', `UI not reachable at ${displayUrl} — is the MCP running?`));
   }
 
   // DB migration check
