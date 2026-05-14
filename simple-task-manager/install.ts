@@ -6,7 +6,7 @@
  *                             If a stale task-manager entry pointing at server.ts/server.js exists,
  *                             it is rewritten to point at dist/server.js.
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
@@ -90,4 +90,15 @@ writeFileSync(mcpFile, JSON.stringify(config, null, 2) + '\n');
 console.log(`${action} task-manager in ${mcpFile}`);
 console.log(`  server : ${entry.args[0]}`);
 console.log(`  db     : ${entry.env?.TASKS_DB ?? '(unset)'}`);
+
+// ── install skills ─────────────────────────────────────────────────────────────
+const commandsDir = resolve(homedir(), '.claude', 'commands');
+mkdirSync(commandsDir, { recursive: true });
+for (const skill of ['refine', 'implement']) {
+  const src = resolve(serverDir, 'commands', `${skill}.md`);
+  const dest = resolve(commandsDir, `${skill}.md`);
+  copyFileSync(src, dest);
+  console.log(`  skill  : /${skill} → ${dest}`);
+}
+
 console.log(`Restart Claude Code to activate.`);
