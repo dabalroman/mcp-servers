@@ -130,12 +130,14 @@ The UI dies with the MCP (SIGTERM on shutdown). One MCP per project = one UI per
 
 ### Env vars
 
+All four are written to `.mcp.json` by `install.ts` with the defaults below — no hidden behaviour.
+
 | Variable | Default | Effect |
 |---|---|---|
-| `TASKS_DB` | required | Path to the SQLite database. Forwarded to the UI so both processes open the same file. |
-| `TASK_UI_PORT` | `7374` | HTTP port for the UI. Change if 7374 is taken. |
-| `AUTO_OPEN_TASK_UI` | unset | When `1`, the UI opens its URL in the system browser on startup. Off by default — the URL is always printed to stderr. |
-| `TASK_UI_DISABLE` | unset | When `1`, the MCP skips spawning the UI entirely. Useful in tests or when you want to run the UI manually from a separate terminal. |
+| `TASKS_DB` | `<project>/tasks.db` | Path to the SQLite database. Forwarded to the UI so both processes open the same file. |
+| `TASK_UI_PORT` | `7374` | HTTP port for the UI. |
+| `AUTO_OPEN_TASK_UI` | `0` | Set to `1` to open the UI in the system browser on startup. |
+| `TASK_UI_DISABLE` | `0` | Set to `1` to skip spawning the UI entirely. |
 
 
 &nbsp;
