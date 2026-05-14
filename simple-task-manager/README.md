@@ -34,7 +34,9 @@ cd ~/.claude/mcp-servers/simple-task-manager && npm install
 
 Open Claude Code in any project and say:
 
-> "Set up the task manager for me"
+```
+Set up the task manager for me
+```
 
 Claude will run the installer, write `.mcp.json` with the correct paths, and tell you to restart.
 
