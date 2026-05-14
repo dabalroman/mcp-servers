@@ -164,7 +164,7 @@ export function registerTools(server: McpServer, store: Store): void {
   // ── health ────────────────────────────────────────────────────────────────────
   server.tool(
     'health',
-    'Validate the task-manager setup: checks .mcp.json config, probes the UI port, verifies DB migrations, and confirms /refine + /implement skills are installed. Returns a human-readable health report with ✓/⚠/✗ status lines and actionable fix instructions.',
+    'Validate the task-manager setup AND report the UI URL. Checks .mcp.json config, probes the UI port, verifies DB migrations, and confirms /refine + /implement skills are installed. Returns a human-readable health report with ✓/⚠/✗ status lines, actionable fix instructions, and the localhost + LAN-IP URLs for the task-manager UI. Call this when the user asks where the UI is, asks for the link, or wants the URL to open the task-manager in their browser — the LAN URL in the Runtime section is the clickable address.',
     {},
     async (): Promise<MCPContent> => handleHealth()
   );

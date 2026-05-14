@@ -161,6 +161,9 @@ These are called by Claude — you don't type them yourself.
 | `getRelated` | Tasks that reference a given id (`inbound`, decorated with `refRelation`) and tasks it references (`outbound`, decorated with `refRelation`). |
 | `getOverview` | Count summary per type: `refinement`, `open` (todo + in_progress), and `done` counts. |
 | `delete` | Permanently remove a task. Cascades to all rows in `refs` (FK ON DELETE CASCADE). Only use when asked — prefer `setStatus(done)` for finished work. |
+| `health` | Check the task-manager setup AND get the UI URL. Reports `.mcp.json` config, UI reachability (both `localhost` and LAN-IP URLs), DB migration status, and `/refine`+`/implement` install. Use when something seems off or when the user asks where the UI is. |
+| `ui-start` | Start the UI server if it isn't already running. Idempotent — no-op if the port is already in use. Respects `TASK_UI_DISABLE`. |
+| `ui-stop` | Stop the UI server if it was spawned by this MCP. No-op if down; warns if the UI is running but was started externally (then stop it via the source). |
 
 ### Refs — structured relations with automatic mirroring
 
