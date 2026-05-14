@@ -12,6 +12,7 @@ import {
   handleGetRelated,
   handleGetByStatus,
   handleGetScopes,
+  handleUiHealth,
 } from './queryHandlers.js';
 import {
   handleAdd,
@@ -152,6 +153,14 @@ export function registerTools(server: McpServer, store: Store): void {
     'List all scopes that exist across active and done tasks — use to discover valid scope values before calling getByScope or getByStatus with a scope filter. Returns { scopes: Array<{ scope, total, open }> }. Sorted: open desc, then total desc, then alphabetically.',
     {},
     async (): Promise<MCPContent> => handleGetScopes(store)
+  );
+
+  // ── ui-health ─────────────────────────────────────────────────────────────────
+  server.tool(
+    'ui-health',
+    'Validate the task-manager setup: checks .mcp.json config, probes the UI port, verifies DB migrations, and confirms /refine + /implement skills are installed. Returns a human-readable health report with ✓/⚠/✗ status lines and actionable fix instructions.',
+    {},
+    async (): Promise<MCPContent> => handleUiHealth()
   );
 
   // ── delete ────────────────────────────────────────────────────────────────────
