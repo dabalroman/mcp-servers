@@ -138,48 +138,9 @@ The UI dies with the MCP (SIGTERM on shutdown). One MCP per project = one UI per
 | `TASK_UI_DISABLE` | unset | When `1`, the MCP skips spawning the UI entirely. Useful in tests or when you want to run the UI manually from a separate terminal. |
 
 
-### Behaviour when the UI is missing
-
-If `~/.claude/mcp-servers/simple-task-manager/task-manager-ui/server.ts` doesn't exist (e.g. you removed the sub-package), the MCP writes:
-
-```
-[simple-task-manager] task-manager-ui not found at … — UI will not be available
-```
-
-…and continues normally. JSON-RPC tools still work as before.
-
----
-
-## Storage — SQLite
-
-Tasks live in a single SQLite database (default `tasks.db` at the project root). Schema:
-
-| Table | Purpose |
-|---|---|
-| `meta` | Key/value (currently just `counter` — last issued id) |
-| `tasks` | One row per task: `id, title, type, status, priority, scope, summary, description, plan, created_at, updated_at` |
-| `refs` | `(from_id, to_id, relation, non_canonical)` — directed; mirrors are written for canonical refs |
-| `schema_migrations` | Audit trail of applied schema migrations alongside `PRAGMA user_version` |
-
-Journal mode is `DELETE` (the SQLite default). WAL was tried first but its mmap'd `tasks.db-shm` region doesn't stay coherent when the writer and reader live in different VFS namespaces (e.g. host MCP + containerised reader sharing the file via a Docker bind mount) — readers kept stale snapshots until checkpoint. DELETE coordinates via POSIX advisory locks on the main DB file, which is bind-mount-safe. Write contention is a non-issue at this scale (tens of writes per session). The DB file (`tasks.db` in each project using the MCP) should be committed to git — tasks are project knowledge and teammates pulling the repo see the same backlog. Only the transient `tasks.db-journal` is gitignored.
-
-### Migrating from the legacy markdown format
-
-```sh
-npx tsx ~/.claude/mcp-servers/simple-task-manager/migrate.ts \
-  /path/to/TASKS.md /path/to/TASKS_DONE.md /path/to/tasks.db
-```
-
-Behaviour:
-- Refuses to run if `tasks.db` already exists — rename or remove it first.
-- Writes `.bak` copies next to both legacy files before reading.
-- Parses the legacy `# id title` / `## type | status | priority` / `$scope:` / `$ref:` format using a parser bundled inside `migrate.ts` (the main `tasks.ts` no longer carries legacy code).
-
-**Types**: `bug` · `feature` · `idea` · `tool` · `other`  
-**Priorities**: `low` · `medium` · `high` · `critical`  
-**Statuses**: `refinement` · `todo` · `in_progress` · `done`
-
----
+&nbsp;
+&nbsp;
+&nbsp;
 
 ## Tools
 
