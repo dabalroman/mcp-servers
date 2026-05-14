@@ -1,10 +1,12 @@
 # simple-task-manager MCP
 
-A persistent task manager for [Claude Code](https://claude.ai/code), exposed as an [MCP](https://modelcontextprotocol.io) server. Tasks live in a single SQLite database (`tasks.db`) at the project root. Claude uses them to track work across sessions, survive context compaction, and suggest what to do next.
+A persistent task manager for [Claude Code](https://claude.ai/code), exposed as an [MCP](https://modelcontextprotocol.io) server. Tasks live in a single SQLite database (`tasks.db`) at your's project root. Claude uses it to track work across sessions, survive context compaction, and suggest what to do next. It uses refine - plan - implement workflow to ensure best possible results. 
 
-**No separate Claude instructions needed** — behavioral rules are embedded in the server and loaded automatically when Claude connects.
+**Batteries included** - behavioral rules are embedded in the server and loaded automatically when Claude connects.
 
-**Web UI included.** When Claude starts the MCP, it also spawns a bundled web app (`simple-task-manager/task-manager-ui/`) at <http://localhost:7374>.
+**Skills included** - Use `/refine` and `/implement` skills to make it flow!
+
+**Web UI included** - When Claude starts the MCP, it also spawns a bundled web app at <http://localhost:7374>.
 
 &nbsp;
 &nbsp;
@@ -12,8 +14,12 @@ A persistent task manager for [Claude Code](https://claude.ai/code), exposed as 
 
 ## Prerequisites
 
-- **Node.js 18 or later** — check with `node --version`. Download from [nodejs.org](https://nodejs.org) if not installed.
-- **Claude Code** — the CLI or desktop app.
+- **Node.js 18 or later** — check with `node --version`.
+- **Claude Code** — the CLI.
+
+> [!warning]
+> This was tested on multiple Linux and WSL2 setups with Claude Code CLI.
+> Good luck if you're working on PowerShell! 
 
 
 &nbsp;
@@ -49,12 +55,12 @@ Restart Claude Code. On first launch it will prompt:
 Allow MCP server "task-manager" to run?
 ```
 
-Then ask if everyting is nice and tasty:
+Approve it. Then ask if everyting is nice and tasty:
 ```
 Use mcp health tool to check if everything is set up.
 ```
 
-Approve it. Then try some prompts:
+Then try some prompts:
 
 **Scheduling**
 - `"Schedule a bug, high priority: when the user closes the window, unsaved text is lost"`
