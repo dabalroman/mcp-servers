@@ -85,6 +85,7 @@ The `summary` column exists in the schema (version 1). The token-saving behaviou
 - Env vars forwarded: `TASKS_DB` plus the parent's full env (so `TASK_UI_PORT`, `AUTO_OPEN_TASK_UI` flow through).
 - Disable the spawn with `TASK_UI_DISABLE=1`. Useful in tests, when running the UI from a separate terminal, or when the sibling package is missing.
 - Missing sibling: if `./task-manager-ui/server.ts` doesn't exist (e.g. fresh checkout where the sibling isn't installed yet), the MCP logs a warning and continues without the UI.
+- Shutdown on stdin close: `server.ts` also hooks `process.stdin` `'end'` and `'close'` events to the same shutdown path. Claude Code closes the stdio pipe without sending SIGTERM when its window is closed — the stdin close triggers a clean teardown (killUi + store.close + process.exit) so the MCP and its UI child don't get orphaned on PID 1.
 
 The UI imports the store directly from `./tasks.js` via a relative path (`../simple-task-manager/tasks.js`) — there is **no vendor mirror**. Schema changes affect only this package; the UI picks them up at the next tsx import.
 

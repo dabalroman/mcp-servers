@@ -127,9 +127,16 @@ function killUi() {
   }
 }
 
-process.on('SIGINT',  () => { killUi(); try { store.close(); } catch { /* ignore */ } process.exit(0); });
-process.on('SIGTERM', () => { killUi(); try { store.close(); } catch { /* ignore */ } process.exit(0); });
+function shutdown() { killUi(); try { store.close(); } catch { /* ignore */ } process.exit(0); }
+
+process.on('SIGINT',  shutdown);
+process.on('SIGTERM', shutdown);
 process.on('exit',    () => { killUi(); try { store.close(); } catch { /* ignore */ } });
+
+// Claude Code closes the stdio pipe without sending a signal — detect that and
+// shut down cleanly so we don't leak an orphaned MCP + UI child on PID 1.
+process.stdin.on('end',   shutdown);
+process.stdin.on('close', shutdown);
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
