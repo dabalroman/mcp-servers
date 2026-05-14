@@ -209,12 +209,12 @@ export async function handleUiHealth(): Promise<MCPContent> {
   try {
     const statusCode = await probeHttp(probeUrl, 2000);
     if (statusCode >= 200 && statusCode < 400) {
-      runtimeChecks.push(check('✓', `UI reachable at ${displayUrl}`));
+      runtimeChecks.push(check('✓', `UI reachable at ${probeUrl} · ${displayUrl}`));
     } else {
-      runtimeChecks.push(check('✗', `UI at ${displayUrl} returned HTTP ${statusCode} — is the MCP running?`));
+      runtimeChecks.push(check('✗', `UI at ${probeUrl} returned HTTP ${statusCode} — is the MCP running?`));
     }
   } catch {
-    runtimeChecks.push(check('✗', `UI not reachable at ${displayUrl} — is the MCP running?`));
+    runtimeChecks.push(check('✗', `UI not reachable at ${probeUrl} — is the MCP running?`));
   }
 
   // DB migration check
