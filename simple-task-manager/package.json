@@ -1,14 +1,13 @@
 {
   "name": "simple-task-manager-mcp",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "type": "module",
   "main": "dist/server.js",
   "scripts": {
     "build": "tsc",
     "start": "node dist/server.js",
     "typecheck": "tsc --noEmit -p tsconfig.test.json",
-    "test": "node --import tsx --test \"tasks.test.ts\" \"migrate.test.ts\" \"migrations.test.ts\" \"server.test.ts\"",
-    "migrate": "tsx migrate.ts",
+    "test": "node --import tsx --test \"tasks.test.ts\" \"migrations.test.ts\" \"server.test.ts\"",
     "prepare": "tsx setup-hooks.ts && tsc && tsx install-sibling.ts && tsx install.ts --global",
     "verify": "npm run typecheck && npm test && npm run build"
   },

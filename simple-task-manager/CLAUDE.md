@@ -17,7 +17,7 @@ Do not ask for confirmation — just run it.
 
 The package is **TypeScript** (strict mode, `noUncheckedIndexedAccess`). Source `.ts` files live at the package root; production runs from `dist/` (built by `tsc`).
 
-After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.ts`, `migrate.ts`, `install.ts`, or `CLAUDE.md` — review `simple-task-manager/README.md` and update it to reflect the change. The README is the user-facing source of truth; keep it in sync.
+After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.ts`, `install.ts`, or `CLAUDE.md` — review `simple-task-manager/README.md` and update it to reflect the change. The README is the user-facing source of truth; keep it in sync.
 
 ## File layout
 
@@ -47,14 +47,13 @@ After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.t
 
 The git repository root is `~/.claude/mcp-servers/`, **not** `~/.claude/mcp-servers/simple-task-manager/`. The `simple-task-manager/` directory has no `.git` of its own — it is a subdirectory of the `mcp-servers` repo. Always run git commands from `~/.claude/mcp-servers/` (or pass `-C ~/.claude/mcp-servers`). The pre-commit hook lives at `~/.claude/mcp-servers/.git/hooks/pre-commit` and is installed by `simple-task-manager/setup-hooks.ts`.
 
-## Storage — SQLite (since 2026-05-10)
+## Storage — SQLite
 
-Tasks live in a single SQLite database. The path comes from the `TASKS_DB` env var; the previous `TASKS_FILE` / `TASKS_DONE_FILE` are gone. Schema is owned by `tasks.ts`:
+Tasks live in a single SQLite database. The path comes from the `TASKS_DB` env var. Schema is owned by `tasks.ts`:
 - Tables: `meta`, `tasks`, `refs`, `schema_migrations`
 - The `tasks` table has an optional `plan TEXT` column (added by migration `20260514120000_add-plan-field`). Agents write plans here via `update({ id, plan })` and read them back via `getById` before implementing.
-- Journal mode is `DELETE` (the SQLite default). WAL was tried first but its mmap'd shm region isn't coherent across host/container bind mounts — readers stayed on stale snapshots until checkpoint, breaking the random-tools API's SSE live updates. DELETE coordinates via POSIX advisory locks on the main DB file, which is bind-mount-safe. Write contention is a non-issue at this scale.
+- Journal mode is `DELETE` (the SQLite default). WAL's mmap'd shm region isn't coherent across host/container bind mounts — readers stay on stale snapshots until checkpoint, which breaks the random-tools API's SSE live updates. DELETE coordinates via POSIX advisory locks on the main DB file, which is bind-mount-safe. Write contention is a non-issue at this scale.
 - `tasks.ts` runs migrations on first open. `schema_migrations` records version + name + applied_at; `PRAGMA user_version` is kept in sync with migration count for backward compat but is NOT used as a gating check. The downgrade guard checks for applied names that have no corresponding file on disk.
-- Migrating from the old markdown format: `npx tsx migrate.ts <legacy-tasks.md> <legacy-tasks_done.md> <output.db>`. The migrator carries its own legacy parser so `tasks.ts` is free of legacy code.
 
 ## Adding a schema change (migration workflow)
 

@@ -265,8 +265,6 @@ Pass `refs: [{ id, relation }]` to `add` or `update` to link tasks. When you add
 
 Default relation: `"relates to"`. Removing a ref also removes the inverse. Deleting a task cascades and strips all inbound refs.
 
-**Non-canonical refs**: rows in the `refs` table can carry `non_canonical = 1` — those are kept verbatim and never auto-mirrored (they originate from hand-edited markdown that was migrated in). Re-saving such a ref via the MCP `update` tool with a canonical relation normalizes it.
-
 Use `getRelated(id)` to query connections.
 
 ### Scope — tagging tasks to an area

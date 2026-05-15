@@ -1,6 +1,6 @@
 export const INSTRUCTIONS: string = `
 You are connected to simple-task-manager — a persistent task tracker that survives session restarts and context compaction.
-Tasks live in a single SQLite database (env var \`TASKS_DB\`); they used to live in TASKS.md / TASKS_DONE.md before the SQLite migration.
+Tasks live in a single SQLite database (env var \`TASKS_DB\`).
 
 ## Critical scheduling rules
 - When the user says "schedule X", "TODO X", "add to the list", "FEATURE X", "BUG X", "IDEA X" — call add() and STOP. Do NOT also implement it.

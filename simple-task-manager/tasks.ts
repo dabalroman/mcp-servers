@@ -1,4 +1,4 @@
-// SQLite-backed task store. Replaces the previous markdown/DSL parser.
+// SQLite-backed task store.
 // Schema is managed by file-per-migration in ./migrations/.
 import { createRequire } from 'node:module';
 import { readdirSync } from 'node:fs';
@@ -618,7 +618,7 @@ export function createStore(dbPath: string): Store {
   };
 }
 
-// ── Pure helpers exported for tests / migrate.ts ──────────────────────────────
+// ── Pure helpers exported for tests ───────────────────────────────────────────
 // Mutates allTasks in place — preserved for backward-compat with random-tools' vendor mirror.
 export function applyRefs(allTasks: Task[], sourceId: number, oldRefs: Ref[] | undefined, nextRefs: Ref[] | undefined): Task[] {
   const validIds = new Set(allTasks.map((t) => t.id));

@@ -27,20 +27,8 @@ function logToClient(level: LogLevel, data: string): void {
   void server.server.sendLoggingMessage({ level, data: trimmed }).catch(() => { /* ignore */ });
 }
 
-if (process.env.TASKS_FILE || process.env.TASKS_DONE_FILE) {
-  logToClient(
-    'warning',
-    '[simple-task-manager] TASKS_FILE / TASKS_DONE_FILE are no longer used. ' +
-    'Set TASKS_DB to the path of the SQLite database (e.g. /abs/path/tasks.db). ' +
-    'Run `node migrate.js <legacy-tasks.md> <legacy-tasks_done.md> <output.db>` to migrate.'
-  );
-}
-
 if (!process.env.TASKS_DB) {
-  throw new Error(
-    'TASKS_DB env var is required (path to the SQLite tasks database). ' +
-    'See README for migration from the legacy markdown format.'
-  );
+  throw new Error('TASKS_DB env var is required (absolute path to the SQLite tasks database).');
 }
 const TASKS_DB = resolve(process.env.TASKS_DB);
 const store = createStore(TASKS_DB);
