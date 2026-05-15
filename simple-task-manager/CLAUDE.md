@@ -80,7 +80,7 @@ The `summary` column exists in the schema (version 1). The token-saving behaviou
 
 The task-manager MCP reads its config from the `mcpServers["task-manager"].env` block in the project's `.mcp.json`. The schema is the single source of truth for both `install.ts` (which writes the file) and `setup-standalone.ts` (which edits it). When you add or rename an env var, update **all four** of these in lockstep:
 
-1. `mcpConfig.ts` — `ENV_DOCS` (the inline doc comment) and `ENV_ORDER` (canonical position).
+1. `mcpConfig.ts` — `ENV_DOCS` (printed by install.ts after writing `.mcp.json`) and `ENV_ORDER` (canonical position).
 2. `install.ts` — the default value in the emitted `entry.env`.
 3. The consumer (server.ts / mcp/* / task-manager-ui) — wherever the var is read.
 4. `README.md` — the env-var table is the user-facing contract.
@@ -95,11 +95,9 @@ Current env vars (canonical order):
 | `TASK_UI_MODE` | enum | `server.ts`, `mcp/*`, UI | `bundled` (default) \| `standalone` \| `disabled`. See "Standalone UI mode" below. |
 | `TASK_UI_AUTO_OPEN_IN_BROWSER` | "0" / "1" | UI | Auto-opens the UI in the system browser when "1". |
 
-### JSONC in `.mcp.json`
+### `.mcp.json` is strict JSON
 
-Claude Code's MCP loader accepts JSONC (`//` line comments, `/* … */` block comments). `install.ts` emits a fully-commented `.mcp.json` so when a user opens it they see what each var does and which values are valid. `setup-standalone.ts` round-trips the file through `parseMcpConfig` (strips comments) + `serializeMcpConfig` (re-emits them deterministically), so doc comments survive edits.
-
-The JSONC helpers live in `mcpConfig.ts`. Don't reintroduce raw `JSON.parse(readFileSync(mcpFile))` anywhere that writes back to the file — you'll lose the comments on the next save.
+Claude Code's project-level MCP loader (the one behind `/doctor`) rejects JSONC — a `//` comment makes it report "MCP config is not a valid JSON" and the MCP fails to load. `serializeMcpConfig` therefore writes pure JSON. Env-var docs reach the user via two channels instead: `install.ts` prints `ENV_DOCS[key]` after writing the file, and the README env-var table is the canonical reference. Don't reintroduce comment emission, and don't add a `stripJsonComments` step to `parseMcpConfig` — both ends are pure JSON.
 
 ## task-manager-ui spawn (bundled mode)
 

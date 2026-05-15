@@ -14,8 +14,8 @@
  *
  * After either command, restart Claude Code so the MCP picks up the new env block.
  *
- * The script reads/writes .mcp.json via the shared JSONC helper so the user-facing
- * comments install.ts emits are preserved across edits.
+ * The script reads/writes .mcp.json via the shared helpers in mcpConfig.ts so
+ * env-var ordering stays diff-stable across edits.
  */
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
 import { resolve, basename, dirname } from 'node:path';

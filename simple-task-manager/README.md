@@ -160,7 +160,7 @@ The UI dies with the MCP (SIGTERM on shutdown). One MCP per project = one UI per
 
 ### Env vars
 
-All of these are written to `.mcp.json` by `install.ts` with the defaults below — no hidden behaviour. Each one is documented inline in the generated `.mcp.json` with `//` comments (Claude Code's MCP loader accepts JSONC), so you can see what's valid without leaving the file.
+All of these are written to `.mcp.json` by `install.ts` with the defaults below — no hidden behaviour. `install.ts` also prints each var's purpose to the console after writing the file (Claude Code's MCP loader is strict JSON, so we can't put doc comments inline). The table below is the canonical reference.
 
 | Variable | Default | Effect |
 |---|---|---|

@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from
 import { resolve, dirname, basename } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
-import { parseMcpConfig, serializeMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
+import { ENV_DOCS, ENV_ORDER, parseMcpConfig, serializeMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
 
 const serverDir = dirname(fileURLToPath(import.meta.url));
 const serverEntry = resolve(serverDir, 'dist/server.js');
@@ -58,7 +58,7 @@ if (existsSync(mcpFile)) {
     config = parseMcpConfig(readFileSync(mcpFile, 'utf8'));
     config.mcpServers ??= {};
   } catch {
-    console.error(`Error: ${mcpFile} exists but is not valid JSON(C). Fix it manually first.`);
+    console.error(`Error: ${mcpFile} exists but is not valid JSON. Fix it manually first.`);
     process.exit(1);
   }
 }
@@ -85,6 +85,21 @@ writeFileSync(mcpFile, serializeMcpConfig(config));
 console.log(`${action} task-manager in ${mcpFile}`);
 console.log(`  server : ${entry.args[0]}`);
 console.log(`  db     : ${entry.env?.TASKS_DB ?? '(unset)'}`);
+
+// Print env-var docs so the user can see what each value means without
+// hunting through the README. We can't put these in `.mcp.json` itself —
+// Claude Code's MCP loader rejects JSONC comments.
+console.log('');
+console.log('Configured env vars (edit .mcp.json to change):');
+for (const key of ENV_ORDER) {
+  const value = entry.env?.[key];
+  if (value === undefined) continue;
+  console.log(`  ${key} = ${JSON.stringify(value)}`);
+  for (const line of ENV_DOCS[key] ?? []) {
+    console.log(`    ${line}`);
+  }
+}
+console.log('');
 
 // ── install skills ─────────────────────────────────────────────────────────────
 const commandsDir = resolve(homedir(), '.claude', 'commands');
