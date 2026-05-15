@@ -7,22 +7,13 @@
  *                             it is rewritten to point at dist/server.js.
  */
 import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
-import { resolve, dirname } from 'path';
+import { resolve, dirname, basename } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
+import { parseMcpConfig, serializeMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
 
 const serverDir = dirname(fileURLToPath(import.meta.url));
 const serverEntry = resolve(serverDir, 'dist/server.js');
-
-type McpEntry = {
-  command: string;
-  args: string[];
-  env?: Record<string, string>;
-};
-
-type McpConfig = {
-  mcpServers: Record<string, McpEntry>;
-};
 
 // ── --global: register the setup instructions in ~/.claude/CLAUDE.md ──────────
 if (process.argv[2] === '--global') {
@@ -54,19 +45,20 @@ const entry: McpEntry = {
   args: [serverEntry],
   env: {
     TASKS_DB: resolve(projectDir, 'tasks.db'),
+    PROJECT_NAME: basename(projectDir),
     TASK_UI_PORT: '7374',
-    TASK_UI_DISABLE: '0',
-    AUTO_OPEN_TASK_UI: '0',
+    TASK_UI_MODE: 'bundled',
+    TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
   },
 };
 
 let config: McpConfig = { mcpServers: {} };
 if (existsSync(mcpFile)) {
   try {
-    config = JSON.parse(readFileSync(mcpFile, 'utf8')) as McpConfig;
+    config = parseMcpConfig(readFileSync(mcpFile, 'utf8'));
     config.mcpServers ??= {};
   } catch {
-    console.error(`Error: ${mcpFile} exists but is not valid JSON. Fix it manually first.`);
+    console.error(`Error: ${mcpFile} exists but is not valid JSON(C). Fix it manually first.`);
     process.exit(1);
   }
 }
@@ -89,7 +81,7 @@ if (existingEntry && !isStaleEntry(existingEntry)) {
 
 const action = existingEntry ? 'Refreshed' : 'Registered';
 config.mcpServers['task-manager'] = entry;
-writeFileSync(mcpFile, JSON.stringify(config, null, 2) + '\n');
+writeFileSync(mcpFile, serializeMcpConfig(config));
 console.log(`${action} task-manager in ${mcpFile}`);
 console.log(`  server : ${entry.args[0]}`);
 console.log(`  db     : ${entry.env?.TASKS_DB ?? '(unset)'}`);

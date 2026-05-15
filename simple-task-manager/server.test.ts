@@ -22,12 +22,15 @@ import {
   handleGetByScope,
   handleGetRelated,
   handleGetByStatus,
+  handleHealth,
 } from './mcp/queryHandlers.js';
 import {
   handleAdd,
   handleUpdate,
   handleSetStatus,
   handleDelete,
+  handleUiStart,
+  handleUiStop,
 } from './mcp/mutationHandlers.js';
 import type { MCPContent } from './mcp/shared.js';
 
@@ -401,6 +404,105 @@ describe('plan field — MCP layer', () => {
     };
     assert.equal(payload.task.plan, 'plan B', 'anchor task should include plan');
     assert.equal(payload.outbound[0]?.plan, undefined, 'outbound should not include plan');
+  });
+});
+
+describe('health handler — ui field', () => {
+  let savedCwd: string;
+  let savedMode: string | undefined;
+  let savedProjectName: string | undefined;
+
+  beforeEach(() => {
+    savedCwd = process.cwd();
+    savedMode = process.env['TASK_UI_MODE'];
+    savedProjectName = process.env['PROJECT_NAME'];
+    // chdir into the fresh tmp dir (no .mcp.json there) so handleHealth takes
+    // the early-return branch and `ui` comes from process.env.
+    process.chdir(dir);
+  });
+
+  afterEach(() => {
+    process.chdir(savedCwd);
+    if (savedMode === undefined) delete process.env['TASK_UI_MODE'];
+    else process.env['TASK_UI_MODE'] = savedMode;
+    if (savedProjectName === undefined) delete process.env['PROJECT_NAME'];
+    else process.env['PROJECT_NAME'] = savedProjectName;
+  });
+
+  test('reports ui: standalone when TASK_UI_MODE=standalone', async () => {
+    process.env['TASK_UI_MODE'] = 'standalone';
+    const resp = await handleHealth();
+    assert.equal((decode(resp) as { ui: string }).ui, 'standalone');
+  });
+
+  test('reports ui: disabled when TASK_UI_MODE=disabled', async () => {
+    process.env['TASK_UI_MODE'] = 'disabled';
+    const resp = await handleHealth();
+    assert.equal((decode(resp) as { ui: string }).ui, 'disabled');
+  });
+
+  test('reports ui: bundled when TASK_UI_MODE=bundled', async () => {
+    process.env['TASK_UI_MODE'] = 'bundled';
+    const resp = await handleHealth();
+    assert.equal((decode(resp) as { ui: string }).ui, 'bundled');
+  });
+
+  test('reports ui: bundled when TASK_UI_MODE is unset', async () => {
+    delete process.env['TASK_UI_MODE'];
+    const resp = await handleHealth();
+    assert.equal((decode(resp) as { ui: string }).ui, 'bundled');
+  });
+
+  test('reports ui: bundled for an unrecognised TASK_UI_MODE value', async () => {
+    process.env['TASK_UI_MODE'] = 'garbage';
+    const resp = await handleHealth();
+    assert.equal((decode(resp) as { ui: string }).ui, 'bundled');
+  });
+});
+
+describe('ui-start / ui-stop — TASK_UI_MODE', () => {
+  let savedMode: string | undefined;
+  let savedProjectName: string | undefined;
+
+  beforeEach(() => {
+    savedMode = process.env['TASK_UI_MODE'];
+    savedProjectName = process.env['PROJECT_NAME'];
+  });
+
+  afterEach(() => {
+    if (savedMode === undefined) delete process.env['TASK_UI_MODE'];
+    else process.env['TASK_UI_MODE'] = savedMode;
+    if (savedProjectName === undefined) delete process.env['PROJECT_NAME'];
+    else process.env['PROJECT_NAME'] = savedProjectName;
+  });
+
+  test('ui-start returns an error pointing to pm2 when mode=standalone', async () => {
+    process.env['TASK_UI_MODE'] = 'standalone';
+    process.env['PROJECT_NAME'] = 'my-project';
+    const resp = await handleUiStart();
+    assert.ok(resp.isError, 'should be an error');
+    const msg = (decode(resp) as { error: string }).error;
+    assert.ok(msg.includes('standalone'), 'error should mention standalone mode');
+    assert.ok(msg.includes('pm2 restart my-project'), 'error should include the pm2 hint with the PROJECT_NAME');
+  });
+
+  test('ui-start returns an error explaining disabled when mode=disabled', async () => {
+    process.env['TASK_UI_MODE'] = 'disabled';
+    const resp = await handleUiStart();
+    assert.ok(resp.isError, 'should be an error');
+    const msg = (decode(resp) as { error: string }).error;
+    assert.ok(msg.includes('disabled'));
+    assert.ok(msg.includes('bundled'), 'error should point at the bundled value as the fix');
+  });
+
+  test('ui-stop returns an error pointing to pm2 when mode=standalone', async () => {
+    process.env['TASK_UI_MODE'] = 'standalone';
+    process.env['PROJECT_NAME'] = 'my-project';
+    const resp = await handleUiStop();
+    assert.ok(resp.isError, 'should be an error');
+    const msg = (decode(resp) as { error: string }).error;
+    assert.ok(msg.includes('standalone'));
+    assert.ok(msg.includes('pm2 stop my-project'));
   });
 });
 

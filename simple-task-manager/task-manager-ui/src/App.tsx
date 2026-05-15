@@ -1,7 +1,35 @@
+import { useEffect, useState } from 'react';
 import TaskManager from './client/TaskManager';
 import { Toaster } from './components/ui/sonner';
 
+type RunMode = 'bundled' | 'standalone' | 'disabled';
+
+type Config = {
+  name: string | null;
+  mode: RunMode;
+};
+
 export default function App() {
+  const [config, setConfig] = useState<Config | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/config')
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((data: Partial<Config>) => {
+        if (cancelled) return;
+        const name = typeof data?.name === 'string' && data.name.length > 0 ? data.name : null;
+        const mode: RunMode = data?.mode === 'standalone' || data?.mode === 'disabled' ? data.mode : 'bundled';
+        setConfig({ name, mode });
+        if (name) document.title = `${name} · tasks`;
+      })
+      .catch(() => { /* leave defaults in place */ });
+    return () => { cancelled = true; };
+  }, []);
+
+  const projectName = config?.name ?? null;
+  const mode = config?.mode ?? null;
+
   return (
     <div className="min-h-screen flex flex-col">
       <header className="border-b border-border">
@@ -9,9 +37,18 @@ export default function App() {
           <span className="font-bold uppercase tracking-widest text-lg text-foreground">
             task<span className="text-primary">/</span>manager
           </span>
-          <span className="text-xs tracking-widest uppercase text-muted-foreground">
-            simple-task-manager MCP UI
-          </span>
+          {projectName && (
+            <div className="flex flex-col items-end gap-1">
+              <span className="font-bold uppercase tracking-widest text-lg text-foreground">
+                {projectName}
+              </span>
+              {mode && (
+                <span className="text-xs tracking-widest uppercase text-muted-foreground">
+                  {mode} mode
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </header>
       <main className="flex-1">

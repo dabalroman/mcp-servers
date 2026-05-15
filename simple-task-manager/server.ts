@@ -60,10 +60,11 @@ registerTools(server, store);
 // local tsx loader (cwd = that package, so node resolves tsx from its
 // node_modules).
 //
-// Env vars:
-//   TASKS_DB           — forwarded so the UI opens the same database.
-//   TASK_UI_PORT       — forwarded; default 7374.
-//   AUTO_OPEN_TASK_UI  — forwarded; UI auto-opens the browser when "1".
+// Env vars (forwarded via the `...process.env` spread to the child):
+//   TASKS_DB                       — UI opens the same SQLite database.
+//   PROJECT_NAME                   — UI header pill + browser tab title.
+//   TASK_UI_PORT                   — port for the UI; default 7374.
+//   TASK_UI_AUTO_OPEN_IN_BROWSER   — UI auto-opens the system browser when "1".
 //
 // Disable spawn entirely with TASK_UI_DISABLE=1 (useful for tests or when
 // running the UI manually from a separate terminal).
@@ -126,8 +127,15 @@ export function spawnUi(): void {
   }
 }
 
-if (process.env.TASK_UI_DISABLE === '1') {
-  logToClient('info', '[simple-task-manager] task-manager-ui spawn disabled via TASK_UI_DISABLE=1');
+// TASK_UI_MODE is the single source of truth for whether/how the UI runs.
+// Values: "bundled" (default) | "standalone" (pm2 owns it) | "disabled" (no UI).
+// Missing or unrecognised values fall back to "bundled" so existing setups keep
+// working until install/setup-standalone updates the file.
+const uiMode = process.env.TASK_UI_MODE ?? 'bundled';
+if (uiMode === 'standalone') {
+  logToClient('info', '[simple-task-manager] TASK_UI_MODE=standalone — UI is pm2-managed, not spawning a child');
+} else if (uiMode === 'disabled') {
+  logToClient('info', '[simple-task-manager] TASK_UI_MODE=disabled — UI will not run');
 } else {
   spawnUi();
 }

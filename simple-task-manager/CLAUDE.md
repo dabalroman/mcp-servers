@@ -77,18 +77,82 @@ The `summary` column exists in the schema (version 1). The token-saving behaviou
 - `handleSetStatus` blocks `refinement → todo` if the task has no summary. `handleUpdate` on a refinement task without summary returns a `summaryReminder` field.
 - The refine skill (`~/.claude/commands/refine.md`) generates the summary as step 3b before promoting.
 
-## task-manager-ui spawn
+## Env-var schema for `.mcp.json`
 
-`server.ts` spawns `./task-manager-ui/server.ts` as a child process after `createStore` returns. The UI dies with the MCP (SIGTERM on shutdown handlers).
+The task-manager MCP reads its config from the `mcpServers["task-manager"].env` block in the project's `.mcp.json`. The schema is the single source of truth for both `install.ts` (which writes the file) and `setup-standalone.ts` (which edits it). When you add or rename an env var, update **all four** of these in lockstep:
+
+1. `mcpConfig.ts` — `ENV_DOCS` (the inline doc comment) and `ENV_ORDER` (canonical position).
+2. `install.ts` — the default value in the emitted `entry.env`.
+3. The consumer (server.ts / mcp/* / task-manager-ui) — wherever the var is read.
+4. `README.md` — the env-var table is the user-facing contract.
+
+Current env vars (canonical order):
+
+| Variable | Type | Owner | Notes |
+|---|---|---|---|
+| `TASKS_DB` | absolute path | `tasks.ts` | SQLite database file. |
+| `PROJECT_NAME` | string | UI + setup-standalone | Big pill in the UI header + browser tab title. Also the pm2 process name in standalone mode. |
+| `TASK_UI_PORT` | port number | UI | Default 7374. |
+| `TASK_UI_MODE` | enum | `server.ts`, `mcp/*`, UI | `bundled` (default) \| `standalone` \| `disabled`. See "Standalone UI mode" below. |
+| `TASK_UI_AUTO_OPEN_IN_BROWSER` | "0" / "1" | UI | Auto-opens the UI in the system browser when "1". |
+
+### JSONC in `.mcp.json`
+
+Claude Code's MCP loader accepts JSONC (`//` line comments, `/* … */` block comments). `install.ts` emits a fully-commented `.mcp.json` so when a user opens it they see what each var does and which values are valid. `setup-standalone.ts` round-trips the file through `parseMcpConfig` (strips comments) + `serializeMcpConfig` (re-emits them deterministically), so doc comments survive edits.
+
+The JSONC helpers live in `mcpConfig.ts`. Don't reintroduce raw `JSON.parse(readFileSync(mcpFile))` anywhere that writes back to the file — you'll lose the comments on the next save.
+
+## task-manager-ui spawn (bundled mode)
+
+In `bundled` mode (the default), `server.ts` spawns `./task-manager-ui/server.ts` as a child process after `createStore` returns. The UI dies with the MCP (SIGTERM on shutdown handlers).
 
 - Spawn command: `node --import tsx server.ts` with `cwd` set to `task-manager-ui/` so node resolves the `tsx` loader from that package's `node_modules`.
 - `stdio: ['ignore', 'pipe', 'pipe']` — child's stdout and stderr are piped into the MCP's **stderr** (the MCP's own stdout is owned by JSON-RPC).
-- Env vars forwarded: `TASKS_DB` plus the parent's full env (so `TASK_UI_PORT`, `AUTO_OPEN_TASK_UI` flow through).
-- Disable the spawn with `TASK_UI_DISABLE=1`. Useful in tests, when running the UI from a separate terminal, or when the sibling package is missing.
+- Env forwarded: `TASKS_DB` plus the parent's full env (so `PROJECT_NAME`, `TASK_UI_PORT`, `TASK_UI_MODE`, `TASK_UI_AUTO_OPEN_IN_BROWSER` flow through).
 - Missing sibling: if `./task-manager-ui/server.ts` doesn't exist (e.g. fresh checkout where the sibling isn't installed yet), the MCP logs a warning and continues without the UI.
 - Shutdown on stdin close: `server.ts` also hooks `process.stdin` `'end'` and `'close'` events to the same shutdown path. Claude Code closes the stdio pipe without sending SIGTERM when its window is closed — the stdin close triggers a clean teardown (killUi + store.close + process.exit) so the MCP and its UI child don't get orphaned on PID 1.
 
 The UI imports the store directly from `./tasks.js` via a relative path (`../simple-task-manager/tasks.js`) — there is **no vendor mirror**. Schema changes affect only this package; the UI picks them up at the next tsx import.
+
+## Standalone UI mode
+
+Per-project opt-in: `TASK_UI_MODE=standalone` in `.mcp.json` flips the MCP from "spawn the UI as a child" to "the UI is a long-lived pm2 process I should ignore." Managed by `setup-standalone.ts on|off` (run from the project dir).
+
+**Why tri-state, not two booleans?** Earlier iterations had `TASK_UI_DISABLE` and `TASK_UI_STANDALONE` as separate `0/1` flags. Mechanically both made the MCP skip the spawn, so the user-facing intent (UI exists vs. doesn't) was hidden behind precedence rules. `TASK_UI_MODE` collapses that into one enum where each value names a distinct lifecycle.
+
+**Spawn logic (`server.ts`)**: switch on `TASK_UI_MODE`. `standalone` and `disabled` both skip `spawnUi()` but log different reasons. Anything else (including unset / unrecognised) falls back to `bundled`.
+
+**`ui-start` / `ui-stop`**:
+
+- `mode === 'standalone'` → return an errorText pointing at `pm2 restart <PROJECT_NAME>` / `pm2 stop <PROJECT_NAME>`. Never proxy to pm2.
+- `mode === 'disabled'` (ui-start only) → error explaining to set `TASK_UI_MODE=bundled` and restart.
+- `mode === 'bundled'` → real behaviour (probe TCP, spawn, send SIGTERM).
+
+**`health.ui` field**: every `handleHealth` response includes a structured `ui: 'bundled' | 'standalone' | 'disabled'` alongside the human-readable `report`. Resolution:
+
+1. `.mcp.json` parsed successfully → `uiMode` derived from `env.TASK_UI_MODE` (validated against the three-value enum; anything else collapses to `bundled` with a `✗` check line).
+2. Early-return branches (no `.mcp.json` or parse failure) → fall back to `resolveUiModeFromProcess()` which reads `process.env.TASK_UI_MODE` with the same validation.
+
+The `Config` section of the report surfaces `TASK_UI_MODE`, `PROJECT_NAME`, and `TASK_UI_AUTO_OPEN_IN_BROWSER` as their own check lines. The `Runtime` section's not-reachable hint is mode-aware: `pm2 status <PROJECT_NAME>` (standalone), "set TASK_UI_MODE=bundled" (disabled), "is the MCP running?" (bundled).
+
+### How the UI itself learns its mode
+
+The browser-side `App.tsx` needs to render the `bundled mode` / `standalone mode` label under the project name. The UI server reads `process.env.TASK_UI_MODE` and exposes it via `GET /api/config`, which also carries `PROJECT_NAME` for the header pill. Client fetches `/api/config` on mount, sets `document.title`, and renders both.
+
+For this to work in standalone mode, the generated `ecosystem.task-ui.config.cjs` must include `TASK_UI_MODE: 'standalone'` in its `env` block — pm2 doesn't inherit the MCP's `.mcp.json` env (the MCP isn't even running yet when pm2 starts the UI on boot). `setup-standalone.ts` bakes this into the generated file.
+
+### Setup script — `setup-standalone.ts`
+
+Lives at the package root next to `install.ts`. Two subcommands:
+
+- `on` — patches `.mcp.json` (sets `TASK_UI_MODE='standalone'`, ensures `PROJECT_NAME` / `TASK_UI_PORT` / `TASKS_DB`), generates `<project>/ecosystem.task-ui.config.cjs`, runs `pm2 delete <PROJECT_NAME>` (ignored on failure) followed by `pm2 start ./ecosystem.task-ui.config.cjs && pm2 save`.
+- `off` — runs `pm2 delete <PROJECT_NAME>`, sets `TASK_UI_MODE='bundled'`, removes the generated ecosystem file.
+
+The generated `ecosystem.task-ui.config.cjs` bakes in the values from `.mcp.json` at generation time: `name`, absolute `cwd` pointing at `task-manager-ui/`, `script: 'server.ts'`, `interpreter: 'node'`, `interpreter_args: '--import tsx'`, and an `env` block with `TASKS_DB` + `PROJECT_NAME` + `TASK_UI_PORT` + `TASK_UI_MODE='standalone'`. The file lives **in the project directory** (next to `.mcp.json`), not in this package — each opted-in project owns its own copy.
+
+**pm2 config-file detection** is filename-based: the file *must* match `*.config.{js,cjs}` for pm2 to read `apps[]`. Naming the file `ecosystem.task-ui.cjs` (without `.config.`) makes pm2 treat it as a script — the process ends up named after the file, ignoring `apps[].name`. Don't drop the `.config.` segment.
+
+Editing `.mcp.json` after `on` and want it to take effect? Re-run `setup-standalone.ts on` to regenerate.
 
 ## Consumers of the `Store` surface
 

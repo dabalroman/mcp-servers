@@ -64,8 +64,13 @@ export function handleDelete(store: Store, { id }: { id: number }): MCPContent {
 }
 
 export async function handleUiStart(): Promise<MCPContent> {
-  if (process.env['TASK_UI_DISABLE'] === '1') {
-    return errorText({ error: 'TASK_UI_DISABLE=1 — UI spawn is disabled. Unset the env var and restart the MCP to enable it.' });
+  const uiMode = process.env['TASK_UI_MODE'] ?? 'bundled';
+  if (uiMode === 'standalone') {
+    const name = process.env['PROJECT_NAME'] ?? '<PROJECT_NAME>';
+    return errorText({ error: `UI is pm2-managed (TASK_UI_MODE=standalone). Use \`pm2 restart ${name}\` to control it.` });
+  }
+  if (uiMode === 'disabled') {
+    return errorText({ error: 'TASK_UI_MODE=disabled — UI is intentionally off. Set TASK_UI_MODE=bundled in .mcp.json and restart the MCP to enable it.' });
   }
 
   const running = await probeTcp(UI_PORT, 1000);
@@ -88,6 +93,10 @@ export async function handleUiStart(): Promise<MCPContent> {
 }
 
 export async function handleUiStop(): Promise<MCPContent> {
+  if (process.env['TASK_UI_MODE'] === 'standalone') {
+    const name = process.env['PROJECT_NAME'] ?? '<PROJECT_NAME>';
+    return errorText({ error: `UI is pm2-managed (TASK_UI_MODE=standalone). Use \`pm2 stop ${name}\` to control it.` });
+  }
   const running = await probeTcp(UI_PORT, 1000);
   if (!running) {
     return text({ stopped: false, notRunning: true });

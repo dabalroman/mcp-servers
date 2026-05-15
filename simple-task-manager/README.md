@@ -160,14 +160,52 @@ The UI dies with the MCP (SIGTERM on shutdown). One MCP per project = one UI per
 
 ### Env vars
 
-All four are written to `.mcp.json` by `install.ts` with the defaults below — no hidden behaviour.
+All of these are written to `.mcp.json` by `install.ts` with the defaults below — no hidden behaviour. Each one is documented inline in the generated `.mcp.json` with `//` comments (Claude Code's MCP loader accepts JSONC), so you can see what's valid without leaving the file.
 
 | Variable | Default | Effect |
 |---|---|---|
 | `TASKS_DB` | `<project>/tasks.db` | Path to the SQLite database. Forwarded to the UI so both processes open the same file. |
-| `TASK_UI_PORT` | `7374` | HTTP port for the UI. |
-| `AUTO_OPEN_TASK_UI` | `0` | Set to `1` to open the UI in the system browser on startup. |
-| `TASK_UI_DISABLE` | `0` | Set to `1` to skip spawning the UI entirely. |
+| `PROJECT_NAME` | project dir name | Human-readable project label. Renders as the big pill in the UI header and as the browser tab title (`<name> · tasks`). Also used as the pm2 process name in `standalone` mode. |
+| `TASK_UI_PORT` | `7374` | HTTP port the UI binds to. |
+| `TASK_UI_MODE` | `bundled` | How the UI runs. One of `bundled`, `standalone`, `disabled` — see below. |
+| `TASK_UI_AUTO_OPEN_IN_BROWSER` | `0` | Set to `1` to open the UI in the system browser on startup. |
+
+#### `TASK_UI_MODE` — the single switch for UI lifecycle
+
+| Value | Meaning |
+|---|---|
+| `bundled` (default) | The MCP spawns the UI as a child process. UI dies with the Claude session. Best for casual / single-session use. |
+| `standalone` | The UI runs as a long-lived [pm2](https://pm2.keymetrics.io/) process. Survives MCP restarts and Claude session closes. Set up via `setup-standalone.ts on` (below) — don't edit this value by hand. |
+| `disabled` | The MCP doesn't start the UI at all. Useful for headless / CI / tests, or when you want to run the UI manually from a separate terminal. |
+
+In `standalone` and `disabled` modes the `ui-start` / `ui-stop` MCP tools return a clear error explaining what to do instead — they never silently no-op.
+
+### Standalone UI mode
+
+By default the UI is a child of the MCP — it dies whenever Claude restarts the MCP or you close the session. If you want the UI to persist across sessions (handy when you keep a project open for a long time), opt that project in:
+
+```sh
+# from the project directory (where .mcp.json lives)
+npx tsx ~/.claude/mcp-servers/simple-task-manager/setup-standalone.ts on
+```
+
+The script will:
+
+1. Set `TASK_UI_MODE=standalone` in `.mcp.json` and ensure `PROJECT_NAME` + `TASK_UI_PORT` are populated (defaults: project dir name, `7374`).
+2. Generate `<project>/ecosystem.task-ui.config.cjs` (a pm2 config file). The filename must include `.config.` — that's how pm2 recognises it as a config file rather than a script.
+3. Run `pm2 start ./ecosystem.task-ui.config.cjs && pm2 save` so the UI process restarts on boot (assuming `pm2 startup` is configured).
+
+Restart Claude Code afterwards. The MCP sees `TASK_UI_MODE=standalone` and skips spawning its own UI child; the `ui-start` / `ui-stop` MCP tools point you at `pm2 restart <PROJECT_NAME>` instead.
+
+To turn it off:
+
+```sh
+npx tsx ~/.claude/mcp-servers/simple-task-manager/setup-standalone.ts off
+```
+
+That deletes the pm2 process, removes the ecosystem file, sets `TASK_UI_MODE=bundled`, and (after a Claude restart) the MCP resumes spawning the UI.
+
+Two projects can each have their own standalone UI in parallel — give them distinct `PROJECT_NAME` and distinct `TASK_UI_PORT` values in their respective `.mcp.json` files.
 
 
 &nbsp;

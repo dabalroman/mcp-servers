@@ -176,9 +176,16 @@ export async function handleHealth(): Promise<MCPContent> {
   }
 
   // Check optional keys
+  const projectName = typeof env['PROJECT_NAME'] === 'string' ? env['PROJECT_NAME'] : '';
   const uiPort = typeof env['TASK_UI_PORT'] === 'string' ? env['TASK_UI_PORT'] : '';
-  const uiDisable = typeof env['TASK_UI_DISABLE'] === 'string' ? env['TASK_UI_DISABLE'] : '';
-  const autoOpen = typeof env['AUTO_OPEN_TASK_UI'] === 'string' ? env['AUTO_OPEN_TASK_UI'] : '';
+  const uiModeRaw = typeof env['TASK_UI_MODE'] === 'string' ? env['TASK_UI_MODE'] : '';
+  const autoOpen = typeof env['TASK_UI_AUTO_OPEN_IN_BROWSER'] === 'string' ? env['TASK_UI_AUTO_OPEN_IN_BROWSER'] : '';
+
+  if (!projectName) {
+    configChecks.push(check('⚠', 'PROJECT_NAME not set — UI header + tab title will be empty'));
+  } else {
+    configChecks.push(check('✓', `PROJECT_NAME = ${projectName}`));
+  }
 
   if (!uiPort) {
     configChecks.push(check('⚠', 'TASK_UI_PORT not set — defaulting to 7374'));
@@ -186,19 +193,27 @@ export async function handleHealth(): Promise<MCPContent> {
     configChecks.push(check('✓', `TASK_UI_PORT = ${uiPort}`));
   }
 
-  if (!autoOpen) {
-    configChecks.push(check('⚠', 'AUTO_OPEN_TASK_UI not set — UI will not auto-open in browser'));
+  const validModes = ['bundled', 'standalone', 'disabled'];
+  if (!uiModeRaw) {
+    configChecks.push(check('⚠', 'TASK_UI_MODE not set — defaulting to "bundled"'));
+  } else if (!validModes.includes(uiModeRaw)) {
+    configChecks.push(check('✗', `TASK_UI_MODE = ${uiModeRaw} (invalid — must be one of: bundled, standalone, disabled). Treating as "bundled".`));
   } else {
-    configChecks.push(check('✓', `AUTO_OPEN_TASK_UI = ${autoOpen}`));
+    configChecks.push(check('✓', `TASK_UI_MODE = ${uiModeRaw}`));
   }
 
-  if (!uiDisable) {
-    configChecks.push(check('⚠', 'TASK_UI_DISABLE not set — UI spawn enabled'));
+  if (!autoOpen) {
+    configChecks.push(check('⚠', 'TASK_UI_AUTO_OPEN_IN_BROWSER not set — UI will not auto-open in the system browser'));
   } else {
-    configChecks.push(check('✓', `TASK_UI_DISABLE = ${uiDisable}`));
+    configChecks.push(check('✓', `TASK_UI_AUTO_OPEN_IN_BROWSER = ${autoOpen}`));
   }
 
   sections.push(renderSection('Config (.mcp.json)', configChecks));
+
+  const uiMode: 'standalone' | 'disabled' | 'bundled' =
+    uiModeRaw === 'standalone' ? 'standalone'
+    : uiModeRaw === 'disabled' ? 'disabled'
+    : 'bundled';
 
   // ── Runtime section ──────────────────────────────────────────────────────────
   const runtimeChecks: CheckResult[] = [];
@@ -206,15 +221,21 @@ export async function handleHealth(): Promise<MCPContent> {
   const probeUrl = `http://localhost:${resolvedPort}/`;
   const displayUrl = `http://${getLanIp()}:${resolvedPort}/`;
 
+  const notReachableHint = uiMode === 'standalone'
+    ? `is the standalone pm2 process running? Try \`pm2 status ${projectName || '<PROJECT_NAME>'}\``
+    : uiMode === 'disabled'
+    ? 'TASK_UI_MODE=disabled — set it to "bundled" and restart the MCP'
+    : 'is the MCP running?';
+
   try {
     const statusCode = await probeHttp(probeUrl, 2000);
     if (statusCode >= 200 && statusCode < 400) {
       runtimeChecks.push(check('✓', `UI reachable at ${probeUrl} · ${displayUrl}`));
     } else {
-      runtimeChecks.push(check('✗', `UI at ${probeUrl} returned HTTP ${statusCode} — is the MCP running?`));
+      runtimeChecks.push(check('✗', `UI at ${probeUrl} returned HTTP ${statusCode} — ${notReachableHint}`));
     }
   } catch {
-    runtimeChecks.push(check('✗', `UI not reachable at ${probeUrl} — is the MCP running?`));
+    runtimeChecks.push(check('✗', `UI not reachable at ${probeUrl} — ${notReachableHint}`));
   }
 
   // DB migration check
@@ -262,7 +283,7 @@ export async function handleHealth(): Promise<MCPContent> {
   const skillsChecks = await checkSkills();
   sections.push(renderSection('Skills', skillsChecks));
 
-  return buildOutput(sections);
+  return buildOutput(sections, uiMode);
 }
 
 function checkSkills(): CheckResult[] {
@@ -279,12 +300,20 @@ function checkSkills(): CheckResult[] {
   });
 }
 
-function buildOutput(sections: string[]): MCPContent {
+function resolveUiModeFromProcess(): 'standalone' | 'disabled' | 'bundled' {
+  const m = process.env['TASK_UI_MODE'];
+  if (m === 'standalone') return 'standalone';
+  if (m === 'disabled') return 'disabled';
+  return 'bundled';
+}
+
+function buildOutput(sections: string[], ui?: 'standalone' | 'disabled' | 'bundled'): MCPContent {
   const divider = '─'.repeat(9);
   const body = sections.join('\n\n');
   const report = `health\n${divider}\n${body}`;
   return text({
     report,
+    ui: ui ?? resolveUiModeFromProcess(),
     displayInstruction: 'Present this health report to the user as a markdown table with three columns: Status (✓/⚠/✗), Category (Config / Runtime / Skills), and Message. Each indented check line is one table row.',
   });
 }

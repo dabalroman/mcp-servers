@@ -10,6 +10,13 @@ const port = parseInt(process.env.TASK_UI_PORT ?? '7374', 10);
 const TASKS_DB = process.env.TASKS_DB
   ? path.resolve(process.env.TASKS_DB)
   : path.join(process.cwd(), 'tasks.db');
+// Validate TASK_UI_MODE so the client gets a clean three-state value.
+const RAW_MODE = process.env.TASK_UI_MODE ?? 'bundled';
+const TASK_UI_MODE: 'bundled' | 'standalone' | 'disabled' =
+  RAW_MODE === 'standalone' ? 'standalone' :
+  RAW_MODE === 'disabled' ? 'disabled' :
+  'bundled';
+const PROJECT_NAME = process.env.PROJECT_NAME ?? null;
 
 const app = express();
 app.use(express.json());
@@ -17,6 +24,13 @@ app.use(express.json());
 const { dispose } = mountTaskApi(app, { dbPath: TASKS_DB });
 process.once('SIGTERM', () => { try { dispose(); } catch { /* ignore */ } process.exit(0); });
 process.once('SIGINT',  () => { try { dispose(); } catch { /* ignore */ } process.exit(0); });
+
+// Surface a few server-side env values to the client. The static dist HTML is
+// built once and served as-is; this endpoint is how the SPA learns the project
+// name and the current run mode so it can render the header pill + mode label.
+app.get('/api/config', (_req, res) => {
+  res.json({ name: PROJECT_NAME, mode: TASK_UI_MODE });
+});
 
 app.use(express.static(dist, { index: 'index.html', maxAge: '1h' }));
 
@@ -33,7 +47,7 @@ const server = app.listen(port, () => {
   // notification — stdout = info, stderr = warning. So use stdout for the
   // normal "listening" line; reserve stderr for real errors.
   process.stdout.write(`[task-manager-ui] listening on ${url} (db: ${TASKS_DB})\n`);
-  if (process.env.AUTO_OPEN_TASK_UI === '1') {
+  if (process.env.TASK_UI_AUTO_OPEN_IN_BROWSER === '1') {
     openBrowser(url);
   }
 });
