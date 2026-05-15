@@ -138,16 +138,30 @@ function killUi() {
   }
 }
 
+// Synchronous shutdown for OS signals — fast, no transport flushing needed.
 function shutdown() { killUi(); try { store.close(); } catch { /* ignore */ } process.exit(0); }
 
 process.on('SIGINT',  shutdown);
 process.on('SIGTERM', shutdown);
 process.on('exit',    () => { killUi(); try { store.close(); } catch { /* ignore */ } });
 
-// Claude Code closes the stdio pipe without sending a signal — detect that and
-// shut down cleanly so we don't leak an orphaned MCP + UI child on PID 1.
-process.stdin.on('end',   shutdown);
-process.stdin.on('close', shutdown);
+// Graceful stdin-EOF shutdown: close the JSON-RPC transport first so Claude
+// Code sees a clean MCP disconnect rather than an abrupt process death.
+// Without this, /mcp reconnect triggers "1 MCP server failed" because Claude
+// Code closes the stdio pipe (causing stdin 'end') before spawning a fresh
+// process, and our immediate process.exit(0) is recorded as a failure (#143).
+let isShuttingDown = false;
+async function stdinShutdown(): Promise<void> {
+  if (isShuttingDown) return;
+  isShuttingDown = true;
+  try { await server.close(); } catch { /* ignore */ }
+  killUi();
+  try { store.close(); } catch { /* ignore */ }
+  process.exit(0);
+}
+
+process.stdin.on('end',   () => { void stdinShutdown(); });
+process.stdin.on('close', () => { void stdinShutdown(); });
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
