@@ -199,14 +199,6 @@ function refRowToObj(r: RefRow): Ref {
   return out;
 }
 
-// Defensive guard: Claude sometimes emits literal \n (0x5C 0x6E) as text tokens
-// in MCP tool call arguments instead of real newline bytes (0x0A).
-function normalizeNewlines(s: string): string;
-function normalizeNewlines<T>(s: T): T;
-function normalizeNewlines(s: unknown): unknown {
-  return typeof s === 'string' ? s.replace(/\\n/g, '\n') : s;
-}
-
 // ── Helpers (pure) ────────────────────────────────────────────────────────────
 export function sortByPriority<T extends { priority: TaskPriority; id: number }>(tasks: T[]): T[] {
   return [...tasks].sort((a, b) => {
@@ -427,7 +419,7 @@ export function createStore(dbPath: string): Store {
 
   function add(input: AddInput): { id: number } {
     const { type, priority, title, description = '', scope, summary, plan, refs, status = 'refinement' } = input;
-    const trimmedTitle = normalizeNewlines(String(title ?? '').trim());
+    const trimmedTitle = String(title ?? '').trim();
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
 
     return db.transaction(() => {
@@ -440,7 +432,7 @@ export function createStore(dbPath: string): Store {
         priority,
         scope?.trim() || null,
         summary?.trim() || null,
-        normalizeNewlines(description.trim()),
+        description.trim(),
         plan?.trim() || null
       );
       setCounter(newId);
@@ -458,7 +450,7 @@ export function createStore(dbPath: string): Store {
       if (!existing) return null;
 
       const next = {
-        title: patch.title !== undefined ? normalizeNewlines(patch.title.trim()) : existing.title,
+        title: patch.title !== undefined ? patch.title.trim() : existing.title,
         type: patch.type ?? existing.type,
         priority: patch.priority ?? existing.priority,
         scope: patch.scope === null
@@ -467,7 +459,7 @@ export function createStore(dbPath: string): Store {
         summary: patch.summary === null
           ? null
           : patch.summary !== undefined ? (patch.summary.trim() || null) : existing.summary,
-        description: patch.description !== undefined ? normalizeNewlines(patch.description.trim()) : existing.description,
+        description: patch.description !== undefined ? patch.description.trim() : existing.description,
         plan: patch.plan === null
           ? null
           : patch.plan !== undefined ? (patch.plan.trim() || null) : existing.plan,
@@ -688,61 +680,3 @@ export function createStore(dbPath: string): Store {
   };
 }
 
-// ── Pure helpers exported for tests ───────────────────────────────────────────
-// Mutates allTasks in place — preserved for backward-compat with random-tools' vendor mirror.
-export function applyRefs(allTasks: Task[], sourceId: number, oldRefs: Ref[] | undefined, nextRefs: Ref[] | undefined): Task[] {
-  const validIds = new Set(allTasks.map((t) => t.id));
-  const canonOld = (oldRefs ?? []).filter((r) => !r.nonCanonical);
-  const canonNext = (nextRefs ?? []).filter((r) => {
-    if (r.nonCanonical) return false;
-    if (r.id === sourceId) return false;
-    if (!validIds.has(r.id)) return false;
-    return true;
-  });
-
-  const sourceTask = allTasks.find((t) => t.id === sourceId);
-  if (sourceTask) {
-    const cleaned = (nextRefs ?? []).filter((r) => r.nonCanonical || (r.id !== sourceId && validIds.has(r.id)));
-    sourceTask.refs = cleaned.length ? cleaned : undefined;
-  }
-
-  const added = canonNext.filter((r) => !canonOld.some((o) => o.id === r.id));
-  const removed = canonOld.filter((r) => !canonNext.some((n) => n.id === r.id));
-  const changed = canonNext.filter((r) => {
-    const old = canonOld.find((o) => o.id === r.id);
-    return old && old.relation !== r.relation;
-  });
-
-  for (const task of allTasks) {
-    if (task.id === sourceId) continue;
-
-    for (const ref of added) {
-      if (task.id !== ref.id) continue;
-      const inverse = INVERSE[ref.relation] ?? ref.relation;
-      if (!task.refs) task.refs = [];
-      if (!task.refs.some((r) => r.id === sourceId)) {
-        task.refs.push({ id: sourceId, relation: inverse });
-      }
-    }
-    for (const ref of removed) {
-      if (task.id !== ref.id || !task.refs) continue;
-      task.refs = task.refs.filter((r) => r.id !== sourceId);
-      if (task.refs.length === 0) task.refs = undefined;
-    }
-    for (const ref of changed) {
-      if (task.id !== ref.id || !task.refs) continue;
-      const inverse = INVERSE[ref.relation] ?? ref.relation;
-      task.refs = task.refs.map((r) => (r.id === sourceId ? { ...r, relation: inverse } : r));
-    }
-  }
-  return allTasks;
-}
-
-export function cascadeDelete(allTasks: Task[], deletedId: number): Task[] {
-  for (const task of allTasks) {
-    if (!task.refs) continue;
-    task.refs = task.refs.filter((r) => r.id !== deletedId);
-    if (task.refs.length === 0) task.refs = undefined;
-  }
-  return allTasks;
-}

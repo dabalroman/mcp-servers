@@ -6,8 +6,6 @@ import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
 import {
   createStore,
-  applyRefs,
-  cascadeDelete,
   sortByPriority,
   sortForNext,
   RELATIONS,
@@ -591,51 +589,6 @@ describe('sortForNext', () => {
       { id: 3, status: 'refinement' as const, priority: 'medium' as const },
     ];
     assert.deepEqual(sortForNext(tasks).map((t) => t.id), [2, 3, 1]);
-  });
-});
-
-describe('applyRefs (in-memory helper)', () => {
-  function makeT(id: number, extra: Partial<import('./tasks.js').Task> = {}): import('./tasks.js').Task {
-    return { id, title: `T${id}`, type: 'bug', status: 'todo', priority: 'medium', description: '', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', ...extra };
-  }
-  test('adds inverse on counterpart', () => {
-    const a = makeT(1);
-    const b = makeT(2);
-    applyRefs([a, b], 1, [], [{ id: 2, relation: 'blocks' }]);
-    assert.deepEqual(b.refs, [{ id: 1, relation: 'is blocked by' }]);
-  });
-  test('removes inverse when ref is removed', () => {
-    const a = makeT(1, { refs: [{ id: 2, relation: 'blocks' }] });
-    const b = makeT(2, { refs: [{ id: 1, relation: 'is blocked by' }] });
-    applyRefs([a, b], 1, [{ id: 2, relation: 'blocks' }], []);
-    assert.equal(b.refs, undefined);
-  });
-  test('updates inverse on relation change', () => {
-    const a = makeT(1, { refs: [{ id: 2, relation: 'blocks' }] });
-    const b = makeT(2, { refs: [{ id: 1, relation: 'is blocked by' }] });
-    applyRefs([a, b], 1, [{ id: 2, relation: 'blocks' }], [{ id: 2, relation: 'causes' }]);
-    assert.equal(b.refs?.[0]?.relation, 'is caused by');
-  });
-  test('strips self-refs and dangling refs', () => {
-    const a = makeT(1);
-    applyRefs([a], 1, [], [{ id: 1, relation: 'relates to' }, { id: 9999, relation: 'blocks' }]);
-    assert.equal(a.refs, undefined);
-  });
-});
-
-describe('cascadeDelete (in-memory helper)', () => {
-  function makeT(id: number, extra: Partial<import('./tasks.js').Task> = {}): import('./tasks.js').Task {
-    return { id, title: `T${id}`, type: 'bug', status: 'todo', priority: 'medium', description: '', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', ...extra };
-  }
-  test('strips refs pointing to deleted id', () => {
-    const t = makeT(1, { refs: [{ id: 99, relation: 'blocks' }] });
-    cascadeDelete([t], 99);
-    assert.equal(t.refs, undefined);
-  });
-  test('preserves refs to other ids', () => {
-    const t = makeT(1, { refs: [{ id: 5, relation: 'relates to' }, { id: 99, relation: 'blocks' }] });
-    cascadeDelete([t], 99);
-    assert.deepEqual(t.refs, [{ id: 5, relation: 'relates to' }]);
   });
 });
 
