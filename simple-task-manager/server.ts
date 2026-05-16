@@ -134,33 +134,36 @@ function killUi() {
   }
 }
 
-// Synchronous shutdown for OS signals — fast, no transport flushing needed.
-function shutdown() { killUi(); try { store.close(); } catch { /* ignore */ } process.exit(0); }
-
-process.on('SIGINT',  shutdown);
-process.on('SIGTERM', shutdown);
-process.on('exit',    () => { killUi(); try { store.close(); } catch { /* ignore */ } });
-
-// Graceful stdin-EOF shutdown: close the JSON-RPC transport first so Claude
-// Code sees a clean MCP disconnect rather than an abrupt process death.
-// Without this, /mcp reconnect triggers "1 MCP server failed" because Claude
-// Code closes the stdio pipe (causing stdin 'end') before spawning a fresh
-// process, and our immediate process.exit(0) is recorded as a failure (#143).
+// Single shutdown path — all exit signals route here so killUi() and
+// store.close() each run at most once. graceful=true closes the JSON-RPC
+// transport first so Claude Code sees a clean MCP disconnect rather than an
+// abrupt process death; without it, /mcp reconnect triggers "1 MCP server
+// failed" because the stdio-EOF reaches us before the fresh process spawns
+// (#143).
 let isShuttingDown = false;
-async function stdinShutdown(): Promise<void> {
+async function shutdown(graceful = false): Promise<void> {
   if (isShuttingDown) return;
   isShuttingDown = true;
-  try { await server.close(); } catch { /* ignore */ }
+  if (graceful) try { await server.close(); } catch { /* ignore */ }
   killUi();
   try { store.close(); } catch { /* ignore */ }
   process.exit(0);
 }
 
-process.stdin.on('end',   () => { void stdinShutdown(); });
-process.stdin.on('close', () => { void stdinShutdown(); });
+process.on('SIGINT',  () => { void shutdown(); });
+process.on('SIGTERM', () => { void shutdown(); });
+// 'exit' is a last-resort safety net; the handlers above already call
+// process.exit(0) which fires this. Cannot be async — just repeat sync cleanup.
+process.on('exit',    () => { killUi(); try { store.close(); } catch { /* ignore */ } });
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+
+// Stdin listeners are registered *after* server.connect() resolves so the
+// StdioServerTransport owns stdin first. Attaching listeners before connect()
+// can switch stdin to flowing mode and steal bytes intended for the transport.
+process.stdin.on('end',   () => { void shutdown(true); });
+process.stdin.on('close', () => { void shutdown(true); });
 
 logFlushed = true;
 for (const entry of logQueue.splice(0)) {
