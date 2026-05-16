@@ -2,6 +2,7 @@ import express from 'express';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { mountTaskApi } from './src/server/taskRouter.js';
+import { VERSION } from '../version.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(__dirname, 'dist');
@@ -29,7 +30,7 @@ process.once('SIGINT',  () => { try { dispose(); } catch { /* ignore */ } proces
 // built once and served as-is; this endpoint is how the SPA learns the project
 // name and the current run mode so it can render the header pill + mode label.
 app.get('/api/config', (_req, res) => {
-  res.json({ name: PROJECT_NAME, mode: TASK_UI_MODE });
+  res.json({ name: PROJECT_NAME, mode: TASK_UI_MODE, version: VERSION, tasksDb: TASKS_DB });
 });
 
 app.use(express.static(dist, { index: 'index.html', maxAge: '1h' }));

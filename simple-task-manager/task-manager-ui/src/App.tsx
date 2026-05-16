@@ -1,12 +1,15 @@
 import { useEffect, useState } from 'react';
 import TaskManager from './client/TaskManager';
 import { Toaster } from './components/ui/sonner';
+import Footer from './components/Footer';
 
 type RunMode = 'bundled' | 'standalone' | 'disabled';
 
 type Config = {
   name: string | null;
   mode: RunMode;
+  version: string | null;
+  tasksDb: string | null;
 };
 
 export default function App() {
@@ -16,11 +19,13 @@ export default function App() {
     let cancelled = false;
     fetch('/api/config')
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((data: Partial<Config>) => {
+      .then((data: Partial<Record<string, unknown>>) => {
         if (cancelled) return;
         const name = typeof data?.name === 'string' && data.name.length > 0 ? data.name : null;
         const mode: RunMode = data?.mode === 'standalone' || data?.mode === 'disabled' ? data.mode : 'bundled';
-        setConfig({ name, mode });
+        const version = typeof data?.version === 'string' && data.version.length > 0 ? data.version : null;
+        const tasksDb = typeof data?.tasksDb === 'string' && data.tasksDb.length > 0 ? data.tasksDb : null;
+        setConfig({ name, mode, version, tasksDb });
         if (name) document.title = `${name} · tasks`;
       })
       .catch(() => { /* leave defaults in place */ });
@@ -32,7 +37,7 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b border-border">
+      <header className="border-b border-border bg-card">
         <div className="max-w-[1080px] mx-auto px-8 py-5 flex items-center justify-between gap-6">
           <span className="font-bold uppercase tracking-widest text-lg text-foreground">
             task<span className="text-primary">/</span>manager
@@ -56,6 +61,13 @@ export default function App() {
           <TaskManager />
         </div>
       </main>
+      <Footer
+        version={config?.version ?? null}
+        tasksDb={config?.tasksDb ?? null}
+        repoUrl="https://github.com/dabalroman/mcp-servers"
+        projectName={projectName}
+        mode={mode}
+      />
       <Toaster position="bottom-right" />
     </div>
   );

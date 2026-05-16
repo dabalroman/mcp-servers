@@ -33,37 +33,42 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
         highlighted ? 'border-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.4)]' : 'border-border',
       )}
     >
-      <div className="flex items-center gap-2 px-3 pt-3 pb-2">
-        <span className="text-muted-foreground/50 text-xs shrink-0">#{task.id}</span>
-        <span className="flex-1 text-base text-foreground leading-snug">{task.title}</span>
+      <div className="flex flex-col-reverse gap-3 px-3 pt-3 pb-2 sm:flex-row sm:items-center sm:gap-2">
+        <div className="flex items-start gap-2 sm:flex-1">
+          <span className="text-muted-foreground/50 text-sm leading-snug shrink-0">#{task.id}</span>
+          <span className="text-base text-foreground leading-snug">{task.title}</span>
+        </div>
 
-        {task.plan && (
-          <button
-            type="button"
-            onClick={() => setPlanOpen(true)}
-            className="inline-flex items-center text-muted-foreground hover:text-primary cursor-pointer transition-colors shrink-0"
-            title="View plan"
-          >
-            <FileText className="w-4 h-4" strokeWidth={1.5} />
-          </button>
-        )}
+        <div className="flex items-center justify-between gap-2 w-full sm:w-auto sm:justify-start">
+          {task.plan && (
+            <button
+              type="button"
+              onClick={() => setPlanOpen(true)}
+              className="inline-flex items-center text-muted-foreground hover:text-primary cursor-pointer transition-colors shrink-0"
+              title="View plan"
+            >
+              <FileText className="w-4 h-4" strokeWidth={1.5} />
+            </button>
+          )}
 
-        {task.scope && (
-          <span className="text-xs tracking-widest text-primary/70 border border-primary/30 px-2 py-1 shrink-0">
-            {task.scope}
+          {task.scope && (
+            <span className="text-xs tracking-widest text-primary/70 border border-primary/30 px-2 py-1 shrink-0">
+              {task.scope}
+            </span>
+          )}
+
+          <span className="text-xs tracking-widest text-muted-foreground border border-border px-2 py-1 shrink-0">
+            {TYPE_LABELS[task.type] ?? task.type.toUpperCase()}
           </span>
-        )}
 
-        <span className="text-xs tracking-widest text-muted-foreground border border-border px-2 py-1 shrink-0">
-          {TYPE_LABELS[task.type] ?? task.type.toUpperCase()}
-        </span>
+          <span className={cn(
+            'text-xs tracking-widest border px-2 py-1 shrink-0',
+            PRIORITY_CLASSES[task.priority],
+          )}>
+            {task.priority.toUpperCase()}
+          </span>
 
-        <span className={cn(
-          'text-xs tracking-widest border px-2 py-1 shrink-0',
-          PRIORITY_CLASSES[task.priority],
-        )}>
-          {task.priority.toUpperCase()}
-        </span>
+        </div>
       </div>
 
       {hasSummary ? (

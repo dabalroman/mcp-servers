@@ -2,7 +2,6 @@ import { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { ToolHeader } from '@/components/ToolHeader';
 import { cn } from '@/lib/utils';
 import { useTasks } from './useTasks';
 import { TaskCard } from './TaskCard';
@@ -102,32 +101,31 @@ export default function TaskManager() {
 
   const tabs: Tab[] = ['active', 'done'];
 
+  const counts: Record<Tab, number> = { active: active.length, done: done.length };
+
   return (
     <div className="flex flex-col gap-7">
-      <ToolHeader
-        title="Claude Task Manager"
-        description="Browser UI for the simple-task-manager MCP. Edits live-sync via SQLite."
-        status={`Active ${active.length} · Done ${done.length}`}
-        actions={
-          <Button size="sm" onClick={openAdd}>+ New</Button>
-        }
-      />
-
-      <div className="flex border-b border-border">
-        {tabs.map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={cn(
-              'px-5 py-2 text-xs tracking-widest uppercase transition-colors border-b-2 -mb-px',
-              tab === t
-                ? 'border-primary text-primary'
-                : 'border-transparent text-muted-foreground hover:text-foreground',
-            )}
-          >
-            {t}
-          </button>
-        ))}
+      <div className="flex items-center justify-between border-b border-border">
+        <div className="flex">
+          {tabs.map((t) => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={cn(
+                'flex items-center gap-2 px-5 py-2 tracking-widest uppercase transition-colors border-b-2 -mb-px',
+                tab === t
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <span className="text-xs">{t}</span>
+              <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
+                {counts[t]}
+              </span>
+            </button>
+          ))}
+        </div>
+        <Button size="sm" onClick={openAdd}>+ New</Button>
       </div>
 
       {tab === 'active' && (
@@ -151,7 +149,7 @@ export default function TaskManager() {
                     <span className="text-xs tracking-widest text-muted-foreground uppercase">
                       {scope}
                     </span>
-                    <span className="text-xs tracking-widest uppercase border border-border px-2 py-1 text-muted-foreground">
+                    <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
                       {tasks.length}
                     </span>
                     <div className="tick-rule flex-1" />
@@ -198,7 +196,7 @@ export default function TaskManager() {
                     <span className="text-xs tracking-widest text-muted-foreground uppercase">
                       {scope}
                     </span>
-                    <span className="text-xs tracking-widest uppercase border border-border px-2 py-1 text-muted-foreground">
+                    <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
                       {tasks.length}
                     </span>
                     <div className="tick-rule flex-1" />
