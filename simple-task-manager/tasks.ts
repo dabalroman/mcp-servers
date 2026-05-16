@@ -350,9 +350,21 @@ export function createStore(dbPath: string): Store {
 
   function readAllTasks(): Task[] {
     const rows = stmtSelectAllTasks.all() as TaskRow[];
+    return attachRefs(rows);
+  }
+
+  // Bulk-load refs for a set of task rows in one query, then join in memory.
+  // O(1) SQLite round-trips regardless of result set size — replaces the
+  // N+1 pattern of calling readRefsFor(row.id) inside a .map().
+  function attachRefs(rows: TaskRow[]): Task[] {
     if (rows.length === 0) return [];
+    const ids = rows.map((r) => r.id);
+    const placeholders = ids.map(() => '?').join(', ');
+    const refRows = db.prepare(
+      `SELECT from_id, to_id, relation, non_canonical FROM refs WHERE from_id IN (${placeholders})`
+    ).all(...ids) as RefRow[];
     const refsByFrom = new Map<number, Ref[]>();
-    for (const r of stmtRefsAll.all() as RefRow[]) {
+    for (const r of refRows) {
       const arr = refsByFrom.get(r.from_id) ?? [];
       arr.push(refRowToObj(r));
       refsByFrom.set(r.from_id, arr);
@@ -504,7 +516,7 @@ export function createStore(dbPath: string): Store {
     } else {
       rows = db.prepare('SELECT * FROM tasks WHERE status = ?').all(status) as TaskRow[];
     }
-    const tasks = rows.map((row) => rowToTask(row, readRefsFor(row.id)));
+    const tasks = attachRefs(rows);
     return sortByPriority(tasks);
   }
 
@@ -517,7 +529,7 @@ export function createStore(dbPath: string): Store {
     } else {
       rows = db.prepare('SELECT * FROM tasks WHERE scope = ? AND status = ?').all(scope, resolved) as TaskRow[];
     }
-    const tasks = rows.map((row) => rowToTask(row, readRefsFor(row.id)));
+    const tasks = attachRefs(rows);
     return sortByPriority(tasks);
   }
 
@@ -530,7 +542,7 @@ export function createStore(dbPath: string): Store {
     } else {
       rows = db.prepare('SELECT * FROM tasks WHERE type = ? AND status = ?').all(type, resolved) as TaskRow[];
     }
-    const tasks = rows.map((row) => rowToTask(row, readRefsFor(row.id)));
+    const tasks = attachRefs(rows);
     return sortByPriority(tasks);
   }
 
@@ -548,7 +560,7 @@ export function createStore(dbPath: string): Store {
         WHERE status IN ('todo', 'in_progress', 'refinement')
       `).all() as TaskRow[];
     }
-    const tasks = rows.map((row) => rowToTask(row, readRefsFor(row.id)));
+    const tasks = attachRefs(rows);
     const sorted = sortForNext(tasks);
     return sorted[0] ?? null;
   }
@@ -605,7 +617,7 @@ export function createStore(dbPath: string): Store {
     } else {
       rows = db.prepare('SELECT * FROM tasks WHERE status = ?').all(resolved) as TaskRow[];
     }
-    const tasks = rows.map((row) => rowToTask(row, readRefsFor(row.id)));
+    const tasks = attachRefs(rows);
     return sortByPriority(tasks);
   }
 
@@ -620,17 +632,32 @@ export function createStore(dbPath: string): Store {
     }
 
     // Outbound = task's own refs (already on task.refs after readTask).
-    const outbound = (task.refs ?? []).flatMap((ref) => {
-      const t = readTask(ref.id);
-      return t && matchesStatus(t) ? [{ ...t, refRelation: ref.relation as string }] : [];
-    });
+    const outboundIds = (task.refs ?? []).map((r) => r.id);
 
     // Inbound = other tasks pointing at this task.
     const inboundRefs = db.prepare(
       'SELECT from_id, relation FROM refs WHERE to_id = ? AND from_id != ?'
     ).all(id, id) as { from_id: number; relation: string }[];
+    const inboundIds = inboundRefs.map((r) => r.from_id);
+
+    // Bulk-load all related tasks in one shot, then join.
+    const relatedIds = [...new Set([...outboundIds, ...inboundIds])];
+    let relatedTasks: Task[] = [];
+    if (relatedIds.length > 0) {
+      const placeholders = relatedIds.map(() => '?').join(', ');
+      const rows = db.prepare(
+        `SELECT * FROM tasks WHERE id IN (${placeholders})`
+      ).all(...relatedIds) as TaskRow[];
+      relatedTasks = attachRefs(rows);
+    }
+    const taskById = new Map(relatedTasks.map((t) => [t.id, t]));
+
+    const outbound = (task.refs ?? []).flatMap((ref) => {
+      const t = taskById.get(ref.id);
+      return t && matchesStatus(t) ? [{ ...t, refRelation: ref.relation as string }] : [];
+    });
     const inbound = inboundRefs.flatMap((r) => {
-      const t = readTask(r.from_id);
+      const t = taskById.get(r.from_id);
       return t && matchesStatus(t) ? [{ ...t, refRelation: r.relation }] : [];
     });
 
