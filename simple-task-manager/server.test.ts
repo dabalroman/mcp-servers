@@ -163,21 +163,21 @@ describe('setStatus handler — knowledgeReminder', () => {
 
 describe('getById handler', () => {
   test('returns isError for unknown id', async () => {
-    const resp = handleGetById(store, { id: 9999 });
+    const resp = await handleGetById(store, { id: 9999 });
     assert.ok(resp.isError);
     assert.ok((decode(resp).error as string).includes('9999'));
   });
 
   test('returns task for known id', async () => {
     const { id } = addTask({ title: 'My task' });
-    const resp = handleGetById(store, { id });
+    const resp = await handleGetById(store, { id });
     assert.ok(!resp.isError);
     assert.equal((decode(resp).task as { title: string }).title, 'My task');
   });
 
   test('error message lists valid IDs', async () => {
     addTask({ title: 'First' });
-    const resp = handleGetById(store, { id: 9999 });
+    const resp = await handleGetById(store, { id: 9999 });
     const errMsg = decode(resp).error as string;
     assert.ok(errMsg.includes('1'), 'error should list id 1 as a valid ID');
   });
@@ -185,14 +185,14 @@ describe('getById handler', () => {
 
 describe('getRelated handler', () => {
   test('returns isError for unknown id', async () => {
-    const resp = handleGetRelated(store, { id: 9999 });
+    const resp = await handleGetRelated(store, { id: 9999 });
     assert.ok(resp.isError);
     assert.ok((decode(resp).error as string).includes('9999'));
   });
 
   test('returns task with outbound and inbound arrays for known id', async () => {
     const { id } = addTask();
-    const resp = handleGetRelated(store, { id });
+    const resp = await handleGetRelated(store, { id });
     assert.ok(!resp.isError);
     const payload = decode(resp);
     assert.ok('task' in payload);
@@ -208,7 +208,7 @@ describe('list-mode stripping (server layer)', () => {
 
   test('getAll strips description when summary present', async () => {
     const { id } = addWithSummary({ status: 'todo' });
-    const { tasks } = decode(handleGetAll(store, {})) as { tasks: Record<string, { id: number; summary?: string; description?: string }[]> };
+    const { tasks } = decode(await handleGetAll(store, {})) as { tasks: Record<string, { id: number; summary?: string; description?: string }[]> };
     const t = tasks.bug?.find((x) => x.id === id);
     assert.equal(t?.summary, 'Short gist.');
     assert.equal(t?.description, undefined);
@@ -216,7 +216,7 @@ describe('list-mode stripping (server layer)', () => {
 
   test('getAll keeps description when no summary', async () => {
     const { id } = store.add({ type: 'bug', priority: 'medium', title: 'T', description: 'Long desc.', status: 'todo' });
-    const { tasks } = decode(handleGetAll(store, {})) as { tasks: Record<string, { id: number; summary?: string; description?: string }[]> };
+    const { tasks } = decode(await handleGetAll(store, {})) as { tasks: Record<string, { id: number; summary?: string; description?: string }[]> };
     const t = tasks.bug?.find((x) => x.id === id);
     assert.equal(t?.description, 'Long desc.');
     assert.equal(t?.summary, undefined);
@@ -224,7 +224,7 @@ describe('list-mode stripping (server layer)', () => {
 
   test('getByScope strips description when summary present', async () => {
     const { id } = addWithSummary({ scope: 'x' });
-    const { tasks } = decode(handleGetByScope(store, { scope: 'x' })) as { tasks: { id: number; summary?: string; description?: string }[] };
+    const { tasks } = decode(await handleGetByScope(store, { scope: 'x' })) as { tasks: { id: number; summary?: string; description?: string }[] };
     const t = tasks.find((x) => x.id === id);
     assert.equal(t?.summary, 'Short gist.');
     assert.equal(t?.description, undefined);
@@ -232,7 +232,7 @@ describe('list-mode stripping (server layer)', () => {
 
   test('getByType strips description when summary present', async () => {
     const { id } = addWithSummary({ type: 'feature' });
-    const { tasks } = decode(handleGetByType(store, { type: 'feature' })) as { tasks: { id: number; summary?: string; description?: string }[] };
+    const { tasks } = decode(await handleGetByType(store, { type: 'feature' })) as { tasks: { id: number; summary?: string; description?: string }[] };
     const t = tasks.find((x) => x.id === id);
     assert.equal(t?.summary, 'Short gist.');
     assert.equal(t?.description, undefined);
@@ -240,14 +240,14 @@ describe('list-mode stripping (server layer)', () => {
 
   test('getNext strips description when summary present', async () => {
     addWithSummary({ type: 'bug', priority: 'high', status: 'todo' });
-    const { task } = decode(handleGetNext(store, {})) as { task: { summary?: string; description?: string } };
+    const { task } = decode(await handleGetNext(store, {})) as { task: { summary?: string; description?: string } };
     assert.equal(task.summary, 'Short gist.');
     assert.equal(task.description, undefined);
   });
 
   test('getAll strips description when summary present', async () => {
     const { id } = addWithSummary({ type: 'bug' });
-    const { tasks } = decode(handleGetAll(store)) as { tasks: Record<string, { id: number; summary?: string; description?: string }[]> };
+    const { tasks } = decode(await handleGetAll(store)) as { tasks: Record<string, { id: number; summary?: string; description?: string }[]> };
     const t = tasks.bug?.find((x) => x.id === id);
     assert.equal(t?.summary, 'Short gist.');
     assert.equal(t?.description, undefined);
@@ -255,7 +255,7 @@ describe('list-mode stripping (server layer)', () => {
 
   test('getById always returns both fields', async () => {
     const { id } = addWithSummary();
-    const { task } = decode(handleGetById(store, { id })) as { task: { summary?: string; description?: string } };
+    const { task } = decode(await handleGetById(store, { id })) as { task: { summary?: string; description?: string } };
     assert.equal(task.summary, 'Short gist.');
     assert.equal(task.description, 'Long desc.');
   });
@@ -263,7 +263,7 @@ describe('list-mode stripping (server layer)', () => {
   test('getRelated: anchor full, outbound/inbound stripped', async () => {
     const { id: a } = addWithSummary({ type: 'bug', title: 'A', description: 'A desc.', summary: 'A gist.' });
     const { id: b } = store.add({ type: 'bug', priority: 'medium', title: 'B', description: 'B desc.', summary: 'B gist.', refs: [{ id: a, relation: 'blocks' }] });
-    const payload = decode(handleGetRelated(store, { id: b })) as {
+    const payload = decode(await handleGetRelated(store, { id: b })) as {
       task: { summary?: string; description?: string };
       outbound: { summary?: string; description?: string }[];
     };
@@ -379,49 +379,49 @@ describe('plan field — MCP layer', () => {
     assert.equal(task?.plan, '# My Plan\n\n- step 1');
   });
 
-  test('getById returns plan intact', () => {
+  test('getById returns plan intact', async () => {
     const { id } = store.add({ type: 'bug', priority: 'medium', title: 'T', description: '', plan: '## Plan\n\nDo the thing.' });
-    const resp = handleGetById(store, { id });
+    const resp = await handleGetById(store, { id });
     const { task } = decode(resp) as { task: { plan?: string } };
     assert.equal(task.plan, '## Plan\n\nDo the thing.');
   });
 
-  test('getAll strips plan from list responses', () => {
+  test('getAll strips plan from list responses', async () => {
     store.add({ type: 'bug', priority: 'medium', title: 'T', description: '', plan: 'secret plan', status: 'todo' });
-    const { tasks } = decode(handleGetAll(store, {})) as { tasks: Record<string, { plan?: string }[]> };
+    const { tasks } = decode(await handleGetAll(store, {})) as { tasks: Record<string, { plan?: string }[]> };
     const all = Object.values(tasks).flat();
     assert.ok(all.every((t) => t.plan === undefined), 'plan must not appear in getAll results');
   });
 
-  test('getByScope strips plan from list responses', () => {
+  test('getByScope strips plan from list responses', async () => {
     store.add({ type: 'bug', priority: 'medium', title: 'T', description: '', plan: 'secret plan', scope: 'myapp' });
-    const { tasks } = decode(handleGetByScope(store, { scope: 'myapp' })) as { tasks: { plan?: string }[] };
+    const { tasks } = decode(await handleGetByScope(store, { scope: 'myapp' })) as { tasks: { plan?: string }[] };
     assert.ok(tasks.every((t) => t.plan === undefined), 'plan must not appear in getByScope results');
   });
 
-  test('getByType strips plan from list responses', () => {
+  test('getByType strips plan from list responses', async () => {
     store.add({ type: 'idea', priority: 'low', title: 'T', description: '', plan: 'secret plan' });
-    const { tasks } = decode(handleGetByType(store, { type: 'idea' })) as { tasks: { plan?: string }[] };
+    const { tasks } = decode(await handleGetByType(store, { type: 'idea' })) as { tasks: { plan?: string }[] };
     assert.ok(tasks.every((t) => t.plan === undefined), 'plan must not appear in getByType results');
   });
 
-  test('getNext strips plan from list response', () => {
+  test('getNext strips plan from list response', async () => {
     store.add({ type: 'bug', priority: 'high', title: 'T', description: '', plan: 'secret plan', status: 'todo' });
-    const { task } = decode(handleGetNext(store, {})) as { task: { plan?: string } };
+    const { task } = decode(await handleGetNext(store, {})) as { task: { plan?: string } };
     assert.equal(task.plan, undefined, 'plan must not appear in getNext result');
   });
 
-  test('getAll strips plan from list responses', () => {
+  test('getAll strips plan from list responses', async () => {
     store.add({ type: 'bug', priority: 'medium', title: 'T', description: '', plan: 'secret plan' });
-    const { tasks } = decode(handleGetAll(store)) as { tasks: Record<string, { plan?: string }[]> };
+    const { tasks } = decode(await handleGetAll(store)) as { tasks: Record<string, { plan?: string }[]> };
     const all = Object.values(tasks).flat();
     assert.ok(all.every((t) => t.plan === undefined), 'plan must not appear in getAll results');
   });
 
-  test('getRelated: anchor task retains plan, outbound/inbound strip it', () => {
+  test('getRelated: anchor task retains plan, outbound/inbound strip it', async () => {
     const { id: a } = store.add({ type: 'bug', priority: 'medium', title: 'A', description: '', plan: 'plan A' });
     const { id: b } = store.add({ type: 'bug', priority: 'medium', title: 'B', description: '', plan: 'plan B', refs: [{ id: a, relation: 'blocks' }] });
-    const payload = decode(handleGetRelated(store, { id: b })) as {
+    const payload = decode(await handleGetRelated(store, { id: b })) as {
       task: { plan?: string };
       outbound: { plan?: string }[];
     };
@@ -436,7 +436,7 @@ describe('getByType handler — status filter', () => {
     const { id: doneId } = addTask({ type: 'feature', title: 'Done feature', status: 'refinement' });
     store.setStatus(doneId, 'done');
 
-    const resp = handleGetByType(store, { type: 'feature' });
+    const resp = await handleGetByType(store, { type: 'feature' });
     const { tasks } = decode(resp) as { tasks: { status: string }[] };
     assert.ok(tasks.every((t) => t.status !== 'done'), 'done must not appear by default');
     assert.equal(tasks.length, 1);
@@ -447,7 +447,7 @@ describe('getByType handler — status filter', () => {
     const { id: doneId } = addTask({ type: 'feature', title: 'Done feature', status: 'refinement' });
     store.setStatus(doneId, 'done');
 
-    const resp = handleGetByType(store, { type: 'feature', status: 'done' });
+    const resp = await handleGetByType(store, { type: 'feature', status: 'done' });
     const { tasks } = decode(resp) as { tasks: { status: string; title: string }[] };
     assert.ok(tasks.every((t) => t.status === 'done'));
     assert.equal(tasks.length, 1);
@@ -459,7 +459,7 @@ describe('getByType handler — status filter', () => {
     const { id: doneId } = addTask({ type: 'feature', title: 'Done feature', status: 'refinement' });
     store.setStatus(doneId, 'done');
 
-    const resp = handleGetByType(store, { type: 'feature', status: 'open' });
+    const resp = await handleGetByType(store, { type: 'feature', status: 'open' });
     const { tasks } = decode(resp) as { tasks: { status: string }[] };
     assert.ok(tasks.every((t) => t.status !== 'done'));
     assert.equal(tasks.length, 1);
@@ -469,7 +469,7 @@ describe('getByType handler — status filter', () => {
     store.add({ type: 'feature', priority: 'medium', title: 'Todo feature', description: '', summary: 'x', status: 'todo' });
     store.add({ type: 'feature', priority: 'medium', title: 'Refinement feature', description: '', status: 'refinement' });
 
-    const resp = handleGetByType(store, { type: 'feature', status: 'todo' });
+    const resp = await handleGetByType(store, { type: 'feature', status: 'todo' });
     const { tasks } = decode(resp) as { tasks: { status: string }[] };
     assert.ok(tasks.every((t) => t.status === 'todo'));
     assert.equal(tasks.length, 1);
@@ -482,7 +482,7 @@ describe('getByScope handler — status filter', () => {
     const { id: doneId } = store.add({ type: 'bug', priority: 'medium', title: 'Done', description: '', scope: 'myapp', status: 'refinement' });
     store.setStatus(doneId, 'done');
 
-    const resp = handleGetByScope(store, { scope: 'myapp' });
+    const resp = await handleGetByScope(store, { scope: 'myapp' });
     const { tasks } = decode(resp) as { tasks: { status: string }[] };
     assert.ok(tasks.every((t) => t.status !== 'done'));
     assert.equal(tasks.length, 1);
@@ -493,7 +493,7 @@ describe('getByScope handler — status filter', () => {
     const { id: doneId } = store.add({ type: 'bug', priority: 'medium', title: 'Done', description: '', scope: 'myapp', status: 'refinement' });
     store.setStatus(doneId, 'done');
 
-    const resp = handleGetByScope(store, { scope: 'myapp', status: 'done' });
+    const resp = await handleGetByScope(store, { scope: 'myapp', status: 'done' });
     const { tasks } = decode(resp) as { tasks: { status: string; title: string }[] };
     assert.ok(tasks.every((t) => t.status === 'done'));
     assert.equal(tasks[0]?.title, 'Done');
@@ -504,7 +504,7 @@ describe('getByScope handler — status filter', () => {
     const { id: doneId } = store.add({ type: 'bug', priority: 'medium', title: 'Done', description: '', scope: 'myapp', status: 'refinement' });
     store.setStatus(doneId, 'done');
 
-    const resp = handleGetByScope(store, { scope: 'myapp', status: 'open' });
+    const resp = await handleGetByScope(store, { scope: 'myapp', status: 'open' });
     const { tasks } = decode(resp) as { tasks: { status: string }[] };
     assert.ok(tasks.every((t) => t.status !== 'done'));
     assert.equal(tasks.length, 1);
@@ -514,7 +514,7 @@ describe('getByScope handler — status filter', () => {
     store.add({ type: 'bug', priority: 'medium', title: 'Todo', description: '', summary: 'x', scope: 'myapp', status: 'todo' });
     store.add({ type: 'bug', priority: 'medium', title: 'Refinement', description: '', scope: 'myapp', status: 'refinement' });
 
-    const resp = handleGetByScope(store, { scope: 'myapp', status: 'todo' });
+    const resp = await handleGetByScope(store, { scope: 'myapp', status: 'todo' });
     const { tasks } = decode(resp) as { tasks: { status: string }[] };
     assert.ok(tasks.every((t) => t.status === 'todo'));
     assert.equal(tasks.length, 1);
@@ -528,7 +528,7 @@ describe('getRelated handler — status filter', () => {
     const { id: c } = store.add({ type: 'bug', priority: 'medium', title: 'Done ref', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.setStatus(c, 'done');
 
-    const resp = handleGetRelated(store, { id: a });
+    const resp = await handleGetRelated(store, { id: a });
     const payload = decode(resp) as { inbound: { id: number }[] };
     const inboundIds = payload.inbound.map((t) => t.id);
     assert.ok(inboundIds.includes(b), 'active ref should appear');
@@ -540,7 +540,7 @@ describe('getRelated handler — status filter', () => {
     const { id: c } = store.add({ type: 'bug', priority: 'medium', title: 'Done ref', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.setStatus(c, 'done');
 
-    const resp = handleGetRelated(store, { id: a, status: 'done' });
+    const resp = await handleGetRelated(store, { id: a, status: 'done' });
     const payload = decode(resp) as { inbound: { id: number }[] };
     const inboundIds = payload.inbound.map((t) => t.id);
     assert.ok(inboundIds.includes(c), 'done ref should appear when status=done');
@@ -552,7 +552,7 @@ describe('getRelated handler — status filter', () => {
     const { id: c } = store.add({ type: 'bug', priority: 'medium', title: 'Done ref', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.setStatus(c, 'done');
 
-    const resp = handleGetRelated(store, { id: a, status: 'open' });
+    const resp = await handleGetRelated(store, { id: a, status: 'open' });
     const payload = decode(resp) as { inbound: { id: number }[] };
     const inboundIds = payload.inbound.map((t) => t.id);
     assert.ok(inboundIds.includes(b));
@@ -565,7 +565,7 @@ describe('getRelated handler — status filter', () => {
     const { id: c } = store.add({ type: 'bug', priority: 'medium', title: 'Todo ref', description: '', summary: 'x', refs: [{ id: a, relation: 'blocks' }] });
     store.setStatus(c, 'todo');
 
-    const resp = handleGetRelated(store, { id: a, status: 'todo' });
+    const resp = await handleGetRelated(store, { id: a, status: 'todo' });
     const payload = decode(resp) as { inbound: { id: number; status: string }[] };
     assert.ok(payload.inbound.every((t) => t.status === 'todo'));
     assert.equal(payload.inbound.length, 1);
@@ -578,7 +578,7 @@ describe('getOverview handler — status filter', () => {
     const { id: doneId } = store.add({ type: 'bug', priority: 'medium', title: 'Done', description: '', status: 'refinement' });
     store.setStatus(doneId, 'done');
 
-    const resp = handleGetOverview(store, {});
+    const resp = await handleGetOverview(store, {});
     const { overview } = decode(resp) as { overview: { type: string; refinement: number; open: number; done: number }[] };
     const bugEntry = overview.find((o) => o.type === 'bug');
     assert.ok(bugEntry, 'bug entry should exist');
@@ -591,7 +591,7 @@ describe('getOverview handler — status filter', () => {
     const { id: doneId } = store.add({ type: 'bug', priority: 'medium', title: 'Done', description: '', status: 'refinement' });
     store.setStatus(doneId, 'done');
 
-    const resp = handleGetOverview(store, { status: 'done' });
+    const resp = await handleGetOverview(store, { status: 'done' });
     const { overview } = decode(resp) as { overview: { type: string; count: number; status: string }[] };
     const bugEntry = overview.find((o) => o.type === 'bug');
     assert.ok(bugEntry, 'bug entry should exist');
@@ -606,7 +606,7 @@ describe('getOverview handler — status filter', () => {
     const { id: doneId } = store.add({ type: 'bug', priority: 'medium', title: 'Done', description: '', status: 'refinement' });
     store.setStatus(doneId, 'done');
 
-    const resp = handleGetOverview(store, { status: 'open' });
+    const resp = await handleGetOverview(store, { status: 'open' });
     const { overview } = decode(resp) as { overview: { type: string; refinement: number; done: number }[] };
     const bugEntry = overview.find((o) => o.type === 'bug');
     assert.ok(bugEntry);
@@ -618,7 +618,7 @@ describe('getOverview handler — status filter', () => {
     store.add({ type: 'bug', priority: 'medium', title: 'Todo', description: '', summary: 'x', status: 'todo' });
     store.add({ type: 'bug', priority: 'medium', title: 'Refinement', description: '', status: 'refinement' });
 
-    const resp = handleGetOverview(store, { status: 'todo' });
+    const resp = await handleGetOverview(store, { status: 'todo' });
     const { overview } = decode(resp) as { overview: { type: string; count: number; status: string }[] };
     const bugEntry = overview.find((o) => o.type === 'bug');
     assert.ok(bugEntry);
@@ -734,7 +734,7 @@ describe('getAll handler', () => {
     const { id: doneId } = addTask({ type: 'bug', title: 'Resolved bug' });
     store.setStatus(doneId, 'done');
 
-    const resp = handleGetAll(store, {});
+    const resp = await handleGetAll(store, {});
     const { tasks } = decode(resp) as { tasks: Record<string, { status: string; title: string }[]> };
     const bugs = tasks.bug ?? [];
     assert.ok(bugs.every((t) => t.status !== 'done'), 'done tasks must not appear in getAll by default');
@@ -747,7 +747,7 @@ describe('getAll handler', () => {
     store.setStatus(id, 'done');
     addTask({ type: 'bug', title: 'Live bug' });
 
-    const resp = handleGetAll(store, {});
+    const resp = await handleGetAll(store, {});
     const { tasks } = decode(resp) as { tasks: Record<string, unknown[]> };
     assert.ok(!('idea' in tasks), 'idea key should be absent when all idea tasks are done');
     assert.ok('bug' in tasks);
@@ -757,7 +757,7 @@ describe('getAll handler', () => {
     const { id } = addTask({ type: 'bug' });
     store.setStatus(id, 'done');
 
-    const resp = handleGetAll(store, {});
+    const resp = await handleGetAll(store, {});
     const { tasks } = decode(resp);
     assert.deepEqual(tasks, {});
   });
@@ -767,7 +767,7 @@ describe('getAll handler', () => {
     const { id: doneId } = addTask({ type: 'bug', title: 'Resolved bug' });
     store.setStatus(doneId, 'done');
 
-    const resp = handleGetAll(store, { status: 'done' });
+    const resp = await handleGetAll(store, { status: 'done' });
     const { tasks } = decode(resp) as { tasks: Record<string, { status: string; title: string }[]> };
     const bugs = tasks.bug ?? [];
     assert.ok(bugs.every((t) => t.status === 'done'), 'only done tasks when status=done');
@@ -780,7 +780,7 @@ describe('getAll handler', () => {
     const { id: doneId } = addTask({ type: 'bug', title: 'Done bug' });
     store.setStatus(doneId, 'done');
 
-    const resp = handleGetAll(store, { status: 'open' });
+    const resp = await handleGetAll(store, { status: 'open' });
     const { tasks } = decode(resp) as { tasks: Record<string, { status: string }[]> };
     const bugs = tasks.bug ?? [];
     assert.ok(bugs.every((t) => t.status !== 'done'), 'done must not appear when status=open');
@@ -791,7 +791,7 @@ describe('getAll handler', () => {
     store.add({ type: 'bug', priority: 'medium', title: 'Todo bug', description: '', summary: 'x', status: 'todo' });
     store.add({ type: 'bug', priority: 'medium', title: 'Refinement bug', description: '', status: 'refinement' });
 
-    const resp = handleGetAll(store, { status: 'todo' });
+    const resp = await handleGetAll(store, { status: 'todo' });
     const { tasks } = decode(resp) as { tasks: Record<string, { status: string }[]> };
     const bugs = tasks.bug ?? [];
     assert.ok(bugs.every((t) => t.status === 'todo'), 'only todo tasks when status=todo');

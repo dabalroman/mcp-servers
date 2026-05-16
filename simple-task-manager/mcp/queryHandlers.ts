@@ -8,20 +8,20 @@ import { text, toListTask, notFoundError, type MCPContent } from './shared.js';
 import { ALL_TYPES } from '../tasks.js';
 import type { Store, Task, TaskType, StatusFilter } from '../tasks.js';
 
-export function handleGetByType(store: Store, { type, status }: { type: TaskType; status?: StatusFilter }): MCPContent {
+export async function handleGetByType(store: Store, { type, status }: { type: TaskType; status?: StatusFilter }): Promise<MCPContent> {
   return text({ tasks: store.getByType(type, status).map(toListTask) });
 }
 
-export function handleGetOverview(store: Store, { status }: { status?: StatusFilter } = {}): MCPContent {
+export async function handleGetOverview(store: Store, { status }: { status?: StatusFilter } = {}): Promise<MCPContent> {
   return text({ overview: store.getOverview(status) });
 }
 
-export function handleGetNext(store: Store, { type }: { type?: TaskType } = {}): MCPContent {
+export async function handleGetNext(store: Store, { type }: { type?: TaskType } = {}): Promise<MCPContent> {
   const task = store.getNext(type);
   return text({ task: task ? toListTask(task) : null });
 }
 
-export function handleGetAll(store: Store, { status }: { status?: StatusFilter } = {}): MCPContent {
+export async function handleGetAll(store: Store, { status }: { status?: StatusFilter } = {}): Promise<MCPContent> {
   const grouped: Partial<Record<TaskType, (Task | Omit<Task, 'description'>)[]>> = {};
   for (const type of ALL_TYPES) {
     const ofType = store.getByType(type, status).map(toListTask);
@@ -30,17 +30,17 @@ export function handleGetAll(store: Store, { status }: { status?: StatusFilter }
   return text({ tasks: grouped });
 }
 
-export function handleGetById(store: Store, { id }: { id: number }): MCPContent {
+export async function handleGetById(store: Store, { id }: { id: number }): Promise<MCPContent> {
   const task = store.getById(id);
   if (!task) return notFoundError(id, store);
   return text({ task });
 }
 
-export function handleGetByScope(store: Store, { scope, status }: { scope: string; status?: StatusFilter }): MCPContent {
+export async function handleGetByScope(store: Store, { scope, status }: { scope: string; status?: StatusFilter }): Promise<MCPContent> {
   return text({ scope, tasks: store.getByScope(scope, status).map(toListTask) });
 }
 
-export function handleGetRelated(store: Store, { id, status }: { id: number; status?: StatusFilter }): MCPContent {
+export async function handleGetRelated(store: Store, { id, status }: { id: number; status?: StatusFilter }): Promise<MCPContent> {
   const result = store.getRelated(id, status);
   if (!result) return notFoundError(id, store);
   return text({
@@ -50,7 +50,7 @@ export function handleGetRelated(store: Store, { id, status }: { id: number; sta
   });
 }
 
-export function handleGetScopes(store: Store): MCPContent {
+export async function handleGetScopes(store: Store): Promise<MCPContent> {
   return text({ scopes: store.getScopes() });
 }
 
