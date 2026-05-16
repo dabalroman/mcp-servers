@@ -37,7 +37,7 @@ export function registerTools(server: McpServer, store: Store): void {
         .describe('critical = blocking or data-loss risk, fix immediately; high = important, tackle soon; medium = normal backlog; low = nice-to-have'),
       title: z.string().min(1, 'Title must not be empty')
         .describe('Short, action-oriented title — start with a verb (e.g. "Fix undo animation glitch on session delete", "Add dark-mode toggle to settings")'),
-      description: z.string()
+      description: z.string().optional().default('')
         .describe('Full context the implementer will need: what is broken or needed, reproduction steps or acceptance criteria, relevant file paths, technical constraints. Be thorough — this is what the next session will read.'),
       scope: z.string().optional()
         .describe('Optional tool or area this task belongs to (e.g. "svg-path-joiner", "eink-frame", "task-manager"). Omit for project-wide tasks. Use getByScope to filter tasks by this value later.'),

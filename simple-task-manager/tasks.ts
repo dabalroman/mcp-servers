@@ -35,7 +35,7 @@ export type Task = {
   priority: TaskPriority;
   scope?: string;
   summary?: string;
-  description?: string;
+  description: string;
   plan?: string;
   refs?: Ref[];
   created_at: string;
@@ -187,12 +187,12 @@ function rowToTask(row: TaskRow, refs: Ref[]): Task {
     type: row.type,
     status: row.status,
     priority: row.priority,
+    description: row.description ?? '',
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
   if (row.scope) t.scope = row.scope;
   if (row.summary) t.summary = row.summary;
-  t.description = row.description ?? '';
   if (row.plan) t.plan = row.plan;
   if (refs && refs.length) t.refs = refs;
   return t;
