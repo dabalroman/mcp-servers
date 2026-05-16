@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import TaskManager from './client/TaskManager';
 import { Toaster } from './components/ui/sonner';
 import Footer from './components/Footer';
+import ModeExplainer from './components/ModeExplainer';
 
 type RunMode = 'bundled' | 'standalone' | 'disabled';
 
@@ -47,11 +48,7 @@ export default function App() {
               <span className="font-bold uppercase tracking-widest text-lg text-foreground">
                 {projectName}
               </span>
-              {mode && (
-                <span className="text-xs tracking-widest uppercase text-muted-foreground">
-                  {mode} mode
-                </span>
-              )}
+              {mode && <ModeExplainer currentMode={mode} />}
             </div>
           )}
         </div>
