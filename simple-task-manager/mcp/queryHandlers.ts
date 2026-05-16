@@ -5,6 +5,7 @@ import * as http from 'node:http';
 import { networkInterfaces } from 'node:os';
 import Database from 'better-sqlite3';
 import { text, toListTask, notFoundError, type MCPContent } from './shared.js';
+import { ALL_TYPES } from '../tasks.js';
 import type { Store, Task, TaskType, StatusFilter } from '../tasks.js';
 
 export function handleGetByType(store: Store, { type, status }: { type: TaskType; status?: StatusFilter }): MCPContent {
@@ -21,9 +22,8 @@ export function handleGetNext(store: Store, { type }: { type?: TaskType } = {}):
 }
 
 export function handleGetAll(store: Store, { status }: { status?: StatusFilter } = {}): MCPContent {
-  const allTypes: TaskType[] = ['bug', 'feature', 'idea', 'tool', 'other'];
-  const grouped: Record<string, (Task | Omit<Task, 'description'>)[]> = {};
-  for (const type of allTypes) {
+  const grouped: Partial<Record<TaskType, (Task | Omit<Task, 'description'>)[]>> = {};
+  for (const type of ALL_TYPES) {
     const ofType = store.getByType(type, status).map(toListTask);
     if (ofType.length > 0) grouped[type] = ofType;
   }

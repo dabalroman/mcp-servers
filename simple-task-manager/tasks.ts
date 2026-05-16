@@ -38,7 +38,7 @@ export type Task = {
 
 const PRIORITY_ORDER: Record<TaskPriority, number> = { critical: 4, high: 3, medium: 2, low: 1 };
 const STATUS_ORDER: Record<TaskStatus, number> = { in_progress: 3, refinement: 2, todo: 1, done: 0 };
-const ALL_TYPES: TaskType[] = ['bug', 'feature', 'idea', 'tool', 'other'];
+export const ALL_TYPES: TaskType[] = ['bug', 'feature', 'idea', 'tool', 'other'];
 
 export const RELATIONS = [
   'blocks', 'is blocked by',
