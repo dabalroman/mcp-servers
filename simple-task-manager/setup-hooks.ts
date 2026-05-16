@@ -21,15 +21,15 @@ mkdirSync(hooksDir, { recursive: true });
 const lines = [
   '#!/bin/sh',
   'set -e',
-  `cd ${__dirname} && npx tsx bump-version.ts && npm test && npm run build`,
+  `cd "${__dirname}" && npx tsx bump-version.ts && npm test && npm run build`,
 ];
 if (existsSync(siblingUi)) {
-  lines.push(`cd ${siblingUi} && npm test && npm run build`);
+  lines.push(`cd "${siblingUi}" && npm test && npm run build`);
   // The UI bundle is checked into git; stage the freshly-rebuilt assets so
   // the commit always reflects current source. The repo root is the
   // mcp-servers checkout, not this package.
   const repoRoot = resolve(__dirname, '..');
-  lines.push(`git -C ${repoRoot} add ${siblingUi.replace(repoRoot + '/', '')}/dist`);
+  lines.push(`git -C "${repoRoot}" add "${siblingUi.replace(repoRoot + '/', '')}"/dist`);
 }
 lines.push('');
 

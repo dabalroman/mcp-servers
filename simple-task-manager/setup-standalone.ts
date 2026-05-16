@@ -19,7 +19,7 @@
  */
 import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'node:fs';
 import { resolve, basename, dirname } from 'node:path';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { parseMcpConfig, serializeMcpConfig } from './mcpConfig.js';
 
@@ -62,9 +62,9 @@ function writeMcp(): void {
   writeFileSync(mcpFile, serializeMcpConfig(config));
 }
 
-function pm2(cmd: string, { ignoreFailure = false }: { ignoreFailure?: boolean } = {}): void {
+function pm2(args: string[], { ignoreFailure = false }: { ignoreFailure?: boolean } = {}): void {
   try {
-    execSync(cmd, { stdio: 'inherit' });
+    execFileSync('pm2', args, { stdio: 'inherit' });
   } catch (err) {
     if (!ignoreFailure) throw err;
   }
@@ -107,9 +107,9 @@ module.exports = {
   writeFileSync(ecosystemFile, ecosystem);
 
   // Replace any previous registration with the same name, then start fresh.
-  pm2(`pm2 delete ${JSON.stringify(projectName)}`, { ignoreFailure: true });
-  pm2(`pm2 start ${JSON.stringify(ecosystemFile)}`);
-  pm2('pm2 save');
+  pm2(['delete', projectName], { ignoreFailure: true });
+  pm2(['start', ecosystemFile]);
+  pm2(['save']);
 
   console.log(`\nStandalone UI started as "${projectName}" on port ${port}.`);
   console.log(`Restart Claude Code to pick up the .mcp.json change.`);
@@ -119,8 +119,8 @@ module.exports = {
 // mode === 'off'
 const projectName = env['PROJECT_NAME'];
 if (projectName) {
-  pm2(`pm2 delete ${JSON.stringify(projectName)}`, { ignoreFailure: true });
-  pm2('pm2 save', { ignoreFailure: true });
+  pm2(['delete', projectName], { ignoreFailure: true });
+  pm2(['save'], { ignoreFailure: true });
 } else {
   console.warn(`PROJECT_NAME not set in ${mcpFile} — skipping pm2 delete. If a standalone process is still running, stop it manually.`);
 }
