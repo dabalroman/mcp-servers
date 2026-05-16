@@ -2,22 +2,29 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { isCollapsed, setCollapsed, toggleCollapsed } from './collapseState';
 import { findTaskLocation } from './taskNavigation';
 import type { Task } from '@/types/task';
+import type { GroupBy } from '@/lib/taskView';
 
 type Tab = 'active' | 'done';
-type PendingNav = { id: number; storageKey: string; scope: string } | null;
+type PendingNav = { id: number; sectionKey: string } | null;
+
+const COLLAPSE_STORAGE_KEY = 'task-manager:collapse';
 
 export function useRefNavigation(
   active: Task[],
   done: Task[],
   tab: Tab,
   setTab: (tab: Tab) => void,
-  storageKeys: { active: string; done: string },
+  groupBy: GroupBy,
 ) {
   const [highlightedId, setHighlightedId] = useState<number | null>(null);
   const [collapseVersion, setCollapseVersion] = useState(0);
   const pendingNav = useRef<PendingNav>(null);
   const pendingScrollId = useRef<number | null>(null);
   const highlightTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function sectionKey(sectionValue: string): string {
+    return `${groupBy}:${sectionValue}`;
+  }
 
   function scrollToTask(id: number) {
     const el = document.querySelector(`[data-task-id="${id}"]`);
@@ -29,10 +36,10 @@ export function useRefNavigation(
 
   useEffect(() => {
     if (pendingNav.current !== null) {
-      const { id, storageKey, scope } = pendingNav.current;
+      const { id, sectionKey: key } = pendingNav.current;
       pendingNav.current = null;
-      if (isCollapsed(localStorage, storageKey, scope)) {
-        setCollapsed(localStorage, storageKey, scope, false);
+      if (isCollapsed(localStorage, COLLAPSE_STORAGE_KEY, key)) {
+        setCollapsed(localStorage, COLLAPSE_STORAGE_KEY, key, false);
         pendingScrollId.current = id;
         setCollapseVersion((v) => v + 1);
       } else {
@@ -51,27 +58,27 @@ export function useRefNavigation(
 
   const navigateToRef = useCallback(
     (targetId: number) => {
-      const location = findTaskLocation(active, done, targetId);
+      const location = findTaskLocation(active, done, targetId, groupBy);
       const targetTab: Tab = location?.tab ?? 'active';
-      const storageKey = targetTab === 'done' ? storageKeys.done : storageKeys.active;
-      const scope = location?.scope ?? '(no scope)';
+      const key = sectionKey(location?.sectionValue ?? '');
 
       if (tab !== targetTab) {
-        pendingNav.current = { id: targetId, storageKey, scope };
+        pendingNav.current = { id: targetId, sectionKey: key };
         setTab(targetTab);
-      } else if (isCollapsed(localStorage, storageKey, scope)) {
-        setCollapsed(localStorage, storageKey, scope, false);
+      } else if (isCollapsed(localStorage, COLLAPSE_STORAGE_KEY, key)) {
+        setCollapsed(localStorage, COLLAPSE_STORAGE_KEY, key, false);
         pendingScrollId.current = targetId;
         setCollapseVersion((v) => v + 1);
       } else {
         scrollToTask(targetId);
       }
     },
-    [active, done, tab, setTab, storageKeys],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [active, done, tab, setTab, groupBy],
   );
 
-  const toggleCollapse = useCallback((storageKey: string, scope: string) => {
-    toggleCollapsed(localStorage, storageKey, scope);
+  const toggleCollapse = useCallback((key: string) => {
+    toggleCollapsed(localStorage, COLLAPSE_STORAGE_KEY, key);
     setCollapseVersion((v) => v + 1);
   }, []);
 

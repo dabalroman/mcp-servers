@@ -33,4 +33,6 @@ export type Task = {
   plan?: string;
   scope?: string;
   refs?: TaskRef[];
+  created_at: string;
+  updated_at: string;
 };

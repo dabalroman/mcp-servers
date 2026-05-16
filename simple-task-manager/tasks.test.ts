@@ -596,7 +596,7 @@ describe('sortForNext', () => {
 
 describe('applyRefs (in-memory helper)', () => {
   function makeT(id: number, extra: Partial<import('./tasks.js').Task> = {}): import('./tasks.js').Task {
-    return { id, title: `T${id}`, type: 'bug', status: 'todo', priority: 'medium', description: '', ...extra };
+    return { id, title: `T${id}`, type: 'bug', status: 'todo', priority: 'medium', description: '', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', ...extra };
   }
   test('adds inverse on counterpart', () => {
     const a = makeT(1);
@@ -625,7 +625,7 @@ describe('applyRefs (in-memory helper)', () => {
 
 describe('cascadeDelete (in-memory helper)', () => {
   function makeT(id: number, extra: Partial<import('./tasks.js').Task> = {}): import('./tasks.js').Task {
-    return { id, title: `T${id}`, type: 'bug', status: 'todo', priority: 'medium', description: '', ...extra };
+    return { id, title: `T${id}`, type: 'bug', status: 'todo', priority: 'medium', description: '', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00', ...extra };
   }
   test('strips refs pointing to deleted id', () => {
     const t = makeT(1, { refs: [{ id: 99, relation: 'blocks' }] });

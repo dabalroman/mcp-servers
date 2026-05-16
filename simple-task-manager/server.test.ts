@@ -90,6 +90,21 @@ describe('add handler', () => {
     assert.ok(typeof id === 'number' && id > 0);
   });
 
+  test('returned task has created_at and updated_at timestamp strings', async () => {
+    const resp = handleAdd(store, {
+      type: 'feature',
+      priority: 'medium',
+      title: 'Timestamp test',
+      description: '',
+      status: 'todo',
+    });
+    const { id } = decode(resp) as { id: number };
+    const task = store.getById(id);
+    assert.ok(task, 'task should exist');
+    assert.ok(typeof task.created_at === 'string' && task.created_at.length > 0, 'created_at should be a non-empty string');
+    assert.ok(typeof task.updated_at === 'string' && task.updated_at.length > 0, 'updated_at should be a non-empty string');
+  });
+
   test('returns isError for empty title', async () => {
     const resp = handleAdd(store, {
       type: 'bug',

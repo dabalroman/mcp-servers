@@ -2,18 +2,18 @@ import { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { TaskListControls, loadViewState } from '@/components/TaskListControls';
 import { cn } from '@/lib/utils';
+import { sortTasks, groupTasks } from '@/lib/taskView';
+import type { ViewState } from '@/lib/taskView';
 import { useTasks } from './useTasks';
 import { TaskCard } from './TaskCard';
 import { TaskForm } from './TaskForm';
 import { isCollapsed } from './collapseState';
-import { groupTasksByScope } from './groupTasksByScope';
 import { useRefNavigation } from './useRefNavigation';
 import type { Task, TaskStatus, TaskType } from '@/types/task';
 
-const STORAGE_KEY_ACTIVE = 'task-manager:collapse:active';
-const STORAGE_KEY_DONE = 'task-manager:collapse:done';
-const STORAGE_KEYS = { active: STORAGE_KEY_ACTIVE, done: STORAGE_KEY_DONE };
+const COLLAPSE_KEY = 'task-manager:collapse';
 
 type Tab = 'active' | 'done';
 
@@ -22,11 +22,12 @@ export default function TaskManager() {
   const [tab, setTab] = useState<Tab>('active');
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
+  const [view, setView] = useState<ViewState>(loadViewState);
 
   const { active, done } = data;
 
   const { navigateToRef, highlightedId, collapseVersion, toggleCollapse } =
-    useRefNavigation(active, done, tab, setTab, STORAGE_KEYS);
+    useRefNavigation(active, done, tab, setTab, view.groupBy);
 
   void collapseVersion;
 
@@ -96,12 +97,84 @@ export default function TaskManager() {
     }
   }, [error]);
 
-  const groupedActive = groupTasksByScope(active, 'active');
-  const groupedDone = groupTasksByScope(done, 'done');
+  const sortedActive = sortTasks(active, view.sortBy, view.sortDir);
+  const sortedDone   = sortTasks(done,   view.sortBy, view.sortDir);
+  const groupedActive = groupTasks(sortedActive, view.groupBy, view.groupDir);
+  const groupedDone   = groupTasks(sortedDone,   view.groupBy, view.groupDir);
 
   const tabs: Tab[] = ['active', 'done'];
-
   const counts: Record<Tab, number> = { active: active.length, done: done.length };
+
+  function renderTaskList(groups: ReturnType<typeof groupTasks>, noTasksMsg: string, showReopen: boolean) {
+    const tasks = groups.flatMap((g) => g.tasks);
+    if (tasks.length === 0) {
+      return <p className="text-muted-foreground text-base">{noTasksMsg}</p>;
+    }
+
+    if (view.groupBy === 'none') {
+      return (
+        <div className="flex flex-col gap-2">
+          {tasks.map((task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              onStatus={handleStatus}
+              onEdit={openEdit}
+              onRefClick={navigateToRef}
+              highlighted={highlightedId === task.id}
+              showReopen={showReopen}
+            />
+          ))}
+        </div>
+      );
+    }
+
+    return (
+      <div className="flex flex-col gap-8">
+        {groups.map(({ label, value, tasks: sectionTasks }) => {
+          const collapseKey = `${view.groupBy}:${value}`;
+          const collapsed = isCollapsed(localStorage, COLLAPSE_KEY, collapseKey);
+          return (
+            <section key={collapseKey}>
+              <button
+                type="button"
+                aria-expanded={!collapsed}
+                onClick={() => toggleCollapse(collapseKey)}
+                className="flex items-center gap-3 mb-3 w-full cursor-pointer hover:bg-accent/20 rounded -mx-2 px-2 py-1 transition-colors"
+              >
+                {collapsed
+                  ? <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground transition-transform" strokeWidth={1.5} />
+                  : <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground transition-transform" strokeWidth={1.5} />
+                }
+                <span className="text-xs tracking-widest text-muted-foreground uppercase">
+                  {label}
+                </span>
+                <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
+                  {sectionTasks.length}
+                </span>
+                <div className="tick-rule flex-1" />
+              </button>
+              {!collapsed && (
+                <div hidden={collapsed} className="flex flex-col gap-2">
+                  {sectionTasks.map((task) => (
+                    <TaskCard
+                      key={task.id}
+                      task={task}
+                      onStatus={handleStatus}
+                      onEdit={openEdit}
+                      onRefClick={navigateToRef}
+                      highlighted={highlightedId === task.id}
+                      showReopen={showReopen}
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          );
+        })}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col gap-7">
@@ -128,100 +201,10 @@ export default function TaskManager() {
         <Button size="sm" onClick={openAdd}>+ New</Button>
       </div>
 
-      {tab === 'active' && (
-        groupedActive.length === 0 ? (
-          <p className="text-muted-foreground text-base">No active tasks. Add one to get started.</p>
-        ) : (
-          <div className="flex flex-col gap-8">
-            {groupedActive.map(({ scope, tasks }) => {
-              const collapsed = isCollapsed(localStorage, STORAGE_KEY_ACTIVE, scope);
-              return (
-                <section key={scope}>
-                  <button
-                    type="button"
-                    onClick={() => toggleCollapse(STORAGE_KEY_ACTIVE, scope)}
-                    className="flex items-center gap-3 mb-3 w-full cursor-pointer hover:bg-accent/20 rounded -mx-2 px-2 py-1 transition-colors"
-                  >
-                    {collapsed
-                      ? <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground transition-transform" strokeWidth={1.5} />
-                      : <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground transition-transform" strokeWidth={1.5} />
-                    }
-                    <span className="text-xs tracking-widest text-muted-foreground uppercase">
-                      {scope}
-                    </span>
-                    <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
-                      {tasks.length}
-                    </span>
-                    <div className="tick-rule flex-1" />
-                  </button>
-                  {!collapsed && (
-                    <div className="flex flex-col gap-2">
-                      {tasks.map((task) => (
-                        <TaskCard
-                          key={task.id}
-                          task={task}
-                          onStatus={handleStatus}
-                          onEdit={openEdit}
-                          onRefClick={navigateToRef}
-                          highlighted={highlightedId === task.id}
-                        />
-                      ))}
-                    </div>
-                  )}
-                </section>
-              );
-            })}
-          </div>
-        )
-      )}
+      <TaskListControls value={view} onChange={setView} />
 
-      {tab === 'done' && (
-        groupedDone.length === 0 ? (
-          <p className="text-muted-foreground text-base">No done tasks yet.</p>
-        ) : (
-          <div className="flex flex-col gap-8">
-            {groupedDone.map(({ scope, tasks }) => {
-              const collapsed = isCollapsed(localStorage, STORAGE_KEY_DONE, scope);
-              return (
-                <section key={scope}>
-                  <button
-                    type="button"
-                    onClick={() => toggleCollapse(STORAGE_KEY_DONE, scope)}
-                    className="flex items-center gap-3 mb-3 w-full cursor-pointer hover:bg-accent/20 rounded -mx-2 px-2 py-1 transition-colors"
-                  >
-                    {collapsed
-                      ? <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground transition-transform" strokeWidth={1.5} />
-                      : <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground transition-transform" strokeWidth={1.5} />
-                    }
-                    <span className="text-xs tracking-widest text-muted-foreground uppercase">
-                      {scope}
-                    </span>
-                    <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
-                      {tasks.length}
-                    </span>
-                    <div className="tick-rule flex-1" />
-                  </button>
-                  {!collapsed && (
-                    <div className="flex flex-col gap-2">
-                      {tasks.map((task) => (
-                        <TaskCard
-                          key={task.id}
-                          task={task}
-                          onStatus={handleStatus}
-                          onEdit={openEdit}
-                          onRefClick={navigateToRef}
-                          highlighted={highlightedId === task.id}
-                          showReopen
-                        />
-                      ))}
-                    </div>
-                  )}
-                </section>
-              );
-            })}
-          </div>
-        )
-      )}
+      {tab === 'active' && renderTaskList(groupedActive, 'No active tasks. Add one to get started.', false)}
+      {tab === 'done'   && renderTaskList(groupedDone,   'No done tasks yet.', true)}
 
       <TaskForm
         key={`${String(formOpen)}:${editing?.id ?? 'new'}`}
@@ -232,7 +215,6 @@ export default function TaskManager() {
         onSubmit={handleFormSubmit}
         onDelete={handleDelete}
       />
-
     </div>
   );
 }

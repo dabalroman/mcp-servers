@@ -3,7 +3,7 @@ import { sortByPriority, STATUS_LABELS, STATUS_CLASSES, STATUS_NEXT } from './co
 import type { Task } from '@/types/task';
 
 function task(id: number, priority: Task['priority']): Task {
-  return { id, priority, type: 'feature', status: 'todo', title: `task ${id}`, description: '' };
+  return { id, priority, type: 'feature', status: 'todo', title: `task ${id}`, description: '', created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00' };
 }
 
 describe('STATUS constants — refinement', () => {

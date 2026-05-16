@@ -38,6 +38,8 @@ export type Task = {
   description?: string;
   plan?: string;
   refs?: Ref[];
+  created_at: string;
+  updated_at: string;
 };
 
 const PRIORITY_ORDER: Record<TaskPriority, number> = { critical: 4, high: 3, medium: 2, low: 1 };
@@ -172,6 +174,8 @@ type TaskRow = {
   summary: string | null;
   description: string | null;
   plan: string | null;
+  created_at: string;
+  updated_at: string;
 };
 
 type RefRow = { from_id: number; to_id: number; relation: string; non_canonical: number };
@@ -183,6 +187,8 @@ function rowToTask(row: TaskRow, refs: Ref[]): Task {
     type: row.type,
     status: row.status,
     priority: row.priority,
+    created_at: row.created_at,
+    updated_at: row.updated_at,
   };
   if (row.scope) t.scope = row.scope;
   if (row.summary) t.summary = row.summary;

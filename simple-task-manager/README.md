@@ -283,6 +283,17 @@ Use `getRelated(id)` to query connections.
 
 Set `scope` on tasks belonging to a specific tool or area (e.g. `"auth"`, `"api"`). Omit for project-wide tasks. Query with `getByScope("auth")` (exact, case-sensitive). Use `getScopes` to list all valid scope values and their open/total counts. Combine with `status` to filter by lifecycle stage.
 
+### Task timestamps
+
+Every task carries two ISO-format timestamp strings:
+
+| Field | Set when |
+|---|---|
+| `created_at` | Row inserted (immutable) |
+| `updated_at` | Any field update or status change. Also serves as the done-time proxy — there is no separate `done_at` column; any later edit to a done task will overwrite the apparent done-time. |
+
+Both fields are returned by all read tools and by the web UI's `/api/tasks` endpoint.
+
 
 &nbsp;
 &nbsp;
