@@ -13,13 +13,7 @@ export type TaskType = 'bug' | 'feature' | 'idea' | 'tool' | 'other';
 export type TaskStatus = 'refinement' | 'todo' | 'in_progress' | 'done';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
 
-export type Relation =
-  | 'blocks' | 'is blocked by'
-  | 'depends on' | 'is depended on by'
-  | 'causes' | 'is caused by'
-  | 'tests' | 'is tested by'
-  | 'relates to'
-  | (string & {});
+export type Relation = typeof RELATIONS[number];
 
 export type Ref = {
   id: number;
@@ -54,7 +48,7 @@ export const RELATIONS = [
   'relates to',
 ] as const;
 
-const INVERSE: Record<string, string> = {
+const INVERSE: Record<Relation, Relation> = {
   'blocks':            'is blocked by',
   'is blocked by':     'blocks',
   'depends on':        'is depended on by',
@@ -199,7 +193,8 @@ function rowToTask(row: TaskRow, refs: Ref[]): Task {
 }
 
 function refRowToObj(r: RefRow): Ref {
-  const out: Ref = { id: r.to_id, relation: r.relation };
+  // relation was validated by zod at write time; cast is safe
+  const out: Ref = { id: r.to_id, relation: r.relation as Relation };
   if (r.non_canonical) out.nonCanonical = true;
   return out;
 }
@@ -403,16 +398,16 @@ export function createStore(dbPath: string): Store {
     });
 
     for (const ref of added) {
-      const inverse = INVERSE[ref.relation as string] ?? ref.relation;
+      const inverse = INVERSE[ref.relation] ?? ref.relation;
       stmtInsertRef.run(ref.id, sourceId, inverse, 0);
     }
     for (const ref of removed) {
       // Remove only the specific mirror: the inverse relation we wrote when this ref was added.
-      const inverse = INVERSE[ref.relation as string] ?? ref.relation;
+      const inverse = INVERSE[ref.relation] ?? ref.relation;
       stmtDeleteMirror.run(ref.id, sourceId, inverse);
     }
     for (const ref of changed) {
-      const inverse = INVERSE[ref.relation as string] ?? ref.relation;
+      const inverse = INVERSE[ref.relation] ?? ref.relation;
       stmtUpdateRefRelation.run(inverse, ref.id, sourceId);
     }
 
@@ -712,7 +707,7 @@ export function applyRefs(allTasks: Task[], sourceId: number, oldRefs: Ref[] | u
 
     for (const ref of added) {
       if (task.id !== ref.id) continue;
-      const inverse = INVERSE[ref.relation as string] ?? ref.relation;
+      const inverse = INVERSE[ref.relation] ?? ref.relation;
       if (!task.refs) task.refs = [];
       if (!task.refs.some((r) => r.id === sourceId)) {
         task.refs.push({ id: sourceId, relation: inverse });
@@ -725,7 +720,7 @@ export function applyRefs(allTasks: Task[], sourceId: number, oldRefs: Ref[] | u
     }
     for (const ref of changed) {
       if (task.id !== ref.id || !task.refs) continue;
-      const inverse = INVERSE[ref.relation as string] ?? ref.relation;
+      const inverse = INVERSE[ref.relation] ?? ref.relation;
       task.refs = task.refs.map((r) => (r.id === sourceId ? { ...r, relation: inverse } : r));
     }
   }
