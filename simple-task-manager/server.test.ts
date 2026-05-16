@@ -350,11 +350,18 @@ describe('update handler — summaryReminder', () => {
     assert.equal(payload.summaryReminder, undefined);
   });
 
-  test('update with summary: null on refinement task returns summaryReminder', async () => {
+  test('update with summary: null does NOT return summaryReminder (caller explicitly touched summary)', async () => {
     const { id } = addTask({ status: 'refinement', summary: 'Existing.' });
     const resp = handleUpdate(store, { id, summary: null });
     const payload = decode(resp);
-    assert.ok(typeof payload.summaryReminder === 'string', 'reminder should fire when summary is cleared on refinement task');
+    assert.equal(payload.summaryReminder, undefined, 'no reminder when patch includes summary key');
+  });
+
+  test('updating other fields on summary-less refinement task returns summaryReminder', async () => {
+    const { id } = addTask({ status: 'refinement' });
+    const resp = handleUpdate(store, { id, description: 'More context.' });
+    const payload = decode(resp);
+    assert.ok(typeof payload.summaryReminder === 'string', 'reminder fires when patch ignores summary');
   });
 });
 

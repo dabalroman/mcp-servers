@@ -35,7 +35,7 @@ export function handleUpdate(store: Store, { id, ...patch }: UpdatePatch & { id:
     success: true,
     task: result.task,
   };
-  if (result.task.status === 'refinement' && !result.task.summary) {
+  if (result.task.status === 'refinement' && !result.task.summary && !('summary' in patch)) {
     response.summaryReminder = 'This task is in refinement. Before promoting to todo, add a 2–3 line summary via update({ id, summary: "..." }).';
   }
   return text(response);
@@ -114,9 +114,23 @@ export async function handleUiStop(): Promise<MCPContent> {
   }
 
   if (child.pid !== undefined && !child.killed) {
-    try { child.kill('SIGTERM'); } catch { /* ignore */ }
+    try {
+      process.kill(child.pid, 0); // verify PID is still alive before sending signal
+      child.kill('SIGTERM');
+    } catch { /* process already gone — proceed to clear the reference */ }
   }
   srv.setUiChild(null);
+
+  // Re-probe to confirm the port was released
+  await new Promise<void>((r) => setTimeout(r, 500));
+  const stillBound = await probeTcp(UI_PORT, 500);
+  if (stillBound) {
+    return text({
+      stopped: false,
+      staleReference: true,
+      message: `Port ${UI_PORT} is still bound after SIGTERM — another process may own it. Stop it manually.`,
+    });
+  }
 
   return text({ stopped: true, port: UI_PORT });
 }

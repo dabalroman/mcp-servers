@@ -106,7 +106,7 @@ export function spawnUi(): void {
     pipeChildLines(child.stderr, 'warning');
     child.on('exit', (code, signal) => {
       logToClient('warning', `[simple-task-manager] task-manager-ui exited (code=${code} signal=${signal})`);
-      uiChild = null;
+      uiChild = null; // unconditional — prevents stale reference if exit fires after a crash
     });
     uiChild = child;
   } catch (err) {
