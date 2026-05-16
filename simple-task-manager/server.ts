@@ -1,13 +1,11 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
-import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { resolve, dirname } from 'node:path';
+import { resolve } from 'node:path';
 import { VERSION } from './version.js';
 import { createStore } from './tasks.js';
 import { INSTRUCTIONS } from './instructions.js';
 import { registerTools } from './mcp/registerTools.js';
+import { uiPkgDir, initUiChild, spawnUi, getUiChild, setUiChild } from './mcp/uiChild.js';
 
 // Buffered log queue — anything emitted before the JSON-RPC transport is
 // connected is held here and flushed once `server.connect()` resolves. All
@@ -30,8 +28,8 @@ function logToClient(level: LogLevel, data: string): void {
 if (!process.env.TASKS_DB) {
   throw new Error('TASKS_DB env var is required (absolute path to the SQLite tasks database).');
 }
-const TASKS_DB = resolve(process.env.TASKS_DB);
-const store = createStore(TASKS_DB);
+const resolvedTasksDb = resolve(process.env.TASKS_DB);
+const store = createStore(resolvedTasksDb);
 
 const server = new McpServer(
   { name: 'simple-task-manager', version: VERSION },
@@ -41,79 +39,10 @@ const server = new McpServer(
 registerTools(server, store);
 
 // ── task-manager-ui spawn ────────────────────────────────────────────────────
-//
-// If the `task-manager-ui/` sub-package is present, spawn its server as a
-// child process so Claude bringing up this MCP also brings up the web UI.
-// Lives at simple-task-manager/task-manager-ui/server.ts; we run it via the
-// local tsx loader (cwd = that package, so node resolves tsx from its
-// node_modules).
-//
-// Env vars (forwarded via the `...process.env` spread to the child):
-//   TASKS_DB                       — UI opens the same SQLite database.
-//   PROJECT_NAME                   — UI header pill + browser tab title.
-//   TASK_UI_PORT                   — port for the UI; default 7374.
-//   TASK_UI_AUTO_OPEN_IN_BROWSER   — UI auto-opens the system browser when "1".
-//
-// Disable spawn entirely with TASK_UI_DISABLE=1 (useful for tests or when
-// running the UI manually from a separate terminal).
-// This file may run from source (`simple-task-manager/server.ts`, one level
-// from the package root) or from the compiled dist (`simple-task-manager/dist/server.js`,
-// two levels in). Try both depths so the sibling lookup works in either case.
-const here = dirname(fileURLToPath(import.meta.url));
-const uiCandidates = [
-  resolve(here, '../task-manager-ui'),
-  resolve(here, '../../task-manager-ui'),
-];
-export const uiPkgDir = uiCandidates.find((p) => existsSync(resolve(p, 'server.ts'))) ?? uiCandidates[0]!;
-export const uiServerEntry = resolve(uiPkgDir, 'server.ts');
-export const resolvedTasksDb = TASKS_DB;
-let uiChild: ChildProcess | null = null;
-
-export function getUiChild(): ChildProcess | null { return uiChild; }
-export function setUiChild(child: ChildProcess | null): void { uiChild = child; }
-
-function pipeChildLines(
-  stream: NodeJS.ReadableStream | null | undefined,
-  level: LogLevel,
-): void {
-  if (!stream) return;
-  let buf = '';
-  stream.on('data', (chunk: Buffer) => {
-    buf += chunk.toString('utf8');
-    let nl: number;
-    while ((nl = buf.indexOf('\n')) >= 0) {
-      const line = buf.slice(0, nl);
-      buf = buf.slice(nl + 1);
-      if (line.length) logToClient(level, line);
-    }
-  });
-  stream.on('end', () => { if (buf.length) logToClient(level, buf); });
-}
-
-export function spawnUi(): void {
-  if (!existsSync(uiServerEntry)) {
-    logToClient('warning', `[simple-task-manager] task-manager-ui not found at ${uiPkgDir} — UI will not be available`);
-    return;
-  }
-  try {
-    const child = spawn(process.execPath, ['--import', 'tsx', uiServerEntry], {
-      cwd: uiPkgDir,
-      env: { ...process.env, TASKS_DB: resolvedTasksDb },
-      stdio: ['ignore', 'pipe', 'pipe'],
-      detached: false,
-    });
-    pipeChildLines(child.stdout, 'info');
-    pipeChildLines(child.stderr, 'warning');
-    child.on('exit', (code, signal) => {
-      logToClient('warning', `[simple-task-manager] task-manager-ui exited (code=${code} signal=${signal})`);
-      uiChild = null; // unconditional — prevents stale reference if exit fires after a crash
-    });
-    uiChild = child;
-  } catch (err) {
-    logToClient('error', `[simple-task-manager] failed to spawn task-manager-ui: ${String(err)}`);
-    uiChild = null;
-  }
-}
+// UI child state and spawn logic live in mcp/uiChild.ts to break the circular
+// dep: server.ts → registerTools → mutationHandlers → (was: dynamic server.ts).
+// initUiChild wires in the DB path and log function before spawnUi() is called.
+initUiChild(resolvedTasksDb, logToClient);
 
 // TASK_UI_MODE is the single source of truth for whether/how the UI runs.
 // Values: "bundled" (default) | "standalone" (pm2 owns it) | "disabled" (no UI).
@@ -125,13 +54,19 @@ if (uiMode === 'standalone') {
 } else if (uiMode === 'disabled') {
   logToClient('info', '[simple-task-manager] TASK_UI_MODE=disabled — UI will not run');
 } else {
+  // bundled mode: fail loudly if the UI sub-package is missing
+  if (uiPkgDir === null) {
+    throw new Error('[simple-task-manager] task-manager-ui not found at any expected location. Re-run the installer or set TASK_UI_MODE=disabled.');
+  }
   spawnUi();
 }
 
 function killUi() {
-  if (uiChild && uiChild.pid && !uiChild.killed) {
-    try { uiChild.kill('SIGTERM'); } catch { /* ignore */ }
+  const child = getUiChild();
+  if (child && child.pid && !child.killed) {
+    try { child.kill('SIGTERM'); } catch { /* ignore */ }
   }
+  setUiChild(null);
 }
 
 // Single shutdown path — all exit signals route here so killUi() and
@@ -152,8 +87,8 @@ async function shutdown(graceful = false): Promise<void> {
 
 process.on('SIGINT',  () => { void shutdown(); });
 process.on('SIGTERM', () => { void shutdown(); });
-// 'exit' is a last-resort safety net; the handlers above already call
-// process.exit(0) which fires this. Cannot be async — just repeat sync cleanup.
+// 'exit' is a last-resort safety net; the handlers above already call process.exit(0)
+// which fires this. Cannot be async — repeat sync cleanup only (killUi is sync).
 process.on('exit',    () => { killUi(); try { store.close(); } catch { /* ignore */ } });
 
 const transport = new StdioServerTransport();

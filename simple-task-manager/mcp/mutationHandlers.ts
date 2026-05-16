@@ -1,21 +1,6 @@
 import { text, errorText, notFoundError, probeTcp, type MCPContent } from './shared.js';
-import { existsSync } from 'node:fs';
 import type { AddInput, Store, TaskStatus, UpdatePatch } from '../tasks.js';
-
-// Resolved lazily to avoid a circular import at module load time: server.ts
-// imports registerTools → mutationHandlers, so we import server.ts only when
-// the handler is actually invoked (post-startup).
-async function getServerExports() {
-  const mod = await import('../server.js');
-  return mod as {
-    uiPkgDir: string;
-    uiServerEntry: string;
-    resolvedTasksDb: string;
-    getUiChild: () => import('node:child_process').ChildProcess | null;
-    setUiChild: (child: import('node:child_process').ChildProcess | null) => void;
-    spawnUi: () => void;
-  };
-}
+import { uiPkgDir, uiServerEntry, getUiChild, setUiChild, spawnUi } from './uiChild.js';
 
 const UI_PORT = parseInt(process.env['TASK_UI_PORT'] ?? '7374', 10);
 
@@ -78,12 +63,11 @@ export async function handleUiStart(): Promise<MCPContent> {
     return text({ started: false, alreadyRunning: true, port: UI_PORT });
   }
 
-  const srv = await getServerExports();
-  if (!existsSync(srv.uiServerEntry)) {
-    return errorText({ error: `task-manager-ui not found at ${srv.uiPkgDir} — the sub-package may not be installed.` });
+  if (!uiServerEntry || !uiPkgDir) {
+    return errorText({ error: `task-manager-ui not found at any expected location — the sub-package may not be installed.` });
   }
 
-  srv.spawnUi();
+  spawnUi();
 
   // Give the process ~1 s to bind its port before confirming
   await new Promise<void>((r) => setTimeout(r, 1000));
@@ -102,8 +86,7 @@ export async function handleUiStop(): Promise<MCPContent> {
     return text({ stopped: false, notRunning: true });
   }
 
-  const srv = await getServerExports();
-  const child = srv.getUiChild();
+  const child = getUiChild();
 
   if (child === null) {
     return text({
@@ -119,7 +102,7 @@ export async function handleUiStop(): Promise<MCPContent> {
       child.kill('SIGTERM');
     } catch { /* process already gone — proceed to clear the reference */ }
   }
-  srv.setUiChild(null);
+  setUiChild(null);
 
   // Re-probe to confirm the port was released
   await new Promise<void>((r) => setTimeout(r, 500));
