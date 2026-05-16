@@ -259,7 +259,9 @@ export type RelatedResult = {
   inbound: (Task & { refRelation: string })[];
 };
 
-export type OverviewEntry = { type: TaskType; refinement: number; open: number; done: number };
+export type OverviewEntry =
+  | { type: TaskType; refinement: number; open: number; done: number }
+  | { type: TaskType; count: number; status: TaskStatus };
 export type ScopeEntry = { scope: string; total: number; open: number };
 
 export type StatusFilter = TaskStatus | 'open';
@@ -561,32 +563,41 @@ export function createStore(dbPath: string): Store {
 
   function getOverview(status?: StatusFilter): OverviewEntry[] {
     const resolved = resolveStatusFilter(status);
-    let whereClause: string;
-    let params: string[];
-    if (Array.isArray(resolved)) {
-      const placeholders = resolved.map(() => '?').join(', ');
-      whereClause = `WHERE status IN (${placeholders})`;
-      params = resolved;
-    } else {
-      whereClause = 'WHERE status = ?';
-      params = [resolved];
+
+    if (!Array.isArray(resolved)) {
+      // Specific status requested — return a simple count per type so no zero-buckets appear.
+      const rows = db.prepare(`
+        SELECT type, COUNT(*) AS count
+        FROM tasks
+        WHERE status = ?
+        GROUP BY type
+      `).all(resolved) as { type: TaskType; count: number }[];
+      return ALL_TYPES
+        .map((type): OverviewEntry | null => {
+          const r = rows.find((x) => x.type === type);
+          return r ? { type, count: r.count, status: resolved } : null;
+        })
+        .filter((o): o is OverviewEntry => o !== null)
+        .sort((a, b) => ('count' in b ? b.count : 0) - ('count' in a ? a.count : 0));
     }
+
+    const placeholders = resolved.map(() => '?').join(', ');
     const rows = db.prepare(`
       SELECT type,
              SUM(CASE WHEN status = 'refinement' THEN 1 ELSE 0 END) AS refinement,
              SUM(CASE WHEN status IN ('todo', 'in_progress') THEN 1 ELSE 0 END) AS open,
              SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done
       FROM tasks
-      ${whereClause}
+      WHERE status IN (${placeholders})
       GROUP BY type
-    `).all(...params) as { type: TaskType; refinement: number; open: number; done: number }[];
+    `).all(...resolved) as { type: TaskType; refinement: number; open: number; done: number }[];
     return ALL_TYPES
       .map((type): OverviewEntry | null => {
         const r = rows.find((x) => x.type === type);
         return r ? { type, refinement: r.refinement, open: r.open, done: r.done } : null;
       })
-      .filter((o): o is OverviewEntry => o !== null && (o.refinement + o.open + o.done > 0))
-      .sort((a, b) => b.open - a.open);
+      .filter((o): o is OverviewEntry => o !== null && ('refinement' in o ? o.refinement + o.open + o.done > 0 : true))
+      .sort((a, b) => ('open' in b ? b.open : 0) - ('open' in a ? a.open : 0));
   }
 
   function getById(id: number): Task | null {

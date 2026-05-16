@@ -579,18 +579,19 @@ describe('getOverview handler — status filter', () => {
     assert.equal(bugEntry.refinement, 1);
   });
 
-  test('status: "done" shows only done tasks', async () => {
+  test('status: "done" shows only done tasks — returns count shape, not three-bucket', async () => {
     store.add({ type: 'bug', priority: 'medium', title: 'Active', description: '', status: 'refinement' });
     const { id: doneId } = store.add({ type: 'bug', priority: 'medium', title: 'Done', description: '', status: 'refinement' });
     store.setStatus(doneId, 'done');
 
     const resp = handleGetOverview(store, { status: 'done' });
-    const { overview } = decode(resp) as { overview: { type: string; refinement: number; open: number; done: number }[] };
+    const { overview } = decode(resp) as { overview: { type: string; count: number; status: string }[] };
     const bugEntry = overview.find((o) => o.type === 'bug');
     assert.ok(bugEntry, 'bug entry should exist');
-    assert.equal(bugEntry.done, 1);
-    assert.equal(bugEntry.refinement, 0);
-    assert.equal(bugEntry.open, 0);
+    assert.equal(bugEntry.count, 1);
+    assert.equal(bugEntry.status, 'done');
+    assert.ok(!('refinement' in bugEntry), 'refinement bucket should not be present');
+    assert.ok(!('open' in bugEntry), 'open bucket should not be present');
   });
 
   test('status: "open" counts refinement+todo+in_progress only', async () => {
@@ -606,18 +607,18 @@ describe('getOverview handler — status filter', () => {
     assert.equal(bugEntry.refinement, 1);
   });
 
-  test('status: "todo" counts only todo tasks', async () => {
+  test('status: "todo" counts only todo tasks — returns count shape, not three-bucket', async () => {
     store.add({ type: 'bug', priority: 'medium', title: 'Todo', description: '', summary: 'x', status: 'todo' });
     store.add({ type: 'bug', priority: 'medium', title: 'Refinement', description: '', status: 'refinement' });
 
     const resp = handleGetOverview(store, { status: 'todo' });
-    const { overview } = decode(resp) as { overview: { type: string; refinement: number; open: number; done: number }[] };
+    const { overview } = decode(resp) as { overview: { type: string; count: number; status: string }[] };
     const bugEntry = overview.find((o) => o.type === 'bug');
     assert.ok(bugEntry);
-    // todo is counted in the 'open' aggregation column
-    assert.equal(bugEntry.open, 1);
-    assert.equal(bugEntry.refinement, 0);
-    assert.equal(bugEntry.done, 0);
+    assert.equal(bugEntry.count, 1);
+    assert.equal(bugEntry.status, 'todo');
+    assert.ok(!('open' in bugEntry), 'open bucket should not be present');
+    assert.ok(!('refinement' in bugEntry), 'refinement bucket should not be present');
   });
 });
 

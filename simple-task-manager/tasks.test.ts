@@ -460,25 +460,25 @@ describe('getOverview', () => {
     makeTask({ type: 'feature' });
     const { id: t3 } = makeTask({ type: 'bug' });
     store.setStatus(t3, 'done');
-    // Default (non-done): done tasks are excluded
+    // Default (non-done): done tasks are excluded; returns three-bucket shape
     const ov = store.getOverview();
-    const bug = ov.find((o) => o.type === 'bug');
+    const bug = ov.find((o) => o.type === 'bug') as { type: string; open: number; done: number; refinement: number } | undefined;
     assert.equal(bug?.open, 1);
     assert.equal(bug?.done, 0);
-    const feature = ov.find((o) => o.type === 'feature');
+    const feature = ov.find((o) => o.type === 'feature') as { type: string; refinement: number } | undefined;
     assert.equal(feature?.refinement, 1);
   });
 
-  test('status: "done" shows only done tasks', () => {
+  test('status: "done" shows only done tasks — count shape, no zero-buckets', () => {
     const { id: t1 } = makeTask({ type: 'bug' });
     store.setStatus(t1, 'todo');
     const { id: t3 } = makeTask({ type: 'bug' });
     store.setStatus(t3, 'done');
     const ov = store.getOverview('done');
-    const bug = ov.find((o) => o.type === 'bug');
-    assert.equal(bug?.done, 1);
-    assert.equal(bug?.open, 0);
-    assert.equal(bug?.refinement, 0);
+    const bug = ov.find((o) => o.type === 'bug') as { type: string; count: number; status: string } | undefined;
+    assert.equal(bug?.count, 1);
+    assert.equal(bug?.status, 'done');
+    assert.ok(bug && !('open' in bug), 'open bucket should not appear');
   });
 
   test('omits types with zero tasks', () => {
@@ -493,10 +493,10 @@ describe('getOverview', () => {
     const { id: t2 } = makeTask({ type: 'bug' });
     store.setStatus(t2, 'done');
     makeTask({ type: 'bug' });
-    // To check all three buckets, pass status: "done" for done-only count
-    // then check non-done (default) separately
+    // Default (non-done) always returns three-bucket shape
     const ovNonDone = store.getOverview();
-    const bugNonDone = ovNonDone.find((o) => o.type === 'bug');
+    const bugNonDone = ovNonDone.find((o) => o.type === 'bug') as
+      { type: string; open: number; done: number; refinement: number } | undefined;
     assert.ok(bugNonDone);
     assert.equal(typeof bugNonDone.open, 'number');
     assert.equal(typeof bugNonDone.done, 'number');
