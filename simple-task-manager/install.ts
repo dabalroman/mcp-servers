@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from
 import { resolve, dirname, basename } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
-import { ENV_DOCS, ENV_ORDER, parseMcpConfig, serializeMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
+import { ENV_DOCS, ENV_ORDER, isStaleEntry, parseMcpConfig, serializeMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
 
 const serverDir = dirname(fileURLToPath(import.meta.url));
 const serverEntry = resolve(serverDir, 'dist/server.js');
@@ -64,15 +64,6 @@ if (existsSync(mcpFile)) {
 }
 
 const existingEntry = config.mcpServers['task-manager'];
-
-// Detect a stale entry from the pre-TypeScript layout (args pointed at server.js
-// at the package root). Rewrite it to the new dist/server.js path so existing
-// installations keep working after upgrade.
-function isStaleEntry(e: McpEntry | undefined): boolean {
-  if (!e) return false;
-  const arg0 = e.args?.[0] ?? '';
-  return arg0.endsWith('/server.js') || arg0.endsWith('/server.ts');
-}
 
 if (existingEntry && !isStaleEntry(existingEntry)) {
   console.log(`task-manager is already registered in ${mcpFile} — nothing to do.`);

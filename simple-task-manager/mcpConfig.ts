@@ -54,6 +54,13 @@ export const ENV_ORDER = [
   'TASK_UI_AUTO_OPEN_IN_BROWSER',
 ];
 
+/** Returns true when an existing task-manager entry points at the old pre-dist path. */
+export function isStaleEntry(e: McpEntry | undefined): boolean {
+  if (!e) return false;
+  const arg0 = e.args?.[0] ?? '';
+  return arg0.endsWith('/server.ts') || (arg0.endsWith('/server.js') && !arg0.endsWith('/dist/server.js'));
+}
+
 export function parseMcpConfig(raw: string): McpConfig {
   return JSON.parse(raw) as McpConfig;
 }

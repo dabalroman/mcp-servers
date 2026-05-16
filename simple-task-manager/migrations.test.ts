@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
-import { createStore } from './tasks.js';
+import { createStore, loadMigrations } from './tasks.js';
 
 let dir: string;
 let dbPath: string;
@@ -190,6 +190,27 @@ describe('file-based migration runner', () => {
 });
 
 describe('migration file name validation', () => {
+  test('loadMigrations throws when exported name does not match filename stem', () => {
+    const fakeDir = mkdtempSync(join(tmpdir(), 'mcp-fake-migrations-'));
+    try {
+      writeFileSync(
+        join(fakeDir, '20991231000000_correct-stem.js'),
+        'module.exports = { name: "wrong-name", up: function() {} };\n'
+      );
+      assert.throws(
+        () => loadMigrations(fakeDir),
+        (err: unknown) => {
+          assert.ok(err instanceof Error);
+          assert.match(err.message, /mismatch/i);
+          assert.match(err.message, /wrong-name/);
+          return true;
+        }
+      );
+    } finally {
+      rmSync(fakeDir, { recursive: true, force: true });
+    }
+  });
+
   test('migration file whose exported name does not match filename is rejected', async () => {
     // The guard in loadMigrations() throws if mod.name !== stem (the filename
     // without extension). We verify all real migration files pass the guard, AND

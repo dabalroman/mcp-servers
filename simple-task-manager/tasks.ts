@@ -77,12 +77,12 @@ const INVERSE: Record<Relation, Relation> = {
 
 type MigrationModule = { name: string; up: (db: DB) => void };
 
-function loadMigrations(): MigrationModule[] {
+export function loadMigrations(dir?: string): MigrationModule[] {
   // In dev, tsx sets __dirname to the source directory (where tasks.ts lives),
   // so path.join(__dirname, 'migrations') finds ./migrations/ next to tasks.ts.
   // In prod, tsc compiles to dist/ with migrations/ copied alongside, so
   // path.join(__dirname, 'migrations') finds dist/migrations/ correctly.
-  const migrationsDir = join(__dirname, 'migrations');
+  const migrationsDir = dir ?? join(__dirname, 'migrations');
   const requireModule = createRequire(import.meta.url);
 
   const files = readdirSync(migrationsDir)
