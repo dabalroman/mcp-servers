@@ -25,11 +25,14 @@ After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.t
 - `instructions.ts` — the `INSTRUCTIONS` string surfaced to MCP clients on connect. Edit this when changing user-facing behavioural rules; the prose is reflected in the agent's system prompt.
 - `tasks.ts` — SQLite storage layer plus all exported types (`Task`, `Ref`, `Store`, `TaskType`, `TaskStatus`, `TaskPriority`, `AddInput`, `UpdatePatch`, `LoadResult`, `RelatedResult`, `OverviewEntry`, `ScopeEntry`).
 - `mcp/shared.ts` — `text` / `errorText`, `toListTask` (list-mode description stripping), `allIdsSorted`, `notFoundError`, the `MCPContent` type, and the zod `refsSchema`.
-- `mcp/queryHandlers.ts` — pure `(store, args) => MCPContent` fns for the 9 read tools (`handleGetByType`, `handleGetOverview`, `handleGetNext`, `handleGetAll`, `handleGetById`, `handleGetByScope`, `handleGetRelated`, `handleGetByStatus`, `handleGetScopes`).
+- `mcp/queryHandlers.ts` — pure `async (store, args) => Promise<MCPContent>` fns for the 9 read tools (`handleGetByType`, `handleGetOverview`, `handleGetNext`, `handleGetAll`, `handleGetById`, `handleGetByScope`, `handleGetRelated`, `handleGetByStatus`, `handleGetScopes`). All handlers are async for uniformity with mutation handlers.
+- `mcp/uiChild.ts` — UI child-process state (`uiPkgDir`, `uiServerEntry`, `getUiChild`, `setUiChild`, `initUiChild`, `spawnUi`). Eagerly imported by both `server.ts` and `mcp/mutationHandlers.ts` to break the circular dependency that a dynamic import of `server.ts` would create.
 - `mcp/mutationHandlers.ts` — pure handlers for `handleAdd`, `handleUpdate`, `handleSetStatus`, `handleDelete`. `handleSetStatus` enforces the `refinement → todo` summary gate and emits `knowledgeReminder` on `done`; `handleUpdate` emits `summaryReminder` for summary-less refinement tasks.
 - `mcp/registerTools.ts` — `registerTools(server, store)` holds every tool name, long description, and zod input schema and wires each tool to its handler. Adding a new tool means adding a handler + a `server.tool(...)` block here.
 
-`server.test.ts` imports the real handlers directly — there is no copied handler logic in tests. Adding a new handler: add it to `mcp/{query,mutation}Handlers.ts`, register it in `mcp/registerTools.ts`, write tests against the imported handler in `server.test.ts`.
+`server.test.ts` imports the real handlers directly — there is no copied handler logic in tests. Adding a new handler: add it to `mcp/{query,mutation}Handlers.ts`, register it in `mcp/registerTools.ts`, write tests against the imported handler in `server.test.ts`. Query handlers are async — test call sites must `await` them and the enclosing test function must be `async`.
+
+`install.test.ts` tests `serializeMcpConfig`, `isStaleEntry`, and `loadMigrations` from `mcpConfig.ts` and `tasks.ts`. `install.ts` is a top-level script (calls `process.exit`) and cannot be imported; testable logic lives in `mcpConfig.ts` instead. `isStaleEntry` checks for `/dist/server.js` suffix specifically — `endsWith('/server.js')` alone is too broad and would flag the current `dist/server.js` path as stale.
 
 ## tsconfig — excluding the UI sub-package
 
