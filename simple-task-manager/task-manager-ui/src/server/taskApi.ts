@@ -17,25 +17,38 @@ export function createTaskApi({ dbPath }: TaskApiOptions) {
   // Poll for external writes (e.g. MCP using a separate DB connection).
   // data_version only increments for *other* connections, so self-writes are
   // handled by calling broadcast() directly after each mutating operation.
+  // Poll and heartbeat only run while there is at least one SSE watcher —
+  // no clients means no one to notify and no keep-alive needed.
   let lastDataVersion = store.dataVersion();
-  const pollTimer = setInterval(() => {
-    let v: number;
-    try { v = store.dataVersion(); }
-    catch { return; /* db closed */ }
-    if (v !== lastDataVersion) {
-      lastDataVersion = v;
-      broadcast();
-    }
-  }, 1_000);
-  if (typeof pollTimer.unref === 'function') pollTimer.unref();
+  let pollTimer: ReturnType<typeof setInterval> | null = null;
+  let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
-  // Keep SSE connections alive through idle-timeout proxies.
-  const heartbeatTimer = setInterval(() => {
-    for (const res of watchers) {
-      try { res.write(': ping\n\n'); } catch { /* client gone */ }
-    }
-  }, 20_000);
-  if (typeof heartbeatTimer.unref === 'function') heartbeatTimer.unref();
+  function startTimers() {
+    if (pollTimer) return;
+    lastDataVersion = store.dataVersion();
+    pollTimer = setInterval(() => {
+      let v: number;
+      try { v = store.dataVersion(); }
+      catch { return; /* db closed */ }
+      if (v !== lastDataVersion) {
+        lastDataVersion = v;
+        broadcast();
+      }
+    }, 1_000);
+    if (typeof pollTimer.unref === 'function') pollTimer.unref();
+
+    heartbeatTimer = setInterval(() => {
+      for (const res of watchers) {
+        try { res.write(': ping\n\n'); } catch { /* client gone */ }
+      }
+    }, 20_000);
+    if (typeof heartbeatTimer.unref === 'function') heartbeatTimer.unref();
+  }
+
+  function stopTimers() {
+    if (pollTimer) { clearInterval(pollTimer); pollTimer = null; }
+    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  }
 
   return {
     list() {
@@ -71,15 +84,18 @@ export function createTaskApi({ dbPath }: TaskApiOptions) {
       res.write('event: connected\ndata: {}\n\n');
 
       watchers.add(res);
-      const cleanup = () => watchers.delete(res);
+      startTimers();
+      const cleanup = () => {
+        watchers.delete(res);
+        if (watchers.size === 0) stopTimers();
+      };
       req.on('close', cleanup);
       req.on('error', cleanup);
       res.on('error', cleanup);
     },
 
     dispose() {
-      clearInterval(pollTimer);
-      clearInterval(heartbeatTimer);
+      stopTimers();
       for (const res of watchers) {
         try { res.end(); } catch { /* already closed */ }
       }

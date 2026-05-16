@@ -19,8 +19,9 @@ try {
   } else {
     seq = '001';
   }
-} catch {
-  seq = '001';
+} catch (err) {
+  if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+  seq = '001'; // first run — version.ts doesn't exist yet
 }
 
 const version = `${curYear}-${curMonth}-${seq}`;

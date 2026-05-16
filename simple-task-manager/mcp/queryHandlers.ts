@@ -225,7 +225,7 @@ export async function handleHealth(): Promise<MCPContent> {
 
   try {
     const statusCode = await probeHttp(probeUrl, 2000);
-    if (statusCode >= 200 && statusCode < 400) {
+    if (statusCode >= 200 && statusCode < 300) {
       runtimeChecks.push(check('✓', `UI reachable at ${probeUrl} · ${displayUrl}`));
     } else {
       runtimeChecks.push(check('✗', `UI at ${probeUrl} returned HTTP ${statusCode} — ${notReachableHint}`));
