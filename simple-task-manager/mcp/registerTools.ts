@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { refsSchema, type MCPContent } from './shared.js';
-import type { AddInput, Store, TaskStatus, TaskType, UpdatePatch } from '../tasks.js';
+import type { AddInput, Store, StatusFilter, TaskStatus, TaskType, UpdatePatch } from '../tasks.js';
 import {
   handleGetByType,
   handleGetOverview,
@@ -10,7 +10,6 @@ import {
   handleGetById,
   handleGetByScope,
   handleGetRelated,
-  handleGetByStatus,
   handleGetScopes,
   handleHealth,
 } from './queryHandlers.js';
@@ -22,6 +21,9 @@ import {
   handleUiStart,
   handleUiStop,
 } from './mutationHandlers.js';
+
+const statusParam = z.enum(['refinement', 'todo', 'in_progress', 'done', 'open']).optional()
+  .describe('Filter by status. Default: non-done. Pass "open" for refinement+todo+in_progress, or a specific status (incl. "done") for exact match.');
 
 export function registerTools(server: McpServer, store: Store): void {
   // ── add ────────────────────────────────────────────────────────────────────────
@@ -54,17 +56,20 @@ export function registerTools(server: McpServer, store: Store): void {
   // ── getByType ──────────────────────────────────────────────────────────────────
   server.tool(
     'getByType',
-    'Get all tasks of a specific type across all statuses — use for "show me all bugs", "list features", "what ideas do we have?". Includes done tasks. Sorted by priority desc then id desc. Prefer getNext when the user just wants the single recommended next task; prefer getAll for the full open backlog. When a task has a summary, description is omitted — call getById for the full task.',
-    { type: z.enum(['bug', 'feature', 'idea', 'tool', 'other']).describe('Task type to filter: bug | feature | idea | tool | other') },
-    async (args: unknown): Promise<MCPContent> => handleGetByType(store, args as { type: TaskType })
+    'Get tasks of a specific type — use for "show me all bugs", "list features", "what ideas do we have?". Filters by status. Default: non-done. Pass "open" for refinement+todo+in_progress, or a single status (incl. "done") for exact match. Sorted by priority desc then id desc. When a task has a summary, description is omitted — call getById for the full task.',
+    {
+      type: z.enum(['bug', 'feature', 'idea', 'tool', 'other']).describe('Task type to filter: bug | feature | idea | tool | other'),
+      status: statusParam,
+    },
+    async (args: unknown): Promise<MCPContent> => handleGetByType(store, args as { type: TaskType; status?: StatusFilter })
   );
 
   // ── getOverview ────────────────────────────────────────────────────────────────
   server.tool(
     'getOverview',
-    'Get a count summary per type: refinement, open (todo + in_progress), and done counts. Use for dashboard questions like "how many tasks are there?" or "give me a backlog summary". Returns only types that have at least one task, sorted by open count desc. Do NOT use this to answer "what\'s next?" — use getNext for that.',
-    {},
-    async (): Promise<MCPContent> => handleGetOverview(store)
+    'Get a count summary per type: refinement, open (todo + in_progress), and done counts. Use for dashboard questions like "how many tasks are there?" or "give me a backlog summary". Filters by status. Default: non-done. Pass "open" for refinement+todo+in_progress, or a single status (incl. "done") for exact match. Returns only types with at least one matching task, sorted by open count desc. Do NOT use this to answer "what\'s next?" — use getNext for that.',
+    { status: statusParam },
+    async (args: unknown): Promise<MCPContent> => handleGetOverview(store, args as { status?: StatusFilter })
   );
 
   // ── getNext ────────────────────────────────────────────────────────────────────
@@ -81,9 +86,9 @@ export function registerTools(server: McpServer, store: Store): void {
   // ── getAll ─────────────────────────────────────────────────────────────────────
   server.tool(
     'getAll',
-    'Get every not-done task (refinement + todo + in_progress) grouped by type — use for "show me everything", "list all tasks", "full backlog". Groups appear in type order: bug, feature, idea, tool, other. Each group sorted by priority desc then id desc. Does NOT include done tasks — use getByType or getById to look up archived work. Prefer getNext for a single recommendation; prefer getByType when the user asks about one specific type. When a task has a summary, description is omitted — call getById for the full task.',
-    {},
-    async (): Promise<MCPContent> => handleGetAll(store)
+    'Get tasks grouped by type — use for "show me everything", "list all tasks", "full backlog". Groups appear in type order: bug, feature, idea, tool, other. Each group sorted by priority desc then id desc. Filters by status. Default: non-done. Pass "open" for refinement+todo+in_progress, or a single status (incl. "done") for exact match. Prefer getNext for a single recommendation; prefer getByType when the user asks about one specific type. When a task has a summary, description is omitted — call getById for the full task.',
+    { status: statusParam },
+    async (args: unknown): Promise<MCPContent> => handleGetAll(store, args as { status?: StatusFilter })
   );
 
   // ── getById ────────────────────────────────────────────────────────────────────
@@ -129,28 +134,23 @@ export function registerTools(server: McpServer, store: Store): void {
   // ── getByScope ────────────────────────────────────────────────────────────────
   server.tool(
     'getByScope',
-    'Get all tasks tagged with a specific scope — use when the user asks "what tasks are there for svg-path-joiner?" or "show me everything related to eink-frame". Includes all statuses (todo, in_progress, done). Sorted by priority desc then id desc. Scope values are set via add or update. Empty results may indicate a wrong/typo\'d scope; use getScopes to discover valid values. When a task has a summary, description is omitted — call getById for the full task.',
-    { scope: z.string().describe('Exact scope value to filter by (e.g. "svg-path-joiner"). Must match exactly — scope is case-sensitive.') },
-    async (args: unknown): Promise<MCPContent> => handleGetByScope(store, args as { scope: string })
+    'Get tasks tagged with a specific scope — use when the user asks "what tasks are there for svg-path-joiner?" or "show me everything related to eink-frame". Filters by status. Default: non-done. Pass "open" for refinement+todo+in_progress, or a single status (incl. "done") for exact match. Sorted by priority desc then id desc. Scope values are set via add or update. Empty results may indicate a wrong/typo\'d scope; use getScopes to discover valid values. When a task has a summary, description is omitted — call getById for the full task.',
+    {
+      scope: z.string().describe('Exact scope value to filter by (e.g. "svg-path-joiner"). Must match exactly — scope is case-sensitive.'),
+      status: statusParam,
+    },
+    async (args: unknown): Promise<MCPContent> => handleGetByScope(store, args as { scope: string; status?: StatusFilter })
   );
 
   // ── getRelated ────────────────────────────────────────────────────────────────
   server.tool(
     'getRelated',
-    'Get tasks related to a given task — returns the task itself, outbound (tasks that #X references, decorated with refRelation), and inbound (tasks that reference #X). Searches all tasks regardless of status. The anchor task is full view (summary + description); outbound and inbound entries follow list mode (summary when present, description otherwise).',
-    { id: z.coerce.number().int().positive().describe('Task ID to find related tasks for') },
-    async (args: unknown): Promise<MCPContent> => handleGetRelated(store, args as { id: number })
-  );
-
-  // ── getByStatus ───────────────────────────────────────────────────────────────
-  server.tool(
-    'getByStatus',
-    'Get all tasks with a specific status — use for "show me everything in refinement", "what\'s in progress?", "list done tasks". Optional scope filter narrows results to an exact scope value (case-sensitive). Returns { tasks: Task[] } sorted by priority desc then id desc. When a task has a summary, description is omitted — call getById for the full task.',
+    'Get tasks related to a given task — returns the task itself, outbound (tasks that #X references, decorated with refRelation), and inbound (tasks that reference #X). Filters by status. Default: non-done. Pass "open" for refinement+todo+in_progress, or a single status (incl. "done") for exact match. The anchor task is full view (summary + description); outbound and inbound entries follow list mode (summary when present, description otherwise).',
     {
-      status: z.enum(['refinement', 'todo', 'in_progress', 'done']).describe('The status to filter by.'),
-      scope: z.string().optional().describe('Optional exact scope filter (case-sensitive).'),
+      id: z.coerce.number().int().positive().describe('Task ID to find related tasks for'),
+      status: statusParam,
     },
-    async (args: unknown): Promise<MCPContent> => handleGetByStatus(store, args as { status: TaskStatus; scope?: string })
+    async (args: unknown): Promise<MCPContent> => handleGetRelated(store, args as { id: number; status?: StatusFilter })
   );
 
   // ── getScopes ─────────────────────────────────────────────────────────────────

@@ -454,18 +454,31 @@ describe('getNext', () => {
 });
 
 describe('getOverview', () => {
-  test('counts per type with refinement/open/done buckets', () => {
+  test('counts per type with refinement/open/done buckets (default = non-done)', () => {
     const { id: t1 } = makeTask({ type: 'bug' });
     store.setStatus(t1, 'todo');
     makeTask({ type: 'feature' });
     const { id: t3 } = makeTask({ type: 'bug' });
     store.setStatus(t3, 'done');
+    // Default (non-done): done tasks are excluded
     const ov = store.getOverview();
     const bug = ov.find((o) => o.type === 'bug');
     assert.equal(bug?.open, 1);
-    assert.equal(bug?.done, 1);
+    assert.equal(bug?.done, 0);
     const feature = ov.find((o) => o.type === 'feature');
     assert.equal(feature?.refinement, 1);
+  });
+
+  test('status: "done" shows only done tasks', () => {
+    const { id: t1 } = makeTask({ type: 'bug' });
+    store.setStatus(t1, 'todo');
+    const { id: t3 } = makeTask({ type: 'bug' });
+    store.setStatus(t3, 'done');
+    const ov = store.getOverview('done');
+    const bug = ov.find((o) => o.type === 'bug');
+    assert.equal(bug?.done, 1);
+    assert.equal(bug?.open, 0);
+    assert.equal(bug?.refinement, 0);
   });
 
   test('omits types with zero tasks', () => {
@@ -480,18 +493,18 @@ describe('getOverview', () => {
     const { id: t2 } = makeTask({ type: 'bug' });
     store.setStatus(t2, 'done');
     makeTask({ type: 'bug' });
-    const ov = store.getOverview();
-    const bug = ov.find((o) => o.type === 'bug');
-    assert.ok(bug);
-    assert.equal(typeof bug.open, 'number');
-    assert.equal(typeof bug.done, 'number');
-    assert.equal(typeof bug.refinement, 'number');
-    assert.equal(bug.open, 1);
-    assert.equal(bug.done, 1);
-    assert.equal(bug.refinement, 1);
-    const total = bug.open + bug.done + bug.refinement;
-    assert.equal(total, 3);
-    const actionable = bug.open + bug.refinement;
+    // To check all three buckets, pass status: "done" for done-only count
+    // then check non-done (default) separately
+    const ovNonDone = store.getOverview();
+    const bugNonDone = ovNonDone.find((o) => o.type === 'bug');
+    assert.ok(bugNonDone);
+    assert.equal(typeof bugNonDone.open, 'number');
+    assert.equal(typeof bugNonDone.done, 'number');
+    assert.equal(typeof bugNonDone.refinement, 'number');
+    assert.equal(bugNonDone.open, 1);
+    assert.equal(bugNonDone.done, 0);
+    assert.equal(bugNonDone.refinement, 1);
+    const actionable = bugNonDone.open + bugNonDone.refinement;
     assert.equal(actionable, 2);
   });
 });

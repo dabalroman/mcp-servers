@@ -230,14 +230,26 @@ These are called by Claude — you don't type them yourself.
 | Tool | What it does |
 |---|---|
 | `getNext` | The single recommended next task. |
-| `getAll` | All not-done tasks, grouped by type. |
+| `getAll` | Tasks grouped by type. Default: non-done. |
 | `getById` | One task by number. |
-| `getByType` | All tasks of one type. |
-| `getByScope` | All tasks tagged with a scope. |
-| `getByStatus` | All tasks with a given status. |
+| `getByType` | Tasks of one type. Default: non-done. |
+| `getByScope` | Tasks tagged with a scope. Default: non-done. |
 | `getScopes` | All scope tags with counts. |
-| `getRelated` | Tasks linked to a given id. |
-| `getOverview` | Per-type counts (refinement / open / done). |
+| `getRelated` | Tasks linked to a given id. Default: non-done. |
+| `getOverview` | Per-type counts. Default: non-done. |
+
+#### Status filtering
+
+All read tools (except `getNext`, `getById`, `getScopes`) accept an optional `status` argument:
+
+| Value | Behaviour |
+|---|---|
+| *(omitted)* | Non-done tasks only — same as `"open"`. **This is the default.** |
+| `"open"` | `refinement` + `todo` + `in_progress` (everything not done). |
+| `"done"` | Completed tasks only. |
+| `"refinement"` / `"todo"` / `"in_progress"` | Exact single-status match. |
+
+Examples: `getAll({ status: "done" })` to see archived work; `getByScope({ scope: "auth", status: "done" })` to see done tasks in a scope.
 
 **Diagnostics & UI control**
 
@@ -269,7 +281,7 @@ Use `getRelated(id)` to query connections.
 
 ### Scope — tagging tasks to an area
 
-Set `scope` on tasks belonging to a specific tool or area (e.g. `"auth"`, `"api"`). Omit for project-wide tasks. Query with `getByScope("auth")` (exact, case-sensitive) or `getByStatus` with a `scope` filter. Use `getScopes` to list all valid scope values and their open/total counts.
+Set `scope` on tasks belonging to a specific tool or area (e.g. `"auth"`, `"api"`). Omit for project-wide tasks. Query with `getByScope("auth")` (exact, case-sensitive). Use `getScopes` to list all valid scope values and their open/total counts. Combine with `status` to filter by lifecycle stage.
 
 
 &nbsp;

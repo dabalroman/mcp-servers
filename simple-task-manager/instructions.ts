@@ -55,8 +55,11 @@ Relation vocabulary (pick the one that describes A → B):
 
 Default relation: "relates to".
 
+## Status filtering
+All read tools (getAll, getByType, getByScope, getByRelated, getOverview) default to non-done tasks. Pass status: "done" to see completed work; status: "open" for refinement+todo+in_progress. When no status is supplied, done tasks are always excluded.
+
 ## Scope — tagging tasks to an area
-Set scope on tasks belonging to a specific tool or area (e.g. "auth", "dashboard"). Query with getByScope (exact, case-sensitive) or getByStatus with a scope filter. Use getScopes to list all valid scope values.
+Set scope on tasks belonging to a specific tool or area (e.g. "auth", "dashboard"). Query with getByScope (exact, case-sensitive). Use getScopes to list all valid scope values.
 
 ## Auto-knowledge capture
 After every task is closed (setStatus → done), curate the relevant CLAUDE.md file(s) before moving on:

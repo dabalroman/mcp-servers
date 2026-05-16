@@ -261,6 +261,17 @@ export type RelatedResult = {
 export type OverviewEntry = { type: TaskType; refinement: number; open: number; done: number };
 export type ScopeEntry = { scope: string; total: number; open: number };
 
+export type StatusFilter = TaskStatus | 'open';
+
+// Expands 'open' or undefined to the list of non-done statuses.
+// 'open' and undefined both mean non-done; a specific TaskStatus means exact match.
+export function resolveStatusFilter(status?: StatusFilter): TaskStatus[] | TaskStatus {
+  if (status === undefined || status === 'open') {
+    return ['refinement', 'todo', 'in_progress'];
+  }
+  return status;
+}
+
 export type Store = {
   readonly db: DB;
   dataVersion(): number;
@@ -270,13 +281,14 @@ export type Store = {
   setStatus(id: number, status: TaskStatus): boolean;
   delete(id: number): boolean;
   getByStatus(status: TaskStatus, scope?: string): Task[];
-  getByScope(scope: string): Task[];
-  getByType(type: TaskType): Task[];
+  getByScope(scope: string, status?: StatusFilter): Task[];
+  getByType(type: TaskType, status?: StatusFilter): Task[];
   getNext(type?: TaskType): Task | null;
-  getOverview(): OverviewEntry[];
-  getRelated(id: number): RelatedResult | null;
+  getOverview(status?: StatusFilter): OverviewEntry[];
+  getRelated(id: number, status?: StatusFilter): RelatedResult | null;
   getScopes(): ScopeEntry[];
   getById(id: number): Task | null;
+  getAll(status?: StatusFilter): Task[];
   close(): void;
 };
 
@@ -501,14 +513,28 @@ export function createStore(dbPath: string): Store {
     return sortByPriority(tasks);
   }
 
-  function getByScope(scope: string): Task[] {
-    const rows = db.prepare('SELECT * FROM tasks WHERE scope = ?').all(scope) as TaskRow[];
+  function getByScope(scope: string, status?: StatusFilter): Task[] {
+    const resolved = resolveStatusFilter(status);
+    let rows: TaskRow[];
+    if (Array.isArray(resolved)) {
+      const placeholders = resolved.map(() => '?').join(', ');
+      rows = db.prepare(`SELECT * FROM tasks WHERE scope = ? AND status IN (${placeholders})`).all(scope, ...resolved) as TaskRow[];
+    } else {
+      rows = db.prepare('SELECT * FROM tasks WHERE scope = ? AND status = ?').all(scope, resolved) as TaskRow[];
+    }
     const tasks = rows.map((row) => rowToTask(row, readRefsFor(row.id)));
     return sortByPriority(tasks);
   }
 
-  function getByType(type: TaskType): Task[] {
-    const rows = db.prepare('SELECT * FROM tasks WHERE type = ?').all(type) as TaskRow[];
+  function getByType(type: TaskType, status?: StatusFilter): Task[] {
+    const resolved = resolveStatusFilter(status);
+    let rows: TaskRow[];
+    if (Array.isArray(resolved)) {
+      const placeholders = resolved.map(() => '?').join(', ');
+      rows = db.prepare(`SELECT * FROM tasks WHERE type = ? AND status IN (${placeholders})`).all(type, ...resolved) as TaskRow[];
+    } else {
+      rows = db.prepare('SELECT * FROM tasks WHERE type = ? AND status = ?').all(type, resolved) as TaskRow[];
+    }
     const tasks = rows.map((row) => rowToTask(row, readRefsFor(row.id)));
     return sortByPriority(tasks);
   }
@@ -532,15 +558,27 @@ export function createStore(dbPath: string): Store {
     return sorted[0] ?? null;
   }
 
-  function getOverview(): OverviewEntry[] {
+  function getOverview(status?: StatusFilter): OverviewEntry[] {
+    const resolved = resolveStatusFilter(status);
+    let whereClause: string;
+    let params: string[];
+    if (Array.isArray(resolved)) {
+      const placeholders = resolved.map(() => '?').join(', ');
+      whereClause = `WHERE status IN (${placeholders})`;
+      params = resolved;
+    } else {
+      whereClause = 'WHERE status = ?';
+      params = [resolved];
+    }
     const rows = db.prepare(`
       SELECT type,
              SUM(CASE WHEN status = 'refinement' THEN 1 ELSE 0 END) AS refinement,
              SUM(CASE WHEN status IN ('todo', 'in_progress') THEN 1 ELSE 0 END) AS open,
              SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done
       FROM tasks
+      ${whereClause}
       GROUP BY type
-    `).all() as { type: TaskType; refinement: number; open: number; done: number }[];
+    `).all(...params) as { type: TaskType; refinement: number; open: number; done: number }[];
     return ALL_TYPES
       .map((type): OverviewEntry | null => {
         const r = rows.find((x) => x.type === type);
@@ -554,14 +592,33 @@ export function createStore(dbPath: string): Store {
     return readTask(id);
   }
 
-  function getRelated(id: number): RelatedResult | null {
+  function getAll(status?: StatusFilter): Task[] {
+    const resolved = resolveStatusFilter(status);
+    let rows: TaskRow[];
+    if (Array.isArray(resolved)) {
+      const placeholders = resolved.map(() => '?').join(', ');
+      rows = db.prepare(`SELECT * FROM tasks WHERE status IN (${placeholders})`).all(...resolved) as TaskRow[];
+    } else {
+      rows = db.prepare('SELECT * FROM tasks WHERE status = ?').all(resolved) as TaskRow[];
+    }
+    const tasks = rows.map((row) => rowToTask(row, readRefsFor(row.id)));
+    return sortByPriority(tasks);
+  }
+
+  function getRelated(id: number, status?: StatusFilter): RelatedResult | null {
     const task = readTask(id);
     if (!task) return null;
+
+    const resolved = resolveStatusFilter(status);
+    function matchesStatus(t: Task): boolean {
+      if (Array.isArray(resolved)) return resolved.includes(t.status);
+      return t.status === resolved;
+    }
 
     // Outbound = task's own refs (already on task.refs after readTask).
     const outbound = (task.refs ?? []).flatMap((ref) => {
       const t = readTask(ref.id);
-      return t ? [{ ...t, refRelation: ref.relation as string }] : [];
+      return t && matchesStatus(t) ? [{ ...t, refRelation: ref.relation as string }] : [];
     });
 
     // Inbound = other tasks pointing at this task.
@@ -570,7 +627,7 @@ export function createStore(dbPath: string): Store {
     ).all(id, id) as { from_id: number; relation: string }[];
     const inbound = inboundRefs.flatMap((r) => {
       const t = readTask(r.from_id);
-      return t ? [{ ...t, refRelation: r.relation }] : [];
+      return t && matchesStatus(t) ? [{ ...t, refRelation: r.relation }] : [];
     });
 
     return { task, outbound, inbound };
@@ -614,6 +671,7 @@ export function createStore(dbPath: string): Store {
     getRelated,
     getScopes,
     getById,
+    getAll,
     close,
   };
 }

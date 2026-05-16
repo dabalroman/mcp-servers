@@ -5,14 +5,14 @@ import * as http from 'node:http';
 import { networkInterfaces } from 'node:os';
 import Database from 'better-sqlite3';
 import { text, toListTask, notFoundError, type MCPContent } from './shared.js';
-import type { Store, Task, TaskStatus, TaskType } from '../tasks.js';
+import type { Store, Task, TaskType, StatusFilter } from '../tasks.js';
 
-export function handleGetByType(store: Store, { type }: { type: TaskType }): MCPContent {
-  return text({ tasks: store.getByType(type).map(toListTask) });
+export function handleGetByType(store: Store, { type, status }: { type: TaskType; status?: StatusFilter }): MCPContent {
+  return text({ tasks: store.getByType(type, status).map(toListTask) });
 }
 
-export function handleGetOverview(store: Store): MCPContent {
-  return text({ overview: store.getOverview() });
+export function handleGetOverview(store: Store, { status }: { status?: StatusFilter } = {}): MCPContent {
+  return text({ overview: store.getOverview(status) });
 }
 
 export function handleGetNext(store: Store, { type }: { type?: TaskType } = {}): MCPContent {
@@ -20,11 +20,11 @@ export function handleGetNext(store: Store, { type }: { type?: TaskType } = {}):
   return text({ task: task ? toListTask(task) : null });
 }
 
-export function handleGetAll(store: Store): MCPContent {
+export function handleGetAll(store: Store, { status }: { status?: StatusFilter } = {}): MCPContent {
   const allTypes: TaskType[] = ['bug', 'feature', 'idea', 'tool', 'other'];
   const grouped: Record<string, (Task | Omit<Task, 'description'>)[]> = {};
   for (const type of allTypes) {
-    const ofType = store.getByType(type).filter((t) => t.status !== 'done').map(toListTask);
+    const ofType = store.getByType(type, status).map(toListTask);
     if (ofType.length > 0) grouped[type] = ofType;
   }
   return text({ tasks: grouped });
@@ -36,22 +36,18 @@ export function handleGetById(store: Store, { id }: { id: number }): MCPContent 
   return text({ task });
 }
 
-export function handleGetByScope(store: Store, { scope }: { scope: string }): MCPContent {
-  return text({ scope, tasks: store.getByScope(scope).map(toListTask) });
+export function handleGetByScope(store: Store, { scope, status }: { scope: string; status?: StatusFilter }): MCPContent {
+  return text({ scope, tasks: store.getByScope(scope, status).map(toListTask) });
 }
 
-export function handleGetRelated(store: Store, { id }: { id: number }): MCPContent {
-  const result = store.getRelated(id);
+export function handleGetRelated(store: Store, { id, status }: { id: number; status?: StatusFilter }): MCPContent {
+  const result = store.getRelated(id, status);
   if (!result) return notFoundError(id, store);
   return text({
     task: result.task,
     outbound: result.outbound.map((t) => ({ ...toListTask(t), refRelation: t.refRelation })),
     inbound:  result.inbound.map((t)  => ({ ...toListTask(t), refRelation: t.refRelation })),
   });
-}
-
-export function handleGetByStatus(store: Store, { status, scope }: { status: TaskStatus; scope?: string }): MCPContent {
-  return text({ tasks: store.getByStatus(status, scope).map(toListTask) });
 }
 
 export function handleGetScopes(store: Store): MCPContent {
