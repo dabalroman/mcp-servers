@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import * as net from 'node:net';
-import { RELATIONS, type Task, type Store } from '../tasks.js';
+import { RELATIONS, type Relation, type Task, type Store } from '../tasks.js';
 
 export type MCPContent = {
   content: { type: 'text'; text: string }[];
@@ -51,5 +51,5 @@ export function probeTcp(port: number, timeoutMs: number): Promise<boolean> {
 
 export const refsSchema = z.array(z.object({
   id: z.number().int().positive(),
-  relation: z.enum(RELATIONS as unknown as [string, ...string[]]).default('relates to'),
+  relation: z.enum(RELATIONS as unknown as [Relation, ...Relation[]]).default('relates to'),
 })).optional();
