@@ -76,6 +76,7 @@ async function dispatch(
 
     const body = JSON.stringify(result);
     res.setHeader('Content-Type', 'application/json');
+    res.setHeader('Cache-Control', 'no-store');
     res.end(body);
   } catch (err: unknown) {
     const e = err as Error;

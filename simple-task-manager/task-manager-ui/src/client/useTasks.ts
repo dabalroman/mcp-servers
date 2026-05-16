@@ -50,6 +50,7 @@ export function useTasks() {
 
     const es = new EventSource('/api/tasks/stream');
     es.addEventListener('tasks-changed', refresh);
+    es.addEventListener('connected', refresh); // re-fetch after reconnect to catch missed events
     es.onerror = () => {};
 
     return () => es.close();
