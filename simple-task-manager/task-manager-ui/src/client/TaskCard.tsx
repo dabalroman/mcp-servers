@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { toast } from 'sonner';
 import { ChevronDown, ChevronUp, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
@@ -35,11 +36,44 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
     >
       <div className="flex flex-col-reverse gap-3 px-3 pt-3 pb-2 sm:flex-row sm:items-center sm:gap-2">
         <div className="flex items-start gap-2 sm:flex-1">
-          <span className="text-muted-foreground/50 text-sm leading-snug shrink-0">#{task.id}</span>
           <span className="text-base text-foreground leading-snug">{task.title}</span>
         </div>
 
         <div className="flex items-center justify-between gap-2 w-full sm:w-auto sm:justify-start">
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              const cmd =
+                task.status === 'refinement' ? `/refine #${task.id}` :
+                task.status === 'todo' || task.status === 'in_progress' ? `/implement #${task.id}` :
+                `#${task.id}`;
+              const successMsg =
+                task.status === 'refinement' ? 'Copied — paste into Claude Code to refine' :
+                task.status === 'todo' || task.status === 'in_progress' ? 'Copied — paste into Claude Code to implement' :
+                `#${task.id} copied`;
+              const fallback = (container: HTMLElement) => {
+                const el = document.createElement('textarea');
+                el.value = cmd;
+                el.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
+                container.appendChild(el);
+                el.focus();
+                el.select();
+                try { document.execCommand('copy'); toast.success(successMsg); }
+                catch { toast.error('Copy failed'); }
+                container.removeChild(el);
+              };
+              if (navigator.clipboard) {
+                navigator.clipboard.writeText(cmd).then(() => toast.success(successMsg)).catch(() => fallback(e.currentTarget));
+              } else {
+                fallback(e.currentTarget);
+              }
+            }}
+            className="text-xs tracking-widest border border-border px-2 py-1 shrink-0 text-muted-foreground cursor-pointer hover:border-primary/60 hover:text-foreground transition-colors"
+          >
+            #{task.id}
+          </button>
+
           {task.plan && (
             <button
               type="button"
