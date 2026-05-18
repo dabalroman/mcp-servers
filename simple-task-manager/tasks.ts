@@ -103,6 +103,13 @@ export function loadMigrations(dir?: string): MigrationModule[] {
 }
 
 function runMigrations(db: DB): void {
+  // Disable FKs around the migration loop. Some migrations rebuild a table by
+  // CREATE-new / INSERT...SELECT / DROP / RENAME; with FKs ON, the DROP fires
+  // ON DELETE CASCADE on dependent tables and wipes refs. Setting
+  // foreign_keys here is a no-op if a transaction is already open, so we
+  // require the caller to invoke runMigrations *before* enabling FKs.
+  db.pragma('foreign_keys = OFF');
+
   // Ensure schema_migrations table exists — it's the authoritative record.
   db.exec(`
     CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -155,6 +162,12 @@ function runMigrations(db: DB): void {
   // backward compatibility with tooling that reads it.
   const finalCount = (db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number }).n;
   db.pragma(`user_version = ${finalCount}`);
+
+  // Verify no FK violations slipped in while FKs were off.
+  const violations = db.prepare('PRAGMA foreign_key_check').all() as unknown[];
+  if (violations.length > 0) {
+    throw new Error(`Foreign key violations after migrations: ${JSON.stringify(violations)}`);
+  }
 }
 
 // ── Row mapping ───────────────────────────────────────────────────────────────
@@ -240,7 +253,6 @@ export type UpdatePatch = {
 };
 
 export type LoadResult = {
-  counter: number;
   active: Task[];
   done: Task[];
 };
@@ -301,15 +313,15 @@ export function createStore(dbPath: string): Store {
   // bind-mount-safe. Write contention is irrelevant at this scale (tens of
   // writes per session).
   db.pragma('journal_mode = DELETE');
+
+  // runMigrations disables FKs internally (table-rebuild migrations need it);
+  // we re-enable after so normal operation enforces them.
+  runMigrations(db);
   db.pragma('foreign_keys = ON');
 
-  runMigrations(db);
-
   // Prepared statements
-  const stmtGetCounter      = db.prepare("SELECT value FROM meta WHERE key = 'counter'");
-  const stmtSetCounter      = db.prepare("UPDATE meta SET value = ? WHERE key = 'counter'");
   const stmtInsertTask      = db.prepare(
-    'INSERT INTO tasks (id, title, type, status, priority, scope, summary, description, plan) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO tasks (title, type, status, priority, scope, summary, description, plan) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   );
   const stmtSelectTask      = db.prepare('SELECT * FROM tasks WHERE id = ?');
   const stmtSelectAllTasks  = db.prepare('SELECT * FROM tasks');
@@ -331,12 +343,6 @@ export function createStore(dbPath: string): Store {
     WHERE id = ?
   `);
   const stmtSetTaskStatus   = db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`);
-
-  function getCounter(): number {
-    const row = stmtGetCounter.get() as { value: string } | undefined;
-    return parseInt(row?.value ?? '0', 10);
-  }
-  function setCounter(n: number): void { stmtSetCounter.run(String(n)); }
 
   function readRefsFor(id: number): Ref[] {
     return (stmtRefsFrom.all(id) as RefRow[]).map(refRowToObj);
@@ -423,10 +429,9 @@ export function createStore(dbPath: string): Store {
   // ── Public API ──────────────────────────────────────────────────────────────
   function load(): LoadResult {
     const all = readAllTasks();
-    const counter = getCounter();
     const active = all.filter((t) => t.status !== 'done');
     const done = all.filter((t) => t.status === 'done');
-    return { counter, active, done };
+    return { active, done };
   }
 
   function add(input: AddInput): { id: number } {
@@ -435,9 +440,7 @@ export function createStore(dbPath: string): Store {
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
 
     return db.transaction(() => {
-      const newId = getCounter() + 1;
-      stmtInsertTask.run(
-        newId,
+      const info = stmtInsertTask.run(
         trimmedTitle,
         type,
         status,
@@ -447,7 +450,7 @@ export function createStore(dbPath: string): Store {
         description.trim(),
         plan?.trim() || null
       );
-      setCounter(newId);
+      const newId = Number(info.lastInsertRowid);
 
       if (refs?.length) {
         applyRefsImpl(newId, [], refs);

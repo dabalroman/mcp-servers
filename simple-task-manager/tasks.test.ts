@@ -18,6 +18,7 @@ const MIGRATION_NAMES = [
   '20260513000000_normalize-literal-newlines',
   '20260513000001_refs-pk-simplify',
   '20260514120000_add-plan-field',
+  '20260519000000_drop-meta-counter-autoincrement-tasks',
 ];
 
 let dir: string;
@@ -67,9 +68,10 @@ describe('schema', () => {
     db.close();
   });
 
-  test('seeds counter = 0', () => {
-    const { counter } = store.load();
-    assert.equal(counter, 0);
+  test('load returns empty active and done on fresh store', () => {
+    const { active, done } = store.load();
+    assert.equal(active.length, 0);
+    assert.equal(done.length, 0);
   });
 
   test('uses DELETE journal mode (not WAL) for cross-namespace coherence', () => {
@@ -103,10 +105,28 @@ describe('add', () => {
     assert.equal(id, 1);
   });
 
-  test('increments counter for sequential adds', () => {
+  test('increments id for sequential adds', () => {
     const { id: id1 } = makeTask({ title: 'A' });
     const { id: id2 } = makeTask({ title: 'B' });
     assert.equal(id2, id1 + 1);
+  });
+
+  test('survives external writer inserting a task with a higher id (no UNIQUE collision)', () => {
+    const { id: id1 } = makeTask({ title: 'A' });
+    assert.equal(id1, 1);
+    store.close();
+
+    // Simulate an external writer (backup restore, direct sqlite3, etc.) bumping max(id).
+    const db = new Database(dbPath);
+    db.prepare(`
+      INSERT INTO tasks (id, type, status, priority, title, description, created_at, updated_at)
+      VALUES (9999, 'other', 'refinement', 'medium', 'external', '', datetime('now'), datetime('now'))
+    `).run();
+    db.close();
+
+    store = createStore(dbPath);
+    const { id: nextId } = makeTask({ title: 'after external' });
+    assert.equal(nextId, 10000, 'next id should follow max(id), not collide on UNIQUE');
   });
 
   test('persists task to db', () => {
@@ -621,7 +641,7 @@ describe('persistence', () => {
     assert.equal(store.getById(id)?.title, 'survive');
   });
 
-  test('counter survives reopen', () => {
+  test('id sequence survives reopen', () => {
     makeTask();
     store.close();
     store = createStore(dbPath);

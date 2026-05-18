@@ -25,7 +25,7 @@ describe('add', () => {
     expect(id).toBe(1);
   });
 
-  it('increments counter correctly for sequential adds', async () => {
+  it('increments id correctly for sequential adds', async () => {
     const id1 = await store.add({ type: 'bug', priority: 'high', title: 'A', description: '' });
     const id2 = await store.add({ type: 'feature', priority: 'low', title: 'B', description: '' });
     expect(id2).toBe(id1 + 1);

@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from 'react';
 import type { Task, TaskRef, TaskStatus, TaskType, TaskPriority } from '@/types/task';
 
 export type TasksPayload = {
-  counter: number;
   active: Task[];
   done: Task[];
 };
@@ -38,7 +37,7 @@ async function fetchTasks(): Promise<TasksPayload> {
 }
 
 export function useTasks() {
-  const [data, setData] = useState<TasksPayload>({ counter: 0, active: [], done: [] });
+  const [data, setData] = useState<TasksPayload>({ active: [], done: [] });
   const [error, setError] = useState<Error | null>(null);
 
   const refresh = useCallback(() => {
