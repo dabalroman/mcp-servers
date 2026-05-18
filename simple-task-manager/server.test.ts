@@ -10,7 +10,7 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createStore, type AddInput, type Store } from './tasks.js';
@@ -679,6 +679,115 @@ describe('health handler — ui field', () => {
     process.env['TASK_UI_MODE'] = 'garbage';
     const resp = await handleHealth();
     assert.equal((decode(resp) as { ui: string }).ui, 'bundled');
+  });
+});
+
+describe('health handler — config section env validation', () => {
+  let savedCwd: string;
+
+  beforeEach(() => {
+    savedCwd = process.cwd();
+    process.chdir(dir);
+  });
+
+  afterEach(() => {
+    process.chdir(savedCwd);
+  });
+
+  function writeMcpJson(env: Record<string, string>): void {
+    const config = {
+      mcpServers: {
+        'task-manager': {
+          command: 'node',
+          args: ['/abs/path/dist/server.js'],
+          env,
+        },
+      },
+    };
+    writeFileSync(join(dir, '.mcp.json'), JSON.stringify(config, null, 2));
+  }
+
+  function getReport(resp: MCPContent): string {
+    return (decode(resp) as { report: string }).report;
+  }
+
+  test('flags legacy TASK_UI_DISABLE and AUTO_OPEN_TASK_UI as ✗ with rename hints', async () => {
+    writeMcpJson({
+      TASKS_DB: dbPath,
+      PROJECT_NAME: 'demo',
+      TASK_UI_PORT: '7374',
+      TASK_UI_MODE: 'bundled',
+      TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
+      TASK_UI_DISABLE: '0',
+      AUTO_OPEN_TASK_UI: '0',
+    });
+    const report = getReport(await handleHealth());
+    assert.match(report, /✗ TASK_UI_DISABLE — renamed: set `TASK_UI_MODE=disabled` instead/);
+    assert.match(report, /✗ AUTO_OPEN_TASK_UI — renamed to `TASK_UI_AUTO_OPEN_IN_BROWSER`/);
+  });
+
+  test('canonical .mcp.json produces ✓ for all five canonical vars', async () => {
+    writeMcpJson({
+      TASKS_DB: dbPath,
+      PROJECT_NAME: 'demo',
+      TASK_UI_PORT: '7374',
+      TASK_UI_MODE: 'bundled',
+      TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
+    });
+    const report = getReport(await handleHealth());
+    assert.match(report, /✓ TASKS_DB = /);
+    assert.match(report, /✓ PROJECT_NAME = demo/);
+    assert.match(report, /✓ TASK_UI_PORT = 7374/);
+    assert.match(report, /✓ TASK_UI_MODE = bundled/);
+    assert.match(report, /✓ TASK_UI_AUTO_OPEN_IN_BROWSER = 0/);
+  });
+
+  test('unknown key produces ⚠ "unknown — not consumed by MCP"', async () => {
+    writeMcpJson({
+      TASKS_DB: dbPath,
+      PROJECT_NAME: 'demo',
+      TASK_UI_PORT: '7374',
+      TASK_UI_MODE: 'bundled',
+      TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
+      FOO_BAR: '1',
+    });
+    const report = getReport(await handleHealth());
+    assert.match(report, /⚠ FOO_BAR — unknown, not consumed by MCP/);
+  });
+
+  test('missing TASK_UI_MODE produces ⚠ "defaults to bundled"', async () => {
+    writeMcpJson({
+      TASKS_DB: dbPath,
+      PROJECT_NAME: 'demo',
+      TASK_UI_PORT: '7374',
+      TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
+    });
+    const report = getReport(await handleHealth());
+    assert.match(report, /⚠ TASK_UI_MODE not set — defaults to "bundled"/);
+  });
+
+  test('non-integer TASK_UI_PORT produces ✗', async () => {
+    writeMcpJson({
+      TASKS_DB: dbPath,
+      PROJECT_NAME: 'demo',
+      TASK_UI_PORT: 'abc',
+      TASK_UI_MODE: 'bundled',
+      TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
+    });
+    const report = getReport(await handleHealth());
+    assert.match(report, /✗ TASK_UI_PORT = abc/);
+  });
+
+  test('health.ui structured field still resolves from .mcp.json env', async () => {
+    writeMcpJson({
+      TASKS_DB: dbPath,
+      PROJECT_NAME: 'demo',
+      TASK_UI_PORT: '7374',
+      TASK_UI_MODE: 'standalone',
+      TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
+    });
+    const resp = await handleHealth();
+    assert.equal((decode(resp) as { ui: string }).ui, 'standalone');
   });
 });
 

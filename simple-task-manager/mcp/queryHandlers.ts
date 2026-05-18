@@ -6,6 +6,7 @@ import { networkInterfaces } from 'node:os';
 import Database from 'better-sqlite3';
 import { text, toListTask, notFoundError, type MCPContent } from './shared.js';
 import { ALL_TYPES } from '../tasks.js';
+import { ENV_ORDER, LEGACY_ENV_KEYS } from '../mcpConfig.js';
 import type { Store, Task, TaskType, StatusFilter } from '../tasks.js';
 
 export async function handleGetByType(store: Store, { type, status }: { type: TaskType; status?: StatusFilter }): Promise<MCPContent> {
@@ -60,6 +61,62 @@ type CheckResult = { symbol: '✓' | '⚠' | '✗'; line: string };
 
 function check(symbol: CheckResult['symbol'], line: string): CheckResult {
   return { symbol, line };
+}
+
+function validateCanonicalEnv(key: string, raw: string): CheckResult {
+  switch (key) {
+    case 'TASKS_DB':
+      return validateTasksDb(raw);
+    case 'PROJECT_NAME':
+      return raw
+        ? check('✓', `PROJECT_NAME = ${raw}`)
+        : check('✗', 'PROJECT_NAME missing or empty — UI header + tab title will be empty');
+    case 'TASK_UI_PORT': {
+      const n = Number(raw);
+      if (raw && Number.isInteger(n) && n >= 1 && n <= 65535) {
+        return check('✓', `TASK_UI_PORT = ${raw}`);
+      }
+      return check('✗', raw
+        ? `TASK_UI_PORT = ${raw} (must be an integer in [1, 65535])`
+        : 'TASK_UI_PORT missing (must be an integer in [1, 65535])');
+    }
+    case 'TASK_UI_MODE': {
+      if (!raw) return check('⚠', 'TASK_UI_MODE not set — defaults to "bundled"');
+      if (raw === 'bundled' || raw === 'standalone' || raw === 'disabled') {
+        return check('✓', `TASK_UI_MODE = ${raw}`);
+      }
+      return check('✗', `TASK_UI_MODE = ${raw} (must be one of: bundled, standalone, disabled)`);
+    }
+    case 'TASK_UI_AUTO_OPEN_IN_BROWSER':
+      if (raw === '0' || raw === '1') {
+        return check('✓', `TASK_UI_AUTO_OPEN_IN_BROWSER = ${raw}`);
+      }
+      return check('✗', raw
+        ? `TASK_UI_AUTO_OPEN_IN_BROWSER = ${raw} (must be "0" or "1")`
+        : 'TASK_UI_AUTO_OPEN_IN_BROWSER missing (must be "0" or "1")');
+    default:
+      return raw
+        ? check('✓', `${key} = ${raw}`)
+        : check('⚠', `${key} not set`);
+  }
+}
+
+function validateTasksDb(raw: string): CheckResult {
+  if (!raw) {
+    return check('✗', 'TASKS_DB not set in .mcp.json — add it to mcpServers.task-manager.env');
+  }
+  if (existsSync(raw)) {
+    return check('✓', `TASKS_DB = ${raw} (exists, writable)`);
+  }
+  const parentDir = dirname(raw);
+  let parentWritable = false;
+  try {
+    accessSync(parentDir, fsConstants.W_OK);
+    parentWritable = true;
+  } catch { /* not writable */ }
+  return parentWritable
+    ? check('✓', `TASKS_DB = ${raw} (does not exist yet, parent directory writable)`)
+    : check('✗', `TASKS_DB = ${raw} — file does not exist and parent directory is not writable`);
 }
 
 function renderSection(title: string, results: CheckResult[]): string {
@@ -147,64 +204,30 @@ export async function handleHealth(): Promise<MCPContent> {
     ? envBlock as Record<string, unknown>
     : {};
 
-  // Check TASKS_DB
-  const tasksDb = typeof env['TASKS_DB'] === 'string' ? env['TASKS_DB'] : '';
-  if (!tasksDb) {
-    configChecks.push(check('✗', 'TASKS_DB not set in .mcp.json — add it to mcpServers.task-manager.env'));
-  } else {
-    const dbExists = existsSync(tasksDb);
-    if (dbExists) {
-      configChecks.push(check('✓', `TASKS_DB = ${tasksDb} (exists, writable)`));
+  // Validate each canonical env var by iterating ENV_ORDER — keeps health
+  // honest when mcpConfig.ts adds/removes keys.
+  for (const key of ENV_ORDER) {
+    const raw = typeof env[key] === 'string' ? (env[key] as string) : '';
+    configChecks.push(validateCanonicalEnv(key, raw));
+  }
+
+  // Flag legacy/unknown keys present in the env block.
+  for (const key of Object.keys(env)) {
+    if (ENV_ORDER.includes(key)) continue;
+    const legacyHint = LEGACY_ENV_KEYS[key];
+    if (legacyHint) {
+      configChecks.push(check('✗', `${key} — ${legacyHint}`));
     } else {
-      // Check if parent directory is writable
-      const parentDir = dirname(tasksDb);
-      let parentWritable = false;
-      try {
-        accessSync(parentDir, fsConstants.W_OK);
-        parentWritable = true;
-      } catch { /* not writable */ }
-      if (parentWritable) {
-        configChecks.push(check('✓', `TASKS_DB = ${tasksDb} (does not exist yet, parent directory writable)`));
-      } else {
-        configChecks.push(check('✗', `TASKS_DB = ${tasksDb} — file does not exist and parent directory is not writable`));
-      }
+      configChecks.push(check('⚠', `${key} — unknown, not consumed by MCP`));
     }
   }
 
-  // Check optional keys
+  sections.push(renderSection('Config (.mcp.json)', configChecks));
+
+  const uiModeRaw = typeof env['TASK_UI_MODE'] === 'string' ? env['TASK_UI_MODE'] : '';
   const projectName = typeof env['PROJECT_NAME'] === 'string' ? env['PROJECT_NAME'] : '';
   const uiPort = typeof env['TASK_UI_PORT'] === 'string' ? env['TASK_UI_PORT'] : '';
-  const uiModeRaw = typeof env['TASK_UI_MODE'] === 'string' ? env['TASK_UI_MODE'] : '';
-  const autoOpen = typeof env['TASK_UI_AUTO_OPEN_IN_BROWSER'] === 'string' ? env['TASK_UI_AUTO_OPEN_IN_BROWSER'] : '';
-
-  if (!projectName) {
-    configChecks.push(check('⚠', 'PROJECT_NAME not set — UI header + tab title will be empty'));
-  } else {
-    configChecks.push(check('✓', `PROJECT_NAME = ${projectName}`));
-  }
-
-  if (!uiPort) {
-    configChecks.push(check('⚠', 'TASK_UI_PORT not set — defaulting to 7374'));
-  } else {
-    configChecks.push(check('✓', `TASK_UI_PORT = ${uiPort}`));
-  }
-
-  const validModes = ['bundled', 'standalone', 'disabled'];
-  if (!uiModeRaw) {
-    configChecks.push(check('⚠', 'TASK_UI_MODE not set — defaulting to "bundled"'));
-  } else if (!validModes.includes(uiModeRaw)) {
-    configChecks.push(check('✗', `TASK_UI_MODE = ${uiModeRaw} (invalid — must be one of: bundled, standalone, disabled). Treating as "bundled".`));
-  } else {
-    configChecks.push(check('✓', `TASK_UI_MODE = ${uiModeRaw}`));
-  }
-
-  if (!autoOpen) {
-    configChecks.push(check('⚠', 'TASK_UI_AUTO_OPEN_IN_BROWSER not set — UI will not auto-open in the system browser'));
-  } else {
-    configChecks.push(check('✓', `TASK_UI_AUTO_OPEN_IN_BROWSER = ${autoOpen}`));
-  }
-
-  sections.push(renderSection('Config (.mcp.json)', configChecks));
+  const tasksDb = typeof env['TASKS_DB'] === 'string' ? env['TASKS_DB'] : '';
 
   const uiMode: 'standalone' | 'disabled' | 'bundled' =
     uiModeRaw === 'standalone' ? 'standalone'

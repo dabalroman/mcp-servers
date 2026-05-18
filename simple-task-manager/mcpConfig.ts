@@ -54,6 +54,16 @@ export const ENV_ORDER = [
   'TASK_UI_AUTO_OPEN_IN_BROWSER',
 ];
 
+/**
+ * Renamed env keys the MCP no longer consumes. The health command flags any of
+ * these found in `.mcp.json` as ✗ with the rename hint. Update this in lockstep
+ * when renaming a canonical env var.
+ */
+export const LEGACY_ENV_KEYS: Record<string, string> = {
+  TASK_UI_DISABLE: 'renamed: set `TASK_UI_MODE=disabled` instead',
+  AUTO_OPEN_TASK_UI: 'renamed to `TASK_UI_AUTO_OPEN_IN_BROWSER`',
+};
+
 /** Returns true when an existing task-manager entry points at the old pre-dist path. */
 export function isStaleEntry(e: McpEntry | undefined): boolean {
   if (!e) return false;
