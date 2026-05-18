@@ -93,12 +93,15 @@ The `summary` column exists in the schema (version 1). The token-saving behaviou
 
 ## Env-var schema for `.mcp.json`
 
-The task-manager MCP reads its config from the `mcpServers["task-manager"].env` block in the project's `.mcp.json`. The schema is the single source of truth for both `install.ts` (which writes the file) and `setup-standalone.ts` (which edits it). When you add or rename an env var, update **all four** of these in lockstep:
+The task-manager MCP reads its config from the `mcpServers["task-manager"].env` block in the project's `.mcp.json`. The schema is the single source of truth for both `install.ts` (which writes the file) and `setup-standalone.ts` (which edits it). When you add or rename an env var, update **all of these** in lockstep:
 
 1. `mcpConfig.ts` — `ENV_DOCS` (printed by install.ts after writing `.mcp.json`) and `ENV_ORDER` (canonical position).
 2. `install.ts` — the default value in the emitted `entry.env`.
 3. The consumer (server.ts / mcp/* / task-manager-ui) — wherever the var is read.
 4. `README.md` — the env-var table is the user-facing contract.
+5. `mcpConfig.ts` — `LEGACY_ENV_KEYS` (rename hint) when renaming or retiring a var; the `health` tool reads this to flag the old key as ✗ with the hint instead of letting it slide through as "unknown".
+
+`handleHealth` (`mcp/queryHandlers.ts`) iterates `ENV_ORDER` to validate canonical vars and flags anything else against `LEGACY_ENV_KEYS` (✗) or as ⚠ unknown — so health stays honest as long as those two exports are kept current.
 
 Current env vars (canonical order):
 
