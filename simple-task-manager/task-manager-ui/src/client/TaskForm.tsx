@@ -1,4 +1,4 @@
-import { useState, useRef, type ChangeEvent, type FormEvent } from 'react';
+import { useState, useRef, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -70,6 +70,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
   const [refSearch, setRefSearch] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [scopeOpen, setScopeOpen] = useState(false);
+  const [scopeHighlight, setScopeHighlight] = useState(-1);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scopeCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -82,6 +83,68 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
     for (const t of allTasks) if (t.scope) set.add(t.scope);
     return [...set].sort();
   })();
+
+  const filteredScopeSuggestions = scopeSuggestions.filter((s) =>
+    s.toLowerCase().includes(form.scope.toLowerCase())
+  );
+
+  function pickScope(value: string) {
+    setForm((f) => ({ ...f, scope: value }));
+    setScopeOpen(false);
+    setScopeHighlight(-1);
+  }
+
+  function onScopeKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!scopeOpen) {
+        if (filteredScopeSuggestions.length > 0) {
+          setScopeOpen(true);
+          setScopeHighlight(0);
+        }
+        return;
+      }
+      if (scopeHighlight >= 0 && scopeHighlight < filteredScopeSuggestions.length) {
+        const picked = filteredScopeSuggestions[scopeHighlight];
+        if (picked !== undefined) pickScope(picked);
+        return;
+      }
+      setScopeOpen(false);
+      setScopeHighlight(-1);
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (filteredScopeSuggestions.length === 0) return;
+      if (!scopeOpen) {
+        setScopeOpen(true);
+        setScopeHighlight(0);
+      } else {
+        setScopeHighlight((h) => (h + 1) % filteredScopeSuggestions.length);
+      }
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (filteredScopeSuggestions.length === 0) return;
+      if (!scopeOpen) {
+        setScopeOpen(true);
+        setScopeHighlight(filteredScopeSuggestions.length - 1);
+      } else {
+        setScopeHighlight((h) =>
+          h <= 0 ? filteredScopeSuggestions.length - 1 : h - 1
+        );
+      }
+      return;
+    }
+    if (e.key === 'Escape' && scopeOpen) {
+      e.preventDefault();
+      e.stopPropagation();
+      setScopeOpen(false);
+      setScopeHighlight(-1);
+    }
+  }
 
   function guardedClose(requestedOpen: boolean) {
     if (!requestedOpen && isDirty) return;
@@ -181,28 +244,31 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
               <div className="relative">
                 <input
                   value={form.scope}
-                  onChange={set('scope')}
+                  onChange={(e) => { set('scope')(e); setScopeHighlight(-1); }}
                   onFocus={() => setScopeOpen(true)}
                   onClick={() => setScopeOpen(true)}
-                  onBlur={() => { scopeCloseTimer.current = setTimeout(() => setScopeOpen(false), 150); }}
+                  onBlur={() => { scopeCloseTimer.current = setTimeout(() => { setScopeOpen(false); setScopeHighlight(-1); }, 150); }}
+                  onKeyDown={onScopeKeyDown}
                   placeholder="(none)"
                   className="bg-background border border-border px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-full"
                 />
-                {scopeOpen && scopeSuggestions.filter((s) => s.toLowerCase().includes(form.scope.toLowerCase())).length > 0 && (
+                {scopeOpen && filteredScopeSuggestions.length > 0 && (
                   <div className="absolute top-full left-0 right-0 border border-border border-t-0 bg-card z-10 max-h-48 overflow-y-auto">
-                    {scopeSuggestions
-                      .filter((s) => s.toLowerCase().includes(form.scope.toLowerCase()))
-                      .map((s) => (
-                        <button
-                          key={s}
-                          type="button"
-                          onMouseDown={() => { if (scopeCloseTimer.current) clearTimeout(scopeCloseTimer.current); }}
-                          onClick={() => { setForm((f) => ({ ...f, scope: s })); setScopeOpen(false); }}
-                          className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/20 transition-colors min-w-0"
-                        >
-                          <span className="text-sm text-foreground truncate">{s}</span>
-                        </button>
-                      ))}
+                    {filteredScopeSuggestions.map((s, i) => (
+                      <button
+                        key={s}
+                        type="button"
+                        onMouseDown={() => { if (scopeCloseTimer.current) clearTimeout(scopeCloseTimer.current); }}
+                        onMouseEnter={() => setScopeHighlight(i)}
+                        onClick={() => pickScope(s)}
+                        className={cn(
+                          'w-full flex items-center gap-2 px-3 py-2 text-left transition-colors min-w-0',
+                          i === scopeHighlight ? 'bg-accent/30' : 'hover:bg-accent/20',
+                        )}
+                      >
+                        <span className="text-sm text-foreground truncate">{s}</span>
+                      </button>
+                    ))}
                   </div>
                 )}
               </div>
