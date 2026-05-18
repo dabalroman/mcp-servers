@@ -1,4 +1,5 @@
 import { useState, useRef, type ChangeEvent, type FormEvent } from 'react';
+import { ChevronDown, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
@@ -70,8 +71,17 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
   const [refSearch, setRefSearch] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [scopeOpen, setScopeOpen] = useState(false);
+  const [scopePicked, setScopePicked] = useState<boolean>(() => (initial?.scope ?? '') !== '');
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scopeCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const scopeInputRef = useRef<HTMLInputElement | null>(null);
+
+  function clearScope() {
+    setForm((f) => ({ ...f, scope: '' }));
+    setScopePicked(false);
+    setScopeOpen(false);
+    scopeInputRef.current?.focus();
+  }
 
   const isDirty = !formsEqual(form, initialForm);
 
@@ -159,7 +169,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
               <select
                 value={form.type}
                 onChange={set('type')}
-                className="bg-background border border-border px-2 py-2 text-base text-foreground focus:outline-none focus:border-primary"
+                className="bg-background border border-border px-2 h-9 text-base text-foreground focus:outline-none focus:border-primary"
               >
                 {TYPES.map(t => <option key={t} value={t}>{t}</option>)}
               </select>
@@ -170,7 +180,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
               <select
                 value={form.priority}
                 onChange={set('priority')}
-                className="bg-background border border-border px-2 py-2 text-base text-foreground focus:outline-none focus:border-primary"
+                className="bg-background border border-border px-2 h-9 text-base text-foreground focus:outline-none focus:border-primary"
               >
                 {PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
@@ -180,14 +190,37 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
               <span className="text-xs tracking-widest text-muted-foreground uppercase">Scope</span>
               <div className="relative">
                 <input
+                  ref={scopeInputRef}
                   value={form.scope}
-                  onChange={set('scope')}
+                  onChange={(e) => { set('scope')(e); setScopePicked(false); }}
                   onFocus={() => setScopeOpen(true)}
                   onClick={() => setScopeOpen(true)}
                   onBlur={() => { scopeCloseTimer.current = setTimeout(() => setScopeOpen(false), 150); }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Backspace' && scopePicked && form.scope !== '') {
+                      e.preventDefault();
+                      clearScope();
+                    }
+                  }}
                   placeholder="(none)"
-                  className="bg-background border border-border px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-full"
+                  className="bg-background border border-border pl-3 pr-8 h-9 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-full"
                 />
+                {form.scope === '' ? (
+                  <ChevronDown
+                    className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none"
+                    strokeWidth={1.5}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    aria-label="Clear scope"
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={clearScope}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    <X className="w-4 h-4" strokeWidth={1.5} />
+                  </button>
+                )}
                 {scopeOpen && scopeSuggestions.filter((s) => s.toLowerCase().includes(form.scope.toLowerCase())).length > 0 && (
                   <div className="absolute top-full left-0 right-0 border border-border border-t-0 bg-card z-10 max-h-48 overflow-y-auto">
                     {scopeSuggestions
@@ -197,7 +230,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
                           key={s}
                           type="button"
                           onMouseDown={() => { if (scopeCloseTimer.current) clearTimeout(scopeCloseTimer.current); }}
-                          onClick={() => { setForm((f) => ({ ...f, scope: s })); setScopeOpen(false); }}
+                          onClick={() => { setForm((f) => ({ ...f, scope: s })); setScopePicked(true); setScopeOpen(false); }}
                           className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/20 transition-colors min-w-0"
                         >
                           <span className="text-sm text-foreground truncate">{s}</span>
