@@ -430,6 +430,42 @@ describe('plan field — MCP layer', () => {
   });
 });
 
+describe('plan status — MCP layer', () => {
+  test('setStatus handler accepts plan', () => {
+    const { id } = addTask({ status: 'refinement' });
+    const resp = handleSetStatus(store, { id, status: 'plan' });
+    assert.ok(!resp.isError);
+    assert.equal((decode(resp) as { success: boolean }).success, true);
+    assert.equal(store.getById(id)?.status, 'plan');
+  });
+
+  test('add handler accepts initial status plan', () => {
+    const resp = handleAdd(store, {
+      type: 'feature',
+      priority: 'medium',
+      title: 'Plan-status task',
+      description: '',
+      status: 'plan',
+    });
+    assert.ok(!resp.isError);
+    const { id } = decode(resp) as { id: number };
+    assert.equal(store.getById(id)?.status, 'plan');
+  });
+
+  test('setStatus plan does NOT require summary (no gate)', () => {
+    const { id } = addTask({ status: 'refinement' });
+    const resp = handleSetStatus(store, { id, status: 'plan' });
+    assert.ok(!resp.isError, 'plan transition should not be blocked by missing summary');
+  });
+
+  test('plan→todo is not blocked by summary check (plan tasks have no gate)', () => {
+    const { id } = addTask({ status: 'refinement' });
+    store.setStatus(id, 'plan');
+    const resp = handleSetStatus(store, { id, status: 'todo' });
+    assert.ok(!resp.isError, 'plan→todo should not be blocked');
+  });
+});
+
 describe('getByType handler — status filter', () => {
   test('no status omits done tasks', async () => {
     addTask({ type: 'feature', title: 'Active feature', status: 'refinement' });
@@ -579,7 +615,7 @@ describe('getOverview handler — status filter', () => {
     store.setStatus(doneId, 'done');
 
     const resp = await handleGetOverview(store, {});
-    const { overview } = decode(resp) as { overview: { type: string; refinement: number; open: number; done: number }[] };
+    const { overview } = decode(resp) as { overview: { type: string; refinement: number; plan: number; open: number; done: number }[] };
     const bugEntry = overview.find((o) => o.type === 'bug');
     assert.ok(bugEntry, 'bug entry should exist');
     assert.equal(bugEntry.done, 0, 'done count should be 0 when filtering non-done');
@@ -607,7 +643,7 @@ describe('getOverview handler — status filter', () => {
     store.setStatus(doneId, 'done');
 
     const resp = await handleGetOverview(store, { status: 'open' });
-    const { overview } = decode(resp) as { overview: { type: string; refinement: number; done: number }[] };
+    const { overview } = decode(resp) as { overview: { type: string; refinement: number; plan: number; done: number }[] };
     const bugEntry = overview.find((o) => o.type === 'bug');
     assert.ok(bugEntry);
     assert.equal(bugEntry.done, 0);

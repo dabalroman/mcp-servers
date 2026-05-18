@@ -1,6 +1,6 @@
 export type TaskType = 'bug' | 'feature' | 'idea' | 'tool' | 'other';
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
-export type TaskStatus = 'refinement' | 'todo' | 'in_progress' | 'done';
+export type TaskStatus = 'refinement' | 'plan' | 'todo' | 'in_progress' | 'done';
 
 export const CANONICAL_RELATIONS = [
   'blocks',

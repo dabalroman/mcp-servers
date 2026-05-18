@@ -18,10 +18,10 @@ export type GroupSection = {
 };
 
 const PRIORITY_RANK: Record<TaskPriority, number> = { critical: 4, high: 3, medium: 2, low: 1 };
-const STATUS_RANK: Record<TaskStatus, number> = { in_progress: 4, todo: 3, refinement: 2, done: 1 };
+const STATUS_RANK: Record<TaskStatus, number> = { in_progress: 5, todo: 4, plan: 3, refinement: 2, done: 1 };
 
 const PRIORITY_ORDER: TaskPriority[] = ['critical', 'high', 'medium', 'low'];
-const STATUS_ORDER: TaskStatus[] = ['in_progress', 'todo', 'refinement', 'done'];
+const STATUS_ORDER: TaskStatus[] = ['in_progress', 'todo', 'plan', 'refinement', 'done'];
 const TYPE_ORDER: TaskType[] = ['bug', 'tool', 'feature', 'idea', 'other'];
 
 const NO_SCOPE = '(no scope)';
@@ -58,7 +58,7 @@ function sectionLabel(groupBy: GroupBy, value: string): string {
   if (groupBy === 'none') return '';
   if (groupBy === 'status') {
     const map: Record<TaskStatus, string> = {
-      in_progress: 'In Progress', todo: 'To Do', refinement: 'Refinement', done: 'Done',
+      in_progress: 'In Progress', todo: 'To Do', plan: 'Plan', refinement: 'Refinement', done: 'Done',
     };
     return map[value as TaskStatus] ?? value;
   }

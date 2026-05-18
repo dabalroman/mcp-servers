@@ -9,7 +9,7 @@ import { cn } from '@/lib/utils';
 import { TYPE_LABELS, PRIORITY_CLASSES, STATUS_LABELS, STATUS_CLASSES } from './constants';
 import type { Task, TaskStatus } from '@/types/task';
 
-const STATUSES: TaskStatus[] = ['refinement', 'todo', 'in_progress', 'done'];
+const STATUSES: TaskStatus[] = ['refinement', 'plan', 'todo', 'in_progress', 'done'];
 
 export type TaskCardProps = {
   task: Task;
@@ -32,10 +32,12 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
     e.stopPropagation();
     const cmd =
       task.status === 'refinement' ? `/refine #${task.id}` :
+      task.status === 'plan' ? `/plan #${task.id}` :
       task.status === 'todo' || task.status === 'in_progress' ? `/implement #${task.id}` :
       `#${task.id}`;
     const successMsg =
       task.status === 'refinement' ? 'Copied — paste into Claude Code to refine' :
+      task.status === 'plan' ? 'Copied — paste into Claude Code to plan' :
       task.status === 'todo' || task.status === 'in_progress' ? 'Copied — paste into Claude Code to implement' :
       `#${task.id} copied`;
     const fallback = (container: HTMLElement) => {

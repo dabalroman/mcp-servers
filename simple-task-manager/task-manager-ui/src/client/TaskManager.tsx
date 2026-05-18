@@ -54,7 +54,7 @@ export default function TaskManager() {
     setFormOpen(true);
   }
 
-  async function handleFormSubmit(form: { title: string; type: TaskType; priority: Task['priority']; description: string; summary: string; scope: string; refs: import('@/types/task').TaskRef[]; status?: 'refinement' | 'todo' }) {
+  async function handleFormSubmit(form: { title: string; type: TaskType; priority: Task['priority']; description: string; summary: string; scope: string; refs: import('@/types/task').TaskRef[]; status?: 'refinement' | 'plan' | 'todo' }) {
     const scope = form.scope || undefined;
     const refs = form.refs.length ? form.refs : undefined;
     try {

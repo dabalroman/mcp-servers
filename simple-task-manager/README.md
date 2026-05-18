@@ -115,9 +115,10 @@ You can prefix any message to signal intent:
 
 ### Task lifecycle
 
-1. New tasks **always** default to `refinement` — even when the task feels small or obvious. Claude acts as project manager: asks you clarifying questions, enriches the description, then promotes to `todo` when ready. Claude is allowed to skip refinement (pass `status: 'todo'` to `add`) **only** when (a) you explicitly ask for it ("schedule as todo", "no refinement needed"), or (b) refinement just happened in the current conversation.
-2. Status changes to `in_progress` **before** starting any work.
-3. Status changes to `done` **after** the commit is made and you confirm it — never before.
+1. New tasks **always** default to `refinement` — even when the task feels small or obvious. Claude acts as project manager: asks you clarifying questions, enriches the description, then promotes to `todo` (or `plan`) when ready. Claude is allowed to skip refinement (pass `status: 'todo'` to `add`) **only** when (a) you explicitly ask for it ("schedule as todo", "no refinement needed"), or (b) refinement just happened in the current conversation.
+2. (Opt-in) `plan` sits between `refinement` and `todo`. Use it when a task needs a written implementation plan before coding starts. Lifecycle: `refinement` → **`plan`** → `todo` → `in_progress` → `done`. Skip `plan` for straightforward tasks.
+3. Status changes to `in_progress` **before** starting any work.
+4. Status changes to `done` **after** the commit is made and you confirm it — never before.
 
 ### Prioritization
 
@@ -134,8 +135,8 @@ Within each type: highest priority first, newest id first.
 ### Workflow pipeline
 
 1. **Schedule** — out-of-scope requests go to `add`, not inline implementation. New tasks default to `refinement`.
-2. **Refine** — for refinement tasks: Claude asks PM questions, enriches the description, promotes to `todo`
-3. **Plan** — for features: write a plan document before touching any code
+2. **Refine** — for refinement tasks: Claude asks PM questions, enriches the description, promotes to `plan` or `todo`
+3. **Plan** — opt-in: for features needing a written plan, task enters `plan` status; Claude writes the plan, then promotes to `todo`
 4. **Implement** — reads relevant files first; no speculative changes
 5. **Build** — must succeed with zero errors
 6. **Test** — verifies end-to-end; waits for your confirmation
@@ -222,7 +223,7 @@ These are called by Claude — you don't type them yourself.
 |---|---|
 | `add` | Schedule a new task. |
 | `update` | Edit any field in place. |
-| `setStatus` | Move a task through `refinement` → `todo` → `in_progress` → `done`. |
+| `setStatus` | Move a task through `refinement` → `plan` (opt-in) → `todo` → `in_progress` → `done`. |
 | `delete` | Permanently remove a task. |
 
 **Reading**
@@ -245,9 +246,9 @@ All read tools (except `getNext`, `getById`, `getScopes`) accept an optional `st
 | Value | Behaviour |
 |---|---|
 | *(omitted)* | Non-done tasks only — same as `"open"`. **This is the default.** |
-| `"open"` | `refinement` + `todo` + `in_progress` (everything not done). |
+| `"open"` | `refinement` + `plan` + `todo` + `in_progress` (everything not done). |
 | `"done"` | Completed tasks only. |
-| `"refinement"` / `"todo"` / `"in_progress"` | Exact single-status match. |
+| `"refinement"` / `"plan"` / `"todo"` / `"in_progress"` | Exact single-status match. |
 
 Examples: `getAll({ status: "done" })` to see archived work; `getByScope({ scope: "auth", status: "done" })` to see done tasks in a scope.
 

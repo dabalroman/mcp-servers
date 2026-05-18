@@ -22,13 +22,15 @@ export const PRIORITY_CLASSES: Record<TaskPriority, string> = {
 
 export const STATUS_LABELS: Record<TaskStatus, string> = {
   refinement:  'REFINEMENT',
+  plan:        'PLAN',
   todo:        'TODO',
   in_progress: 'IN PROGRESS',
   done:        'DONE',
 };
 
 export const STATUS_NEXT: Record<TaskStatus, TaskStatus> = {
-  refinement:  'todo',
+  refinement:  'plan',
+  plan:        'todo',
   todo:        'in_progress',
   in_progress: 'done',
   done:        'refinement',
@@ -36,6 +38,7 @@ export const STATUS_NEXT: Record<TaskStatus, TaskStatus> = {
 
 export const STATUS_CLASSES: Record<TaskStatus, string> = {
   refinement:  'border-warning text-warning',
+  plan:        'border-violet-400/60 text-violet-400',
   todo:        'border-border text-muted-foreground',
   in_progress: 'border-primary text-primary',
   done:        'border-muted-foreground/30 text-muted-foreground/50',

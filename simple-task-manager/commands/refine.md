@@ -40,7 +40,7 @@ For each task in priority order (`getNext` ordering: bug > tool > feature > idea
 
 3b. **Generate summary**: produce a 2–3 line summary capturing: (1) what the task does, (2) the most important decision, (3) the user-visible outcome. Call `mcp__task-manager__update({ id, summary })` to persist it. The summary **must** be written before calling `setStatus('todo')` — the server will reject the promotion if it is missing.
 
-4. Once the description is specific enough that an implementer could work from it without guessing, confirm the summary looks good with the user, then ask "Promote #NN to todo?" and call `mcp__task-manager__setStatus(id, 'todo')` only on confirmation. Note: `setStatus` will return an error if the summary is missing — write it first via `update({ id, summary: "..." })`.
+4. Once the description is specific enough that an implementer could work from it without guessing, confirm the summary looks good with the user, then ask "Promote #NN to **plan** or directly to **todo**?" Default to **todo** when unsure — `plan` is opt-in and only useful when the task needs a written implementation plan before coding starts. Call `mcp__task-manager__setStatus(id, 'plan')` or `mcp__task-manager__setStatus(id, 'todo')` only on confirmation. Note: `setStatus` will return an error if the summary is missing — write it first via `update({ id, summary: "..." })`.
 5. If the task is filed as `idea` but is now concretely scoped, ask whether to reclassify to `feature`.
 
 ### Step 4 — Move on
