@@ -65,7 +65,8 @@ The git repository root is `~/.claude/mcp-servers/`, **not** `~/.claude/mcp-serv
 ## Storage — SQLite
 
 Tasks live in a single SQLite database. The path comes from the `TASKS_DB` env var. Schema is owned by `tasks.ts`:
-- Tables: `meta`, `tasks`, `refs`, `schema_migrations`
+- Tables: `tasks`, `refs`, `schema_migrations` (plus `sqlite_sequence`, owned by SQLite).
+- The `tasks` table uses `INTEGER PRIMARY KEY AUTOINCREMENT` — ids come from SQLite (via `lastInsertRowid` on insert) and are stored in `sqlite_sequence`. The earlier `meta.counter` scheme drifted whenever an external writer inserted a row without bumping the counter and was dropped in `20260519000000_drop-meta-counter-autoincrement-tasks`. Deleted ids are never reused (the AUTOINCREMENT high-water mark guarantees this).
 - The `tasks` table has an optional `plan TEXT` column (added by migration `20260514120000_add-plan-field`). Agents write plans here via `update({ id, plan })` and read them back via `getById` before implementing.
 - Journal mode is `DELETE` (the SQLite default). WAL's mmap'd shm region isn't coherent across host/container bind mounts — readers stay on stale snapshots until checkpoint, which breaks the random-tools API's SSE live updates. DELETE coordinates via POSIX advisory locks on the main DB file, which is bind-mount-safe. Write contention is a non-issue at this scale.
 - `tasks.ts` runs migrations on first open. `schema_migrations` records version + name + applied_at; `PRAGMA user_version` is kept in sync with migration count for backward compat but is NOT used as a gating check. The downgrade guard checks for applied names that have no corresponding file on disk.
@@ -78,6 +79,8 @@ Tasks live in a single SQLite database. The path comes from the `TASKS_DB` env v
 4. Run `npm run verify` in both `simple-task-manager` and `task-manager-ui` before committing.
 
 The runner automatically detects new files, sorts them by name (chronological), and applies any not yet in `schema_migrations`. It rejects DBs that have applied names not found on disk (downgrade guard).
+
+**FKs are OFF during the migration loop.** `runMigrations` disables `foreign_keys` before applying anything and re-enables it after, then runs `PRAGMA foreign_key_check` to surface any violations. Without this, table-rebuild migrations (CREATE-new / INSERT…SELECT / DROP / RENAME) trigger ON DELETE CASCADE on dependent tables during the DROP and wipe `refs`. If your migration only ALTERs columns this doesn't matter; if it rebuilds a table, rely on this — don't try to toggle `foreign_keys` inside `up()` (no-op inside a transaction).
 
 The sibling `task-manager-ui` imports `tasks.ts` directly via a relative path — no vendor mirror, no `EXPECTED_MIGRATIONS` list to update. Schema changes live in this package only.
 
