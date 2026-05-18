@@ -1,3 +1,15 @@
+# Public repo
+
+`~/.claude/mcp-servers/` is a **public** GitHub repository. Anything committed is world-readable and permanent (rewriting history later does not unpublish leaked content). Before writing or editing any file here:
+
+1. **Do not commit user-specific paths.** Use `~/` or `<user-home>` in examples — never `/home/<username>/...` or any absolute home path.
+2. **Do not commit real project names, task content, DB paths, or host names.** Use placeholders: `/abs/path/tasks.db`, `<project-name>`, `<host>`.
+3. **Test fixtures and migration examples use synthetic data only** — invented titles, IDs starting from 1, fake scopes like `example-scope`.
+4. **Scrub before every commit.** Run `git diff --staged` and reject anything matching the above.
+5. **When in doubt, redact.** A placeholder is always safer than a real value.
+
+---
+
 # simple-task-manager — Setup
 
 When the user asks to "set up the task manager", "install the task manager MCP", or similar:
