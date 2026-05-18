@@ -65,7 +65,7 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
         highlighted ? 'border-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.4)]' : 'border-border',
       )}
     >
-      <div className="flex flex-col-reverse gap-3 px-3 pt-3 pb-2 sm:flex-row sm:items-start sm:gap-2">
+      <div className="flex flex-col-reverse gap-3 px-3 pt-3 pb-2 md:flex-row md:items-start md:gap-2">
         <button
           type="button"
           onClick={copyIdCommand}
@@ -74,11 +74,11 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
           #{task.id}
         </button>
 
-        <div className="flex items-start gap-2 sm:flex-1 sm:min-w-0">
+        <div className="flex items-start gap-2 md:flex-1 md:min-w-0">
           <span className="text-base text-foreground leading-[1.625rem] break-words min-w-0">{task.title}</span>
         </div>
 
-        <div className="flex items-center justify-between gap-2 w-full sm:w-auto sm:justify-start">
+        <div className="flex items-center justify-between gap-2 w-full md:w-auto md:justify-start">
           <button
             type="button"
             onClick={copyIdCommand}
