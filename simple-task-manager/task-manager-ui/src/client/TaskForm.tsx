@@ -1,4 +1,4 @@
-import { useState, useRef, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
+import { useEffect, useState, useRef, type ChangeEvent, type FormEvent, type KeyboardEvent } from 'react';
 import { ChevronDown, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -78,6 +78,22 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
   const scopeCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scopeInputRef = useRef<HTMLInputElement | null>(null);
   const refInputRef = useRef<HTMLInputElement | null>(null);
+  const titleRef = useRef<HTMLInputElement | null>(null);
+
+  // Move focus to the title input after Radix finishes its own focus
+  // management on open. Without the rAF the dialog's focus-trap can
+  // pull focus back to the DialogContent wrapper.
+  useEffect(() => {
+    if (!open) return;
+    const id = requestAnimationFrame(() => titleRef.current?.focus());
+    return () => cancelAnimationFrame(id);
+  }, [open]);
+
+  function tryClose() {
+    if (!isDirty || window.confirm('Discard unsaved changes?')) {
+      onOpenChange(false);
+    }
+  }
 
   function clearScope() {
     setForm((f) => ({ ...f, scope: '' }));
@@ -166,7 +182,10 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
   }
 
   function guardedClose(requestedOpen: boolean) {
-    if (!requestedOpen && isDirty) return;
+    if (!requestedOpen) {
+      tryClose();
+      return;
+    }
     onOpenChange(requestedOpen);
   }
 
@@ -273,8 +292,15 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
       <DialogContent
         className="bg-card border-border sm:max-w-[800px]"
         hideCloseButton
-        onEscapeKeyDown={e => { if (isDirty) e.preventDefault(); }}
-        onInteractOutside={e => { if (isDirty) e.preventDefault(); }}
+        onEscapeKeyDown={(e) => {
+          if (isDirty && !window.confirm('Discard unsaved changes?')) {
+            e.preventDefault();
+          }
+        }}
+        onInteractOutside={(e) => {
+          e.preventDefault();
+          tryClose();
+        }}
       >
         <DialogHeader>
           <DialogTitle className="text-primary text-sm tracking-widest uppercase">
@@ -284,7 +310,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
 
         <form onSubmit={submit} className="flex flex-col gap-4 min-w-0">
           <input
-            autoFocus
+            ref={titleRef}
             required
             placeholder="Title"
             value={form.title}
@@ -375,7 +401,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
               rows={12}
               value={form.description}
               onChange={set('description')}
-              onKeyDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.stopPropagation(); }}
               placeholder="Context, acceptance criteria, notes…"
               className="bg-background border border-border px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary resize-y max-h-[40vh]"
             />
@@ -387,7 +413,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
               rows={3}
               value={form.summary}
               onChange={set('summary')}
-              onKeyDown={(e) => e.stopPropagation()}
+              onKeyDown={(e) => { if (e.key === 'Enter') e.stopPropagation(); }}
               placeholder="2–3 line gist: what it does, key decision, outcome…"
               className="bg-background border border-border px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary resize-y"
             />
@@ -518,7 +544,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
                   Delete
                 </Button>
               )}
-              <Button type="button" variant="outline" size="sm" className="flex-1 sm:flex-none" onClick={() => onOpenChange(false)}>Cancel</Button>
+              <Button type="button" variant="outline" size="sm" className="flex-1 sm:flex-none" onClick={tryClose}>Cancel</Button>
               <Button type="submit" size="sm" className="flex-1 sm:flex-none" disabled={!form.title.trim()}>
                 {initial ? 'Save' : 'Add Task'}
               </Button>
