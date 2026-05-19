@@ -313,6 +313,11 @@ export function createStore(dbPath: string): Store {
   // bind-mount-safe. Write contention is irrelevant at this scale (tens of
   // writes per session).
   db.pragma('journal_mode = DELETE');
+  // DELETE journaling coordinates via POSIX file locks; SQLITE_BUSY is thrown
+  // immediately to the loser of any write race unless we ask SQLite to retry.
+  // 5s is generous for our workload (tens of writes per session) and short
+  // enough that a genuinely stuck lock surfaces as an error.
+  db.pragma('busy_timeout = 5000');
 
   // runMigrations disables FKs internally (table-rebuild migrations need it);
   // we re-enable after so normal operation enforces them.

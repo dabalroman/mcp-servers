@@ -275,6 +275,9 @@ export async function handleHealth(): Promise<MCPContent> {
       } catch { /* migrations dir not found */ }
 
       const db = new Database(dbPath, { readonly: true });
+      // Short busy_timeout so health doesn't spuriously fail mid-migration or
+      // during a large write — but stays bounded if something's actually stuck.
+      db.pragma('busy_timeout = 2000');
       let appliedCount = 0;
       try {
         const row = db.prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM schema_migrations').get();
