@@ -346,7 +346,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
                   </button>
                 )}
                 {scopeOpen && filteredScopeSuggestions.length > 0 && (
-                  <div className="absolute top-full left-0 right-0 border border-border border-t-0 bg-card z-10 max-h-48 overflow-y-auto">
+                  <div tabIndex={-1} className="absolute top-full left-0 right-0 border border-border border-t-0 bg-card z-10 max-h-48 overflow-y-auto">
                     {filteredScopeSuggestions.map((s, i) => (
                       <button
                         key={s}
@@ -457,7 +457,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
                 </button>
               )}
               {dropdownOpen && candidates.length > 0 && (
-                <div className="absolute top-full left-0 right-0 border border-border border-t-0 bg-card z-10 max-h-48 overflow-y-auto">
+                <div tabIndex={-1} className="absolute top-full left-0 right-0 border border-border border-t-0 bg-card z-10 max-h-48 overflow-y-auto">
                   {candidates.map((t, i) => (
                     <button
                       key={t.id}
