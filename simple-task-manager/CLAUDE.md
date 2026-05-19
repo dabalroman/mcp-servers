@@ -70,6 +70,8 @@ Tasks live in a single SQLite database. The path comes from the `TASKS_DB` env v
 - The `tasks` table has an optional `plan TEXT` column (added by migration `20260514120000_add-plan-field`). Agents write plans here via `update({ id, plan })` and read them back via `getById` before implementing.
 - Journal mode is `DELETE` (the SQLite default). WAL's mmap'd shm region isn't coherent across host/container bind mounts — readers stay on stale snapshots until checkpoint, which breaks the random-tools API's SSE live updates. DELETE coordinates via POSIX advisory locks on the main DB file, which is bind-mount-safe. Write contention is a non-issue at this scale.
 - `tasks.ts` runs migrations on first open. `schema_migrations` records version + name + applied_at; `PRAGMA user_version` is kept in sync with migration count for backward compat but is NOT used as a gating check. The downgrade guard checks for applied names that have no corresponding file on disk.
+- Connection pragmas (set in `createStore`): `journal_mode=DELETE` (see above), `busy_timeout=5000` (DELETE journaling raises immediate `SQLITE_BUSY` without this; the health-handler's read-only connection uses `2000`), `foreign_keys=ON` (wrapped in `try/finally` around `runMigrations` so a thrown migration can't leave the connection with FK enforcement off — would silently break the `refs` ON DELETE CASCADE).
+- `runMigrations` body is wrapped in a single `BEGIN IMMEDIATE` transaction so two processes calling `createStore` on a fresh DB serialise on the write lock instead of both racing into duplicate `schema_migrations` INSERTs (the bundled-mode UI spawns right after the MCP's `createStore`). The loser waits on `busy_timeout`, then sees the populated table and the loop becomes a no-op.
 
 ## Adding a schema change (migration workflow)
 
@@ -158,6 +160,8 @@ The `Config` section of the report surfaces `TASK_UI_MODE`, `PROJECT_NAME`, and 
 ### How the UI itself learns its mode
 
 The browser-side `App.tsx` needs to render the `bundled mode` / `standalone mode` label under the project name. The UI server reads `process.env.TASK_UI_MODE` and exposes it via `GET /api/config`, which also carries `PROJECT_NAME` for the header pill. Client fetches `/api/config` on mount, sets `document.title`, and renders both.
+
+`/api/config` is auth-less and reachable by any LAN client. Keep its payload minimal — `{name, mode, version}`. Don't add filesystem paths (e.g. `TASKS_DB`), credentials, or anything host-identifying; they'd leak the host's username + directory layout to anything that can reach :7374.
 
 For this to work in standalone mode, the generated `ecosystem.task-ui.config.cjs` must include `TASK_UI_MODE: 'standalone'` in its `env` block — pm2 doesn't inherit the MCP's `.mcp.json` env (the MCP isn't even running yet when pm2 starts the UI on boot). `setup-standalone.ts` bakes this into the generated file.
 
