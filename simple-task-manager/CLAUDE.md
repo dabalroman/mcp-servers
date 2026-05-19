@@ -84,6 +84,8 @@ The runner automatically detects new files, sorts them by name (chronological), 
 
 The sibling `task-manager-ui` imports `tasks.ts` directly via a relative path — no vendor mirror, no `EXPECTED_MIGRATIONS` list to update. Schema changes live in this package only.
 
+**Widening a CHECK-constrained enum** (e.g. adding a new `status` or `type` value) requires a full table rebuild — SQLite cannot ALTER a CHECK constraint in place. The `20260519010000_add-plan-status` migration is the canonical pattern: CREATE TABLE `tasks_new` with the expanded constraint, `INSERT … SELECT … FROM tasks ORDER BY id`, DROP old table, RENAME, recreate indexes. Rely on the FK-off contract above so the DROP doesn't cascade-wipe `refs`. Don't forget to add the new value to every enumeration site: the `TaskStatus`/`TaskType` union in `tasks.ts`, the zod schemas in `mcp/registerTools.ts`, the duplicated union in `task-manager-ui/src/types/task.ts`, plus UI constants (`STATUS_LABELS`, `STATUS_NEXT`, `STATUS_CLASSES`, `STATUS_RANK`, `STATUS_ORDER`, `STATUSES`, `INITIAL_STATUSES`).
+
 ## Summary field — architecture
 
 The `summary` column exists in the schema (version 1). The token-saving behaviour lives entirely in the **MCP layer** (`mcp/`), not in `tasks.ts`:
