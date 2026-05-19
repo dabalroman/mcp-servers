@@ -82,6 +82,10 @@ describe('schema', () => {
     db.close();
   });
 
+  test('sets busy_timeout=5000 so concurrent writers wait instead of SQLITE_BUSY', () => {
+    assert.equal(store.db.pragma('busy_timeout', { simple: true }), 5000);
+  });
+
   test('refuses to open a db that has unknown applied migrations (downgrade guard)', () => {
     store.close();
     const db = new Database(dbPath);
