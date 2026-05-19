@@ -10,7 +10,6 @@ type Config = {
   name: string | null;
   mode: RunMode;
   version: string | null;
-  tasksDb: string | null;
 };
 
 export default function App() {
@@ -25,8 +24,7 @@ export default function App() {
         const name = typeof data?.name === 'string' && data.name.length > 0 ? data.name : null;
         const mode: RunMode = data?.mode === 'standalone' || data?.mode === 'disabled' ? data.mode : 'bundled';
         const version = typeof data?.version === 'string' && data.version.length > 0 ? data.version : null;
-        const tasksDb = typeof data?.tasksDb === 'string' && data.tasksDb.length > 0 ? data.tasksDb : null;
-        setConfig({ name, mode, version, tasksDb });
+        setConfig({ name, mode, version });
         if (name) document.title = `${name} · tasks`;
       })
       .catch(() => { /* leave defaults in place */ });
@@ -60,7 +58,6 @@ export default function App() {
       </main>
       <Footer
         version={config?.version ?? null}
-        tasksDb={config?.tasksDb ?? null}
         repoUrl="https://github.com/dabalroman/mcp-servers"
         projectName={projectName}
         mode={mode}

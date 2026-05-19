@@ -1,16 +1,15 @@
-import { Github, Tag, Database } from 'lucide-react';
+import { Github, Tag } from 'lucide-react';
 
 type RunMode = 'bundled' | 'standalone' | 'disabled';
 
 type FooterProps = {
   version: string | null;
-  tasksDb: string | null;
   repoUrl: string;
   projectName: string | null;
   mode: RunMode | null;
 };
 
-export default function Footer({ version, tasksDb, repoUrl, projectName, mode }: FooterProps) {
+export default function Footer({ version, repoUrl, projectName, mode }: FooterProps) {
   return (
     <footer className="mt-8 border-t border-border bg-card">
       <div className="max-w-[1080px] mx-auto px-8 py-5 flex items-center justify-between gap-6">
@@ -44,12 +43,6 @@ export default function Footer({ version, tasksDb, repoUrl, projectName, mode }:
             GitHub
           </a>
         </div>
-        {tasksDb && (
-          <div className="flex items-center gap-1 min-w-0">
-            <Database className="w-4 h-4 shrink-0" strokeWidth={1.5} />
-            <span className="truncate" title={tasksDb}>{tasksDb}</span>
-          </div>
-        )}
       </div>
     </footer>
   );
