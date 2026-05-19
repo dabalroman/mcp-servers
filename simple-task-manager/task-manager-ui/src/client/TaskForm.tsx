@@ -351,6 +351,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
                       <button
                         key={s}
                         type="button"
+                        tabIndex={-1}
                         onMouseDown={() => { if (scopeCloseTimer.current) clearTimeout(scopeCloseTimer.current); }}
                         onMouseEnter={() => setScopeHighlight(i)}
                         onClick={() => pickScope(s)}
@@ -461,6 +462,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
                     <button
                       key={t.id}
                       type="button"
+                      tabIndex={-1}
                       onMouseDown={() => { if (closeTimer.current) clearTimeout(closeTimer.current); }}
                       onMouseEnter={() => setRefHighlight(i)}
                       onClick={() => addRef(t)}
