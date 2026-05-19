@@ -315,9 +315,14 @@ export function createStore(dbPath: string): Store {
   db.pragma('journal_mode = DELETE');
 
   // runMigrations disables FKs internally (table-rebuild migrations need it);
-  // we re-enable after so normal operation enforces them.
-  runMigrations(db);
-  db.pragma('foreign_keys = ON');
+  // we re-enable after so normal operation enforces them. try/finally so a
+  // thrown migration can't leave the connection with FKs off for its lifetime
+  // — that would silently break ON DELETE CASCADE on `refs`.
+  try {
+    runMigrations(db);
+  } finally {
+    db.pragma('foreign_keys = ON');
+  }
 
   // Prepared statements
   const stmtInsertTask      = db.prepare(

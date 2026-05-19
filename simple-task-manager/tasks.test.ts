@@ -90,6 +90,12 @@ describe('schema', () => {
     assert.throws(() => createStore(dbPath), /downgrade not supported/);
   });
 
+  test('enables foreign_keys on the live connection after migrations', () => {
+    // try/finally around runMigrations guarantees this even when a migration
+    // throws — otherwise ON DELETE CASCADE on `refs` silently stops firing.
+    assert.equal(store.db.pragma('foreign_keys', { simple: true }), 1);
+  });
+
   test('migrations are idempotent — re-opening does not re-run', () => {
     store.close();
     const reopened = createStore(dbPath);
