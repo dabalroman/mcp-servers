@@ -70,12 +70,14 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
   const [initialForm] = useState<FormState>(() => deriveForm(initial));
   const [refSearch, setRefSearch] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [refHighlight, setRefHighlight] = useState(-1);
   const [scopeOpen, setScopeOpen] = useState(false);
   const [scopeHighlight, setScopeHighlight] = useState(-1);
   const [scopePicked, setScopePicked] = useState<boolean>(() => (initial?.scope ?? '') !== '');
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scopeCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scopeInputRef = useRef<HTMLInputElement | null>(null);
+  const refInputRef = useRef<HTMLInputElement | null>(null);
 
   function clearScope() {
     setForm((f) => ({ ...f, scope: '' }));
@@ -177,6 +179,63 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
     setForm((f) => ({ ...f, refs: [...f.refs, { id: task.id, relation: 'relates to' }] }));
     setRefSearch('');
     setDropdownOpen(false);
+    setRefHighlight(-1);
+  }
+
+  function clearRefSearch() {
+    setRefSearch('');
+    setRefHighlight(-1);
+    refInputRef.current?.focus();
+  }
+
+  function onRefSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      e.stopPropagation();
+      if (!dropdownOpen) {
+        if (candidates.length > 0) {
+          setDropdownOpen(true);
+          setRefHighlight(0);
+        }
+        return;
+      }
+      if (refHighlight >= 0 && refHighlight < candidates.length) {
+        const picked = candidates[refHighlight];
+        if (picked !== undefined) addRef(picked);
+        return;
+      }
+      setDropdownOpen(false);
+      setRefHighlight(-1);
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (candidates.length === 0) return;
+      if (!dropdownOpen) {
+        setDropdownOpen(true);
+        setRefHighlight(0);
+      } else {
+        setRefHighlight((h) => (h + 1) % candidates.length);
+      }
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (candidates.length === 0) return;
+      if (!dropdownOpen) {
+        setDropdownOpen(true);
+        setRefHighlight(candidates.length - 1);
+      } else {
+        setRefHighlight((h) => (h <= 0 ? candidates.length - 1 : h - 1));
+      }
+      return;
+    }
+    if (e.key === 'Escape' && dropdownOpen) {
+      e.preventDefault();
+      e.stopPropagation();
+      setDropdownOpen(false);
+      setRefHighlight(-1);
+    }
   }
 
   function removeRef(id: number) {
@@ -371,22 +430,44 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
 
             <div className="relative">
               <input
+                ref={refInputRef}
                 value={refSearch}
-                onChange={(e) => { setRefSearch(e.target.value); setDropdownOpen(true); }}
+                onChange={(e) => { setRefSearch(e.target.value); setDropdownOpen(true); setRefHighlight(-1); }}
                 onFocus={() => setDropdownOpen(true)}
-                onBlur={() => { closeTimer.current = setTimeout(() => setDropdownOpen(false), 150); }}
+                onBlur={() => { closeTimer.current = setTimeout(() => { setDropdownOpen(false); setRefHighlight(-1); }, 150); }}
+                onKeyDown={onRefSearchKeyDown}
                 placeholder="Search tasks to link…"
-                className="bg-background border border-border px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-full"
+                className="bg-background border border-border pl-3 pr-8 h-9 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-full"
               />
+              {refSearch === '' ? (
+                <ChevronDown
+                  className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none"
+                  strokeWidth={1.5}
+                />
+              ) : (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={clearRefSearch}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <X className="w-4 h-4" strokeWidth={1.5} />
+                </button>
+              )}
               {dropdownOpen && candidates.length > 0 && (
                 <div className="absolute top-full left-0 right-0 border border-border border-t-0 bg-card z-10 max-h-48 overflow-y-auto">
-                  {candidates.map((t) => (
+                  {candidates.map((t, i) => (
                     <button
                       key={t.id}
                       type="button"
                       onMouseDown={() => { if (closeTimer.current) clearTimeout(closeTimer.current); }}
+                      onMouseEnter={() => setRefHighlight(i)}
                       onClick={() => addRef(t)}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-left hover:bg-accent/20 transition-colors min-w-0"
+                      className={cn(
+                        'w-full flex items-center gap-2 px-3 py-2 text-left transition-colors min-w-0',
+                        i === refHighlight ? 'bg-accent/30' : 'hover:bg-accent/20',
+                      )}
                     >
                       <span className="text-xs text-muted-foreground/60 shrink-0 font-mono">#{t.id}</span>
                       <span className="text-sm text-foreground truncate min-w-0 flex-1">{t.title}</span>
