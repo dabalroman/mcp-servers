@@ -8,7 +8,7 @@ import { TYPES, PRIORITIES, RELATIONS, STATUS_CLASSES, STATUS_LABELS } from './c
 import { cn } from '@/lib/utils';
 import type { Task, TaskRef, TaskType, TaskPriority, TaskStatus } from '@/types/task';
 
-type InitialStatus = 'refinement' | 'todo';
+type InitialStatus = 'refinement' | 'plan' | 'todo';
 
 type FormState = {
   title: string;
@@ -23,7 +23,7 @@ type FormState = {
 
 const EMPTY: FormState = { title: '', type: 'feature', priority: 'medium', description: '', summary: '', scope: '', refs: [], status: 'refinement' };
 
-const INITIAL_STATUSES: InitialStatus[] = ['refinement', 'todo'];
+const INITIAL_STATUSES: InitialStatus[] = ['refinement', 'plan', 'todo'];
 
 export type TaskFormProps = {
   open: boolean;
@@ -35,7 +35,7 @@ export type TaskFormProps = {
 };
 
 function deriveStatus(status: TaskStatus | undefined): InitialStatus | undefined {
-  if (status === 'refinement' || status === 'todo') return status;
+  if (status === 'refinement' || status === 'plan' || status === 'todo') return status;
   return undefined;
 }
 

@@ -22,8 +22,8 @@ import {
   handleUiStop,
 } from './mutationHandlers.js';
 
-const statusParam = z.enum(['refinement', 'todo', 'in_progress', 'done', 'open']).optional()
-  .describe('Filter by status. Default: non-done. Pass "open" for refinement+todo+in_progress, or a specific status (incl. "done") for exact match.');
+const statusParam = z.enum(['refinement', 'plan', 'todo', 'in_progress', 'done', 'open']).optional()
+  .describe('Filter by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a specific status (incl. "done") for exact match.');
 
 export function registerTools(server: McpServer, store: Store): void {
   // ── add ────────────────────────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ export function registerTools(server: McpServer, store: Store): void {
       .describe('Optional implementation plan in markdown. Written by the agent after /plan; read back via getById before /implement.'),
     refs: refsSchema
       .describe('Optional related-task references — use when this task depends on, blocks, or is otherwise connected to existing tasks. Each entry: { id: number, relation?: string }. Relation must be one of the canonical values; default "relates to". The server automatically writes the inverse on the referenced task — you only need to specify one side.'),
-    status: z.enum(['refinement', 'todo']).default('refinement')
+    status: z.enum(['refinement', 'plan', 'todo']).default('refinement')
       .describe('Initial status. ALWAYS leave as default "refinement" unless one of these holds: (a) the user explicitly told you to skip refinement / mark as todo, or (b) you just refined this exact task with the user in the current conversation. Otherwise pass "refinement" (or omit the field). Choosing "todo" without one of those conditions is a rule violation — when in doubt, pick "refinement".'),
   };
   server.tool(
@@ -61,7 +61,7 @@ export function registerTools(server: McpServer, store: Store): void {
   };
   server.tool(
     'getByType',
-    'Get tasks of a specific type — use for "show me all bugs", "list features", "what ideas do we have?". Filters by status. Default: non-done. Pass "open" for refinement+todo+in_progress, or a single status (incl. "done") for exact match. Sorted by priority desc then id desc. When a task has a summary, description is omitted — call getById for the full task.',
+    'Get tasks of a specific type — use for "show me all bugs", "list features", "what ideas do we have?". Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Sorted by priority desc then id desc. When a task has a summary, description is omitted — call getById for the full task.',
     getByTypeSchema,
     async (args: z.infer<z.ZodObject<typeof getByTypeSchema>>): Promise<MCPContent> => handleGetByType(store, args)
   );
@@ -70,7 +70,7 @@ export function registerTools(server: McpServer, store: Store): void {
   const getOverviewSchema = { status: statusParam };
   server.tool(
     'getOverview',
-    'Get a count summary per type: refinement, open (todo + in_progress), and done counts. Use for dashboard questions like "how many tasks are there?" or "give me a backlog summary". Filters by status. Default: non-done. Pass "open" for refinement+todo+in_progress, or a single status (incl. "done") for exact match. Returns only types with at least one matching task, sorted by open count desc. Do NOT use this to answer "what\'s next?" — use getNext for that.',
+    'Get a count summary per type: refinement, plan, open (todo + in_progress), and done counts. Use for dashboard questions like "how many tasks are there?" or "give me a backlog summary". Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Returns only types with at least one matching task, sorted by open count desc. Do NOT use this to answer "what\'s next?" — use getNext for that.',
     getOverviewSchema,
     async (args: z.infer<z.ZodObject<typeof getOverviewSchema>>): Promise<MCPContent> => handleGetOverview(store, args)
   );
@@ -82,7 +82,7 @@ export function registerTools(server: McpServer, store: Store): void {
   };
   server.tool(
     'getNext',
-    'Get the single next actionable task — use for "what should I do next?", "what\'s next?", or any recommendation request. Sort order: in_progress first (resume interrupted work), then refinement (needs PM clarification), then todo, then highest priority, then newest id (FILO). Considers refinement, todo, and in_progress tasks. Optional type filter narrows to one category. When no filter is given, apply the project prioritization order: bug > tool > feature > idea > other. IMPORTANT: if the returned task has status "refinement", do NOT start implementing — instead ask the user clarifying questions to refine the description, then promote to "todo" via setStatus. When a task has a summary, description is omitted — call getById for the full task.',
+    'Get the single next actionable task — use for "what should I do next?", "what\'s next?", or any recommendation request. Sort order: in_progress first (resume interrupted work), then refinement (needs PM clarification), then plan (awaiting plan write), then todo, then highest priority, then newest id (FILO). Considers refinement, plan, todo, and in_progress tasks. Optional type filter narrows to one category. When no filter is given, apply the project prioritization order: bug > tool > feature > idea > other. IMPORTANT: if the returned task has status "refinement", do NOT start implementing — instead ask the user clarifying questions to refine the description, then promote to "todo" via setStatus. When a task has a summary, description is omitted — call getById for the full task.',
     getNextSchema,
     async (args: z.infer<z.ZodObject<typeof getNextSchema>>): Promise<MCPContent> => handleGetNext(store, args)
   );
@@ -91,7 +91,7 @@ export function registerTools(server: McpServer, store: Store): void {
   const getAllSchema = { status: statusParam };
   server.tool(
     'getAll',
-    'Get tasks grouped by type — use for "show me everything", "list all tasks", "full backlog". Groups appear in type order: bug, feature, idea, tool, other. Each group sorted by priority desc then id desc. Filters by status. Default: non-done. Pass "open" for refinement+todo+in_progress, or a single status (incl. "done") for exact match. Prefer getNext for a single recommendation; prefer getByType when the user asks about one specific type. When a task has a summary, description is omitted — call getById for the full task.',
+    'Get tasks grouped by type — use for "show me everything", "list all tasks", "full backlog". Groups appear in type order: bug, feature, idea, tool, other. Each group sorted by priority desc then id desc. Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Prefer getNext for a single recommendation; prefer getByType when the user asks about one specific type. When a task has a summary, description is omitted — call getById for the full task.',
     getAllSchema,
     async (args: z.infer<z.ZodObject<typeof getAllSchema>>): Promise<MCPContent> => handleGetAll(store, args)
   );
@@ -108,7 +108,7 @@ export function registerTools(server: McpServer, store: Store): void {
   // ── setStatus ──────────────────────────────────────────────────────────────────
   const setStatusSchema = {
     id: z.coerce.number().int().positive().describe('Task ID — get it from getNext, getAll, getByType, or getById'),
-    status: z.enum(['refinement', 'todo', 'in_progress', 'done']).describe('refinement = needs PM clarification before work starts; todo = ready to implement; in_progress = actively being worked on (set this before beginning); done = completed and committed (set this after user confirms the commit)')
+    status: z.enum(['refinement', 'plan', 'todo', 'in_progress', 'done']).describe('refinement = needs PM clarification before work starts; plan = planning in progress (opt-in step between refinement and todo); todo = ready to implement; in_progress = actively being worked on (set this before beginning); done = completed and committed (set this after user confirms the commit)')
   };
   server.tool(
     'setStatus',
@@ -146,7 +146,7 @@ export function registerTools(server: McpServer, store: Store): void {
   };
   server.tool(
     'getByScope',
-    'Get tasks tagged with a specific scope — use when the user asks "what tasks are there for svg-path-joiner?" or "show me everything related to eink-frame". Filters by status. Default: non-done. Pass "open" for refinement+todo+in_progress, or a single status (incl. "done") for exact match. Sorted by priority desc then id desc. Scope values are set via add or update. Empty results may indicate a wrong/typo\'d scope; use getScopes to discover valid values. When a task has a summary, description is omitted — call getById for the full task.',
+    'Get tasks tagged with a specific scope — use when the user asks "what tasks are there for svg-path-joiner?" or "show me everything related to eink-frame". Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Sorted by priority desc then id desc. Scope values are set via add or update. Empty results may indicate a wrong/typo\'d scope; use getScopes to discover valid values. When a task has a summary, description is omitted — call getById for the full task.',
     getByScopeSchema,
     async (args: z.infer<z.ZodObject<typeof getByScopeSchema>>): Promise<MCPContent> => handleGetByScope(store, args)
   );
@@ -158,7 +158,7 @@ export function registerTools(server: McpServer, store: Store): void {
   };
   server.tool(
     'getRelated',
-    'Get tasks related to a given task — returns the task itself, outbound (tasks that #X references, decorated with refRelation), and inbound (tasks that reference #X). Filters by status. Default: non-done. Pass "open" for refinement+todo+in_progress, or a single status (incl. "done") for exact match. The anchor task is full view (summary + description); outbound and inbound entries follow list mode (summary when present, description otherwise).',
+    'Get tasks related to a given task — returns the task itself, outbound (tasks that #X references, decorated with refRelation), and inbound (tasks that reference #X). Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. The anchor task is full view (summary + description); outbound and inbound entries follow list mode (summary when present, description otherwise).',
     getRelatedSchema,
     async (args: z.infer<z.ZodObject<typeof getRelatedSchema>>): Promise<MCPContent> => handleGetRelated(store, args)
   );

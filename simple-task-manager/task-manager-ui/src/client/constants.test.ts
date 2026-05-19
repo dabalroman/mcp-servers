@@ -11,8 +11,9 @@ describe('STATUS constants — refinement', () => {
     expect(STATUS_LABELS.refinement).toBe('REFINEMENT');
   });
 
-  it('STATUS_NEXT cycles: refinement → todo → in_progress → done → refinement', () => {
-    expect(STATUS_NEXT.refinement).toBe('todo');
+  it('STATUS_NEXT cycles: refinement → plan → todo → in_progress → done → refinement', () => {
+    expect(STATUS_NEXT.refinement).toBe('plan');
+    expect(STATUS_NEXT.plan).toBe('todo');
     expect(STATUS_NEXT.todo).toBe('in_progress');
     expect(STATUS_NEXT.in_progress).toBe('done');
     expect(STATUS_NEXT.done).toBe('refinement');
@@ -20,9 +21,18 @@ describe('STATUS constants — refinement', () => {
 
   it('refinement has a distinct STATUS_CLASSES entry', () => {
     expect(STATUS_CLASSES.refinement).toBeTruthy();
+    expect(STATUS_CLASSES.refinement).not.toBe(STATUS_CLASSES.plan);
     expect(STATUS_CLASSES.refinement).not.toBe(STATUS_CLASSES.todo);
     expect(STATUS_CLASSES.refinement).not.toBe(STATUS_CLASSES.in_progress);
     expect(STATUS_CLASSES.refinement).not.toBe(STATUS_CLASSES.done);
+  });
+
+  it('plan has a distinct STATUS_CLASSES entry', () => {
+    expect(STATUS_CLASSES.plan).toBeTruthy();
+    expect(STATUS_CLASSES.plan).not.toBe(STATUS_CLASSES.refinement);
+    expect(STATUS_CLASSES.plan).not.toBe(STATUS_CLASSES.todo);
+    expect(STATUS_CLASSES.plan).not.toBe(STATUS_CLASSES.in_progress);
+    expect(STATUS_CLASSES.plan).not.toBe(STATUS_CLASSES.done);
   });
 });
 

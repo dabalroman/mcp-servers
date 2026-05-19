@@ -8,6 +8,7 @@ import {
   createStore,
   sortByPriority,
   sortForNext,
+  resolveStatusFilter,
   RELATIONS,
   type AddInput,
   type Store,
@@ -19,6 +20,7 @@ const MIGRATION_NAMES = [
   '20260513000001_refs-pk-simplify',
   '20260514120000_add-plan-field',
   '20260519000000_drop-meta-counter-autoincrement-tasks',
+  '20260519010000_add-plan-status',
 ];
 
 let dir: string;
@@ -478,12 +480,12 @@ describe('getOverview', () => {
     makeTask({ type: 'feature' });
     const { id: t3 } = makeTask({ type: 'bug' });
     store.setStatus(t3, 'done');
-    // Default (non-done): done tasks are excluded; returns three-bucket shape
+    // Default (non-done): done tasks are excluded; returns four-bucket shape
     const ov = store.getOverview();
-    const bug = ov.find((o) => o.type === 'bug') as { type: string; open: number; done: number; refinement: number } | undefined;
+    const bug = ov.find((o) => o.type === 'bug') as { type: string; open: number; done: number; refinement: number; plan: number } | undefined;
     assert.equal(bug?.open, 1);
     assert.equal(bug?.done, 0);
-    const feature = ov.find((o) => o.type === 'feature') as { type: string; refinement: number } | undefined;
+    const feature = ov.find((o) => o.type === 'feature') as { type: string; refinement: number; plan: number } | undefined;
     assert.equal(feature?.refinement, 1);
   });
 
@@ -511,10 +513,10 @@ describe('getOverview', () => {
     const { id: t2 } = makeTask({ type: 'bug' });
     store.setStatus(t2, 'done');
     makeTask({ type: 'bug' });
-    // Default (non-done) always returns three-bucket shape
+    // Default (non-done) always returns four-bucket shape
     const ovNonDone = store.getOverview();
     const bugNonDone = ovNonDone.find((o) => o.type === 'bug') as
-      { type: string; open: number; done: number; refinement: number } | undefined;
+      { type: string; open: number; done: number; refinement: number; plan: number } | undefined;
     assert.ok(bugNonDone);
     assert.equal(typeof bugNonDone.open, 'number');
     assert.equal(typeof bugNonDone.done, 'number');
@@ -609,6 +611,57 @@ describe('sortForNext', () => {
       { id: 3, status: 'refinement' as const, priority: 'medium' as const },
     ];
     assert.deepEqual(sortForNext(tasks).map((t) => t.id), [2, 3, 1]);
+  });
+
+  test('STATUS_ORDER: in_progress > refinement > plan > todo > done', () => {
+    const tasks = [
+      { id: 1, status: 'done' as const,        priority: 'medium' as const },
+      { id: 2, status: 'todo' as const,         priority: 'medium' as const },
+      { id: 3, status: 'plan' as const,         priority: 'medium' as const },
+      { id: 4, status: 'refinement' as const,   priority: 'medium' as const },
+      { id: 5, status: 'in_progress' as const,  priority: 'medium' as const },
+    ];
+    assert.deepEqual(sortForNext(tasks).map((t) => t.id), [5, 4, 3, 2, 1]);
+  });
+});
+
+describe('plan status', () => {
+  test('setStatus accepts plan', () => {
+    const { id } = makeTask();
+    assert.equal(store.setStatus(id, 'plan'), true);
+    assert.equal(store.getById(id)?.status, 'plan');
+  });
+
+  test('resolveStatusFilter open includes plan', () => {
+    const resolved = resolveStatusFilter('open');
+    assert.ok(Array.isArray(resolved));
+    assert.ok((resolved as string[]).includes('plan'));
+  });
+
+  test('getNext includes plan-status tasks', () => {
+    const { id: a } = makeTask({ title: 'plan-task' });
+    store.setStatus(a, 'plan');
+    const next = store.getNext();
+    assert.equal(next?.id, a);
+  });
+
+  test('getAll open includes plan-status tasks', () => {
+    const { id } = makeTask({ title: 'plan-task' });
+    store.setStatus(id, 'plan');
+    const all = store.getAll('open');
+    assert.ok(all.some((t) => t.id === id));
+  });
+
+  test('getOverview has a plan count in three-bucket shape', () => {
+    const { id } = makeTask({ type: 'bug' });
+    store.setStatus(id, 'plan');
+    const ov = store.getOverview();
+    const bug = ov.find((o) => o.type === 'bug') as
+      { type: string; refinement: number; plan: number; open: number; done: number } | undefined;
+    assert.ok(bug, 'bug entry should exist');
+    assert.equal(bug?.plan, 1);
+    assert.equal(bug?.open, 0);
+    assert.equal(bug?.refinement, 0);
   });
 });
 

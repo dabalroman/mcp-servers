@@ -10,7 +10,7 @@ import type { Database as DB } from 'better-sqlite3';
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
 export type TaskType = 'bug' | 'feature' | 'idea' | 'tool' | 'other';
-export type TaskStatus = 'refinement' | 'todo' | 'in_progress' | 'done';
+export type TaskStatus = 'refinement' | 'plan' | 'todo' | 'in_progress' | 'done';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
 
 export type Relation = typeof RELATIONS[number];
@@ -37,7 +37,7 @@ export type Task = {
 };
 
 const PRIORITY_ORDER: Record<TaskPriority, number> = { critical: 4, high: 3, medium: 2, low: 1 };
-const STATUS_ORDER: Record<TaskStatus, number> = { in_progress: 3, refinement: 2, todo: 1, done: 0 };
+const STATUS_ORDER: Record<TaskStatus, number> = { in_progress: 4, refinement: 3, plan: 2, todo: 1, done: 0 };
 export const ALL_TYPES: TaskType[] = ['bug', 'feature', 'idea', 'tool', 'other'];
 
 export const RELATIONS = [
@@ -264,7 +264,7 @@ export type RelatedResult = {
 };
 
 export type OverviewEntry =
-  | { type: TaskType; refinement: number; open: number; done: number }
+  | { type: TaskType; refinement: number; plan: number; open: number; done: number }
   | { type: TaskType; count: number; status: TaskStatus };
 export type ScopeEntry = { scope: string; total: number; open: number };
 
@@ -274,7 +274,7 @@ export type StatusFilter = TaskStatus | 'open';
 // 'open' and undefined both mean non-done; a specific TaskStatus means exact match.
 export function resolveStatusFilter(status?: StatusFilter): TaskStatus[] | TaskStatus {
   if (status === undefined || status === 'open') {
-    return ['refinement', 'todo', 'in_progress'];
+    return ['refinement', 'plan', 'todo', 'in_progress'];
   }
   return status;
 }
@@ -554,13 +554,13 @@ export function createStore(dbPath: string): Store {
     if (type) {
       rows = db.prepare(`
         SELECT * FROM tasks
-        WHERE status IN ('todo', 'in_progress', 'refinement')
+        WHERE status IN ('todo', 'in_progress', 'refinement', 'plan')
         AND type = ?
       `).all(type) as TaskRow[];
     } else {
       rows = db.prepare(`
         SELECT * FROM tasks
-        WHERE status IN ('todo', 'in_progress', 'refinement')
+        WHERE status IN ('todo', 'in_progress', 'refinement', 'plan')
       `).all() as TaskRow[];
     }
     const tasks = attachRefs(rows);
@@ -592,18 +592,19 @@ export function createStore(dbPath: string): Store {
     const rows = db.prepare(`
       SELECT type,
              SUM(CASE WHEN status = 'refinement' THEN 1 ELSE 0 END) AS refinement,
+             SUM(CASE WHEN status = 'plan' THEN 1 ELSE 0 END) AS plan,
              SUM(CASE WHEN status IN ('todo', 'in_progress') THEN 1 ELSE 0 END) AS open,
              SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done
       FROM tasks
       WHERE status IN (${placeholders})
       GROUP BY type
-    `).all(...resolved) as { type: TaskType; refinement: number; open: number; done: number }[];
+    `).all(...resolved) as { type: TaskType; refinement: number; plan: number; open: number; done: number }[];
     return ALL_TYPES
       .map((type): OverviewEntry | null => {
         const r = rows.find((x) => x.type === type);
-        return r ? { type, refinement: r.refinement, open: r.open, done: r.done } : null;
+        return r ? { type, refinement: r.refinement, plan: r.plan, open: r.open, done: r.done } : null;
       })
-      .filter((o): o is OverviewEntry => o !== null && ('refinement' in o ? o.refinement + o.open + o.done > 0 : true))
+      .filter((o): o is OverviewEntry => o !== null && ('refinement' in o ? o.refinement + o.plan + o.open + o.done > 0 : true))
       .sort((a, b) => ('open' in b ? b.open : 0) - ('open' in a ? a.open : 0));
   }
 

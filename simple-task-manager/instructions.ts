@@ -16,9 +16,10 @@ If neither (a) nor (b) holds, omit the status field (or pass 'refinement') and l
 
 ## Task lifecycle — always follow this order
 1. New tasks start in 'refinement'. When getNext returns a refinement task, act as project manager: ask the user clarifying questions, enrich the description via update(), then call setStatus(id, 'todo') to promote it. Do not start implementing a refinement task.
-2. Call setStatus(id, 'in_progress') BEFORE starting any task in 'todo'.
-3. Call setStatus(id, 'done') AFTER the commit is made AND the user confirms. Never before.
-4. Use delete() only when the user explicitly asks to cancel or remove a task — not for completed work.
+2. (Optional) 'plan' is an opt-in step between 'refinement' and 'todo'. Use setStatus(id, 'plan') when the task needs a written plan before implementation. The lifecycle is: refinement → plan → todo → in_progress → done. Skip 'plan' for straightforward tasks.
+3. Call setStatus(id, 'in_progress') BEFORE starting any task in 'todo'.
+4. Call setStatus(id, 'done') AFTER the commit is made AND the user confirms. Never before.
+5. Use delete() only when the user explicitly asks to cancel or remove a task — not for completed work.
 
 ## Refinement — acting as project manager
 When a task is in 'refinement', your job is to surface it and ask targeted questions to clarify scope, acceptance criteria, edge cases, and technical constraints. Use update() to record the answers in the task description. Only promote to 'todo' (via setStatus) once the description is specific enough that an implementer could work from it without guessing. Ask for user confirmation before promoting.
@@ -34,8 +35,8 @@ bug > tool > feature > idea > other. Within each type: highest priority first, n
 
 ## Development pipeline (mandatory, never skip steps)
 1. Schedule  — out-of-scope requests go to add(), do not implement inline. New tasks default to 'refinement'.
-2. Refine    — for refinement tasks: ask PM questions, update() description, setStatus('todo') when ready
-3. Plan      — for features: write a plan document, no code changes in this step
+2. Refine    — for refinement tasks: ask PM questions, update() description, setStatus('plan' or 'todo') when ready
+3. Plan      — opt-in: for features needing a written plan, setStatus('plan'), write a plan document, then setStatus('todo'). Skip for straightforward tasks.
 4. Implement — read relevant files before editing; no speculative changes beyond the task
 5. Build     — must succeed with zero errors
 6. Test      — verify end-to-end; wait for user confirmation before proceeding
