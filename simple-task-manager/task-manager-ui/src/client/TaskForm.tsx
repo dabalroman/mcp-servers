@@ -30,8 +30,8 @@ export type TaskFormProps = {
   onOpenChange: (open: boolean) => void;
   initial: Task | null;
   allTasks: Task[];
-  onSubmit: (form: FormState & { status: InitialStatus | undefined }) => void | Promise<void>;
-  onDelete?: (id: number) => void | Promise<void>;
+  onSubmit: (form: FormState & { status: InitialStatus | undefined }) => Promise<boolean>;
+  onDelete?: (id: number) => Promise<boolean>;
 };
 
 function deriveStatus(status: TaskStatus | undefined): InitialStatus | undefined {
@@ -280,11 +280,18 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
       t.title.toLowerCase().includes(refSearch.toLowerCase()))
   );
 
-  function submit(e: FormEvent<HTMLFormElement>) {
+  const [submitting, setSubmitting] = useState(false);
+
+  async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (!form.title.trim()) return;
-    onSubmit(form);
-    onOpenChange(false);
+    if (!form.title.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      const ok = await onSubmit(form);
+      if (ok) onOpenChange(false);
+    } finally {
+      setSubmitting(false);
+    }
   }
 
   return (
@@ -534,19 +541,24 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
                   variant="destructive"
                   size="sm"
                   className="flex-1 sm:flex-none"
-                  onClick={() => {
-                    if (window.confirm(`Delete task #${initial.id} "${initial.title}"?`)) {
-                      onDelete(initial.id);
-                      onOpenChange(false);
+                  disabled={submitting}
+                  onClick={async () => {
+                    if (!window.confirm(`Delete task #${initial.id} "${initial.title}"?`)) return;
+                    setSubmitting(true);
+                    try {
+                      const ok = await onDelete(initial.id);
+                      if (ok) onOpenChange(false);
+                    } finally {
+                      setSubmitting(false);
                     }
                   }}
                 >
                   Delete
                 </Button>
               )}
-              <Button type="button" variant="outline" size="sm" className="flex-1 sm:flex-none" onClick={tryClose}>Cancel</Button>
-              <Button type="submit" size="sm" className="flex-1 sm:flex-none" disabled={!form.title.trim()}>
-                {initial ? 'Save' : 'Add Task'}
+              <Button type="button" variant="outline" size="sm" className="flex-1 sm:flex-none" onClick={tryClose} disabled={submitting}>Cancel</Button>
+              <Button type="submit" size="sm" className="flex-1 sm:flex-none" disabled={!form.title.trim() || submitting}>
+                {submitting ? 'Saving…' : (initial ? 'Save' : 'Add Task')}
               </Button>
             </div>
           </div>

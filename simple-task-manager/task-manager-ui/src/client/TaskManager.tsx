@@ -35,13 +35,23 @@ export default function TaskManager() {
   useEffect(() => { navigateToRefRef.current = navigateToRef; }, [navigateToRef]);
 
   async function handleStatus(id: number, status: TaskStatus) {
-    try { await update(id, { status }); }
-    catch { toast.error('Status update failed'); }
+    try {
+      await update(id, { status });
+    } catch (err) {
+      console.error('[task-ui] status update failed', { id, status, error: err });
+      toast.error(`Failed to update status of #${id}.`);
+    }
   }
 
-  async function handleDelete(id: number) {
-    try { await remove(id); }
-    catch { toast.error('Delete failed'); }
+  async function handleDelete(id: number): Promise<boolean> {
+    try {
+      await remove(id);
+      return true;
+    } catch (err) {
+      console.error('[task-ui] delete failed', { id, error: err });
+      toast.error(`Failed to delete #${id}.`);
+      return false;
+    }
   }
 
   function openEdit(task: Task) {
@@ -54,7 +64,7 @@ export default function TaskManager() {
     setFormOpen(true);
   }
 
-  async function handleFormSubmit(form: { title: string; type: TaskType; priority: Task['priority']; description: string; summary: string; scope: string; refs: import('@/types/task').TaskRef[]; status?: 'refinement' | 'todo' }) {
+  async function handleFormSubmit(form: { title: string; type: TaskType; priority: Task['priority']; description: string; summary: string; scope: string; refs: import('@/types/task').TaskRef[]; status?: 'refinement' | 'todo' }): Promise<boolean> {
     const scope = form.scope || undefined;
     const refs = form.refs.length ? form.refs : undefined;
     try {
@@ -82,8 +92,21 @@ export default function TaskManager() {
           { id: toastId },
         );
       }
-    } catch {
-      toast.error('Save failed');
+      return true;
+    } catch (err) {
+      // Keep the payload small — task descriptions can contain sensitive
+      // text users wouldn't expect dumped to devtools logs.
+      console.error('[task-ui] save failed', {
+        editingId: editing?.id ?? null,
+        titleLen: form.title.length,
+        type: form.type,
+        priority: form.priority,
+        hasDescription: !!form.description,
+        scope: form.scope || null,
+        error: err,
+      });
+      toast.error(editing ? `Failed to save #${editing.id}.` : 'Failed to add task.');
+      return false;
     }
   }
 

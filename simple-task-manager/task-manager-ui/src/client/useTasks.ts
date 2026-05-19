@@ -61,6 +61,7 @@ export function useTasks() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const json = await res.json() as { id: number };
     return json.id;
   }, []);
