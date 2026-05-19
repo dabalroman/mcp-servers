@@ -109,65 +109,74 @@ function runMigrations(db: DB): void {
   // foreign_keys here is a no-op if a transaction is already open, so we
   // require the caller to invoke runMigrations *before* enabling FKs.
   db.pragma('foreign_keys = OFF');
+  // Brief busy_timeout so concurrent openers (bundled-mode UI spawns right
+  // after the MCP calls createStore on a fresh DB) wait on the BEGIN IMMEDIATE
+  // below instead of taking immediate SQLITE_BUSY.
+  db.pragma('busy_timeout = 5000');
 
-  // Ensure schema_migrations table exists — it's the authoritative record.
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
-      version    INTEGER PRIMARY KEY,
-      name       TEXT NOT NULL,
-      applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+  // Wrap the entire migration bootstrap in one BEGIN IMMEDIATE so two processes
+  // racing createStore() on a fresh DB serialise on the write lock instead of
+  // both observing an empty schema_migrations and racing into duplicate
+  // INSERTs. The loser waits on busy_timeout then re-reads schema_migrations
+  // (now populated) and the loop becomes a no-op.
+  db.transaction(() => {
+    // Ensure schema_migrations table exists — it's the authoritative record.
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS schema_migrations (
+        version    INTEGER PRIMARY KEY,
+        name       TEXT NOT NULL,
+        applied_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+    `);
+
+    // One-time backfills: rename old inline-array names to timestamp-prefixed file names.
+    // These run on first open after upgrading from the inline-MIGRATIONS code and are
+    // no-ops on new or already-upgraded DBs.
+    db.prepare(`UPDATE schema_migrations SET name='20260101000000_initial-schema' WHERE version=1 AND name='initial-schema'`).run();
+    db.prepare(`UPDATE schema_migrations SET name='20260513000000_normalize-literal-newlines' WHERE version=2 AND name='normalize-literal-newlines'`).run();
+    db.prepare(`UPDATE schema_migrations SET name='20260513000001_refs-pk-simplify' WHERE version=3 AND name='refs_pk_simplify'`).run();
+
+    const migrations = loadMigrations();
+    const onDiskNames = new Set(migrations.map((m) => m.name));
+
+    const appliedRows = db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all() as
+      { version: number; name: string }[];
+    const appliedNames = new Set(appliedRows.map((r) => r.name));
+
+    // Downgrade guard: applied name not present on disk means a newer code version ran.
+    const missing = [...appliedNames].filter((n) => !onDiskNames.has(n));
+    if (missing.length > 0) {
+      throw new Error(
+        `DB was migrated by newer code; downgrade not supported. Missing migration files: ${missing.join(', ')}`
+      );
+    }
+
+    const insertMigration = db.prepare(
+      'INSERT INTO schema_migrations (version, name) VALUES (?, ?)'
     );
-  `);
 
-  // One-time backfills: rename old inline-array names to timestamp-prefixed file names.
-  // These run on first open after upgrading from the inline-MIGRATIONS code and are
-  // no-ops on new or already-upgraded DBs.
-  db.prepare(`UPDATE schema_migrations SET name='20260101000000_initial-schema' WHERE version=1 AND name='initial-schema'`).run();
-  db.prepare(`UPDATE schema_migrations SET name='20260513000000_normalize-literal-newlines' WHERE version=2 AND name='normalize-literal-newlines'`).run();
-  db.prepare(`UPDATE schema_migrations SET name='20260513000001_refs-pk-simplify' WHERE version=3 AND name='refs_pk_simplify'`).run();
+    // version = 1-based ordinal of all applied migrations after this run
+    let nextVersion = appliedRows.length + 1;
 
-  const migrations = loadMigrations();
-  const onDiskNames = new Set(migrations.map((m) => m.name));
-
-  const appliedRows = db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all() as
-    { version: number; name: string }[];
-  const appliedNames = new Set(appliedRows.map((r) => r.name));
-
-  // Downgrade guard: applied name not present on disk means a newer code version ran.
-  const missing = [...appliedNames].filter((n) => !onDiskNames.has(n));
-  if (missing.length > 0) {
-    throw new Error(
-      `DB was migrated by newer code; downgrade not supported. Missing migration files: ${missing.join(', ')}`
-    );
-  }
-
-  const insertMigration = db.prepare(
-    'INSERT INTO schema_migrations (version, name) VALUES (?, ?)'
-  );
-
-  // version = 1-based ordinal of all applied migrations after this run
-  let nextVersion = appliedRows.length + 1;
-
-  for (const migration of migrations) {
-    if (appliedNames.has(migration.name)) continue;
-    db.transaction(() => {
+    for (const migration of migrations) {
+      if (appliedNames.has(migration.name)) continue;
       migration.up(db);
       insertMigration.run(nextVersion, migration.name);
-    })();
-    appliedNames.add(migration.name);
-    nextVersion++;
-  }
+      appliedNames.add(migration.name);
+      nextVersion++;
+    }
 
-  // Keep user_version in sync with total number of applied migrations for
-  // backward compatibility with tooling that reads it.
-  const finalCount = (db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number }).n;
-  db.pragma(`user_version = ${finalCount}`);
+    // Keep user_version in sync with total number of applied migrations for
+    // backward compatibility with tooling that reads it.
+    const finalCount = (db.prepare('SELECT COUNT(*) AS n FROM schema_migrations').get() as { n: number }).n;
+    db.pragma(`user_version = ${finalCount}`);
 
-  // Verify no FK violations slipped in while FKs were off.
-  const violations = db.prepare('PRAGMA foreign_key_check').all() as unknown[];
-  if (violations.length > 0) {
-    throw new Error(`Foreign key violations after migrations: ${JSON.stringify(violations)}`);
-  }
+    // Verify no FK violations slipped in while FKs were off.
+    const violations = db.prepare('PRAGMA foreign_key_check').all() as unknown[];
+    if (violations.length > 0) {
+      throw new Error(`Foreign key violations after migrations: ${JSON.stringify(violations)}`);
+    }
+  }).immediate();
 }
 
 // ── Row mapping ───────────────────────────────────────────────────────────────
