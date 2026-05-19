@@ -29,8 +29,11 @@ process.once('SIGINT',  () => { try { dispose(); } catch { /* ignore */ } proces
 // Surface a few server-side env values to the client. The static dist HTML is
 // built once and served as-is; this endpoint is how the SPA learns the project
 // name and the current run mode so it can render the header pill + mode label.
+// Deliberately does not expose TASKS_DB — the absolute path leaks the host
+// username + directory layout to any client that can reach the endpoint,
+// which is auth-less. The client doesn't need it for rendering.
 app.get('/api/config', (_req, res) => {
-  res.json({ name: PROJECT_NAME, mode: TASK_UI_MODE, version: VERSION, tasksDb: TASKS_DB });
+  res.json({ name: PROJECT_NAME, mode: TASK_UI_MODE, version: VERSION });
 });
 
 app.use(express.static(dist, { index: 'index.html', maxAge: '1h' }));
