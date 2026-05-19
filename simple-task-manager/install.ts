@@ -95,7 +95,7 @@ console.log('');
 // ── install skills ─────────────────────────────────────────────────────────────
 const commandsDir = resolve(homedir(), '.claude', 'commands');
 mkdirSync(commandsDir, { recursive: true });
-for (const skill of ['refine', 'implement']) {
+for (const skill of ['refine', 'implement', 'autopilot']) {
   const src = resolve(serverDir, 'commands', `${skill}.md`);
   const dest = resolve(commandsDir, `${skill}.md`);
   copyFileSync(src, dest);

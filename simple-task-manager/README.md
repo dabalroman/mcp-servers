@@ -4,7 +4,7 @@ A persistent task manager for [Claude Code](https://claude.ai/code), exposed as 
 
 **Batteries included** - behavioral rules are embedded in the server and loaded automatically when Claude connects.
 
-**Skills included** - Use `/refine` and `/implement` skills to make it flow!
+**Skills included** - Use `/refine`, `/implement`, and `/autopilot` skills to make it flow!
 
 **Web UI included** - When Claude starts the MCP, it also spawns a bundled web app at <http://localhost:7374>.
 
@@ -90,6 +90,11 @@ Use this skill to implement tasks. Claude will use all knowledge from simple-tas
 It will try to write and run tests to ensure code quality.
 - `"/implement #143"`
 - `"Go on, fix that data-fetching bug"`
+
+### /autopilot
+Use this skill to batch-implement every `todo` task in a scope. Claude works through them one branch per task, runs the full pipeline (plan → implement → tests → commit) without per-task confirmation, and stops only at hard blockers. You review the resulting branches locally and merge the good ones.
+- `"/autopilot <scope>"` — Claude works through every `todo` task tagged with `<scope>`
+- `"/autopilot"` — Claude lists scopes and asks which one
 
 &nbsp;
 &nbsp;
