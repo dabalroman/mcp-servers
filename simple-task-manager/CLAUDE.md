@@ -62,6 +62,8 @@ After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.t
 
 The git repository root is `~/.claude/mcp-servers/`, **not** `~/.claude/mcp-servers/simple-task-manager/`. The `simple-task-manager/` directory has no `.git` of its own — it is a subdirectory of the `mcp-servers` repo. Always run git commands from `~/.claude/mcp-servers/` (or pass `-C ~/.claude/mcp-servers`). The pre-commit hook lives at `~/.claude/mcp-servers/.git/hooks/pre-commit` and is installed by `simple-task-manager/setup-hooks.ts`.
 
+Every commit that implements or closes a task-manager task **must use this subject format**: `#<id>/<type>/<scope>: <description>`, e.g. `#172/fix/task-manager: always sync skills`. This keeps git history traceable back to the task that motivated the change.
+
 ## Storage — SQLite
 
 Tasks live in a single SQLite database. The path comes from the `TASKS_DB` env var. Schema is owned by `tasks.ts`:
