@@ -106,6 +106,15 @@ module.exports = {
 `;
   writeFileSync(ecosystemFile, ecosystem);
 
+  // Ensure dist/ is built from current source before pm2 spawns it — a stale
+  // dist/ would crash the MCP. Always rebuild; install deps first if missing.
+  if (!existsSync(resolve(HERE, 'node_modules'))) {
+    console.log('node_modules not found — running npm install...');
+    execFileSync('npm', ['install'], { cwd: HERE, stdio: 'inherit' });
+  }
+  console.log('Building dist/ from current source...');
+  execFileSync('npm', ['run', 'build'], { cwd: HERE, stdio: 'inherit' });
+
   // Replace any previous registration with the same name, then start fresh.
   pm2(['delete', projectName], { ignoreFailure: true });
   pm2(['start', ecosystemFile]);

@@ -10,6 +10,7 @@ import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from
 import { resolve, dirname, basename } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
+import { execFileSync } from 'node:child_process';
 import { ENV_DOCS, ENV_ORDER, isStaleEntry, parseMcpConfig, serializeMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
 
 const serverDir = dirname(fileURLToPath(import.meta.url));
@@ -50,6 +51,17 @@ if (process.argv[2] === '--global') {
   installSkills();
   process.exit(0);
 }
+
+// ── Ensure dist/ is built from current source before pointing .mcp.json at it ──
+// .mcp.json points at dist/server.js; a stale dist/ (e.g. after a code pull that
+// added migrations) crashes the MCP on startup. Always rebuild — the build is
+// fast. node_modules may be absent on a fresh checkout — install first if so.
+if (!existsSync(resolve(serverDir, 'node_modules'))) {
+  console.log('node_modules not found — running npm install...');
+  execFileSync('npm', ['install'], { cwd: serverDir, stdio: 'inherit' });
+}
+console.log('Building dist/ from current source...');
+execFileSync('npm', ['run', 'build'], { cwd: serverDir, stdio: 'inherit' });
 
 // ── per-project: write .mcp.json ───────────────────────────────────────────────
 const projectDir = resolve(process.argv[2] ?? process.cwd());
