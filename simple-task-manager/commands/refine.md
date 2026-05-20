@@ -1,5 +1,5 @@
 ---
-description: Act as PM — clarify scope, enrich descriptions, promote refinement tasks to todo. Args: "#NN" | fuzzy scope (e.g. "eink") | empty for all.
+description: Act as PM — clarify scope, enrich descriptions, promote refinement tasks to plan or todo. Args: "#NN" | fuzzy scope (e.g. "eink") | empty for all.
 model: opus
 ---
 
@@ -7,7 +7,7 @@ model: opus
 
 **Model**: this skill must run on Opus. If you are not on Opus, tell the user to switch (`/model opus`) and stop — refinement quality depends on it.
 
-Act as project manager for tasks in `refinement` status: ask clarifying questions, enrich the description via `update()`, and promote to `todo` once the spec is concrete enough to implement without guessing.
+Act as project manager for tasks in `refinement` status: ask clarifying questions, enrich the description via `update()`, and promote to `plan` or `todo` once the spec is concrete enough to implement without guessing.
 
 ## Usage
 
@@ -38,7 +38,7 @@ For each task in priority order (`getNext` ordering: bug > tool > feature > idea
 2. Ask targeted clarifying questions covering: scope, acceptance criteria, edge cases, technical constraints, file paths, out-of-scope items. Use `AskUserQuestion` for choice-style questions; ask in chat for open-ended ones.
 3. Use `mcp__task-manager__update` to fold the answers into the description. Lock the description with a "(locked YYYY-MM-DD)" marker on the section that contains the agreed decisions.
 
-3b. **Generate summary**: produce a 2–3 line summary capturing: (1) what the task does, (2) the most important decision, (3) the user-visible outcome. Call `mcp__task-manager__update({ id, summary })` to persist it. The summary **must** be written before calling `setStatus('todo')` — the server will reject the promotion if it is missing.
+3b. **Generate summary**: produce a 2–3 line summary capturing: (1) what the task does, (2) the most important decision, (3) the user-visible outcome. Call `mcp__task-manager__update({ id, summary })` to persist it. The summary **must** be written before promoting to `plan` or `todo` — the server will reject the promotion if it is missing.
 
 4. Once the description is specific enough that an implementer could work from it without guessing, confirm the summary looks good with the user, then ask "Promote #NN to **plan** or directly to **todo**?" Default to **todo** when unsure — `plan` is opt-in and only useful when the task needs a written implementation plan before coding starts. Call `mcp__task-manager__setStatus(id, 'plan')` or `mcp__task-manager__setStatus(id, 'todo')` only on confirmation. Note: `setStatus` will return an error if the summary is missing — write it first via `update({ id, summary: "..." })`.
 5. If the task is filed as `idea` but is now concretely scoped, ask whether to reclassify to `feature`.

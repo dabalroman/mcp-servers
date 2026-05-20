@@ -15,6 +15,20 @@ import { ENV_DOCS, ENV_ORDER, isStaleEntry, parseMcpConfig, serializeMcpConfig, 
 const serverDir = dirname(fileURLToPath(import.meta.url));
 const serverEntry = resolve(serverDir, 'dist/server.js');
 
+/** Copy the slash-command skills into ~/.claude/commands, overwriting existing copies.
+ *  Always runs — even when .mcp.json / CLAUDE.md are left untouched — so a skill
+ *  update in this repo reliably propagates to every already-set-up project. */
+function installSkills(): void {
+  const commandsDir = resolve(homedir(), '.claude', 'commands');
+  mkdirSync(commandsDir, { recursive: true });
+  for (const skill of ['refine', 'implement', 'autopilot']) {
+    const src = resolve(serverDir, 'commands', `${skill}.md`);
+    const dest = resolve(commandsDir, `${skill}.md`);
+    copyFileSync(src, dest);
+    console.log(`  skill  : /${skill} → ${dest}`);
+  }
+}
+
 // ── --global: register the setup instructions in ~/.claude/CLAUDE.md ──────────
 if (process.argv[2] === '--global') {
   const claudeMd = resolve(homedir(), '.claude', 'CLAUDE.md');
@@ -22,17 +36,18 @@ if (process.argv[2] === '--global') {
   const line = `@${resolve(serverDir, 'CLAUDE.md')}`;
 
   if (existsSync(claudeMd) && readFileSync(claudeMd, 'utf8').includes(marker)) {
-    console.log(`simple-task-manager already registered in ${claudeMd} — nothing to do.`);
-    process.exit(0);
+    console.log(`simple-task-manager already registered in ${claudeMd}.`);
+  } else {
+    const existing = existsSync(claudeMd) ? readFileSync(claudeMd, 'utf8') : '';
+    const separator = existing.length && !existing.endsWith('\n') ? '\n' : '';
+    mkdirSync(dirname(claudeMd), { recursive: true });
+    writeFileSync(claudeMd, existing + separator + line + '\n');
+    console.log(`Registered in ${claudeMd}`);
+    console.log(`Claude can now set up this MCP in any project.`);
+    console.log(`Start a new session and say: "setup the task manager"`);
   }
 
-  const existing = existsSync(claudeMd) ? readFileSync(claudeMd, 'utf8') : '';
-  const separator = existing.length && !existing.endsWith('\n') ? '\n' : '';
-  mkdirSync(dirname(claudeMd), { recursive: true });
-  writeFileSync(claudeMd, existing + separator + line + '\n');
-  console.log(`Registered in ${claudeMd}`);
-  console.log(`Claude can now set up this MCP in any project.`);
-  console.log(`Start a new session and say: "setup the task manager"`);
+  installSkills();
   process.exit(0);
 }
 
@@ -66,40 +81,32 @@ if (existsSync(mcpFile)) {
 const existingEntry = config.mcpServers['task-manager'];
 
 if (existingEntry && !isStaleEntry(existingEntry)) {
-  console.log(`task-manager is already registered in ${mcpFile} — nothing to do.`);
-  process.exit(0);
-}
+  console.log(`task-manager is already registered in ${mcpFile} — .mcp.json left unchanged.`);
+} else {
+  const action = existingEntry ? 'Refreshed' : 'Registered';
+  config.mcpServers['task-manager'] = entry;
+  writeFileSync(mcpFile, serializeMcpConfig(config));
+  console.log(`${action} task-manager in ${mcpFile}`);
+  console.log(`  server : ${entry.args[0]}`);
+  console.log(`  db     : ${entry.env?.TASKS_DB ?? '(unset)'}`);
 
-const action = existingEntry ? 'Refreshed' : 'Registered';
-config.mcpServers['task-manager'] = entry;
-writeFileSync(mcpFile, serializeMcpConfig(config));
-console.log(`${action} task-manager in ${mcpFile}`);
-console.log(`  server : ${entry.args[0]}`);
-console.log(`  db     : ${entry.env?.TASKS_DB ?? '(unset)'}`);
-
-// Print env-var docs so the user can see what each value means without
-// hunting through the README. We can't put these in `.mcp.json` itself —
-// Claude Code's MCP loader rejects JSONC comments.
-console.log('');
-console.log('Configured env vars (edit .mcp.json to change):');
-for (const key of ENV_ORDER) {
-  const value = entry.env?.[key];
-  if (value === undefined) continue;
-  console.log(`  ${key} = ${JSON.stringify(value)}`);
-  for (const line of ENV_DOCS[key] ?? []) {
-    console.log(`    ${line}`);
+  // Print env-var docs so the user can see what each value means without
+  // hunting through the README. We can't put these in `.mcp.json` itself —
+  // Claude Code's MCP loader rejects JSONC comments.
+  console.log('');
+  console.log('Configured env vars (edit .mcp.json to change):');
+  for (const key of ENV_ORDER) {
+    const value = entry.env?.[key];
+    if (value === undefined) continue;
+    console.log(`  ${key} = ${JSON.stringify(value)}`);
+    for (const line of ENV_DOCS[key] ?? []) {
+      console.log(`    ${line}`);
+    }
   }
+  console.log('');
 }
-console.log('');
 
 // ── install skills ─────────────────────────────────────────────────────────────
-const commandsDir = resolve(homedir(), '.claude', 'commands');
-mkdirSync(commandsDir, { recursive: true });
-for (const skill of ['refine', 'implement', 'autopilot']) {
-  const src = resolve(serverDir, 'commands', `${skill}.md`);
-  const dest = resolve(commandsDir, `${skill}.md`);
-  copyFileSync(src, dest);
-  console.log(`  skill  : /${skill} → ${dest}`);
-}
+installSkills();
 
 console.log(`Restart Claude Code to activate.`);
