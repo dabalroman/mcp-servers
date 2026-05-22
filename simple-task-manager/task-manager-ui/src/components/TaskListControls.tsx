@@ -68,8 +68,8 @@ export function TaskListControls({ value, onChange }: Props) {
           className={`${DIR_BTN} border-l border-border`}
         >
           {value.groupDir === 'asc'
-            ? <ArrowDown className="w-4 h-4 shrink-0" strokeWidth={1.5} />
-            : <ArrowUp className="w-4 h-4 shrink-0" strokeWidth={1.5} />
+            ? <ArrowUp className="w-4 h-4 shrink-0" strokeWidth={1.5} />
+            : <ArrowDown className="w-4 h-4 shrink-0" strokeWidth={1.5} />
           }
         </button>
       </div>
@@ -94,8 +94,8 @@ export function TaskListControls({ value, onChange }: Props) {
           className={`${DIR_BTN} border-l border-border`}
         >
           {value.sortDir === 'asc'
-            ? <ArrowDown className="w-4 h-4 shrink-0" strokeWidth={1.5} />
-            : <ArrowUp className="w-4 h-4 shrink-0" strokeWidth={1.5} />
+            ? <ArrowUp className="w-4 h-4 shrink-0" strokeWidth={1.5} />
+            : <ArrowDown className="w-4 h-4 shrink-0" strokeWidth={1.5} />
           }
         </button>
       </div>
