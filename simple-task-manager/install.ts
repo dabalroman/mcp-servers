@@ -10,7 +10,7 @@ import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from
 import { resolve, dirname, basename } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
-import { ENV_DOCS, ENV_ORDER, isStaleEntry, parseMcpConfig, serializeMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
+import { ENV_DOCS, ENV_ORDER, GLOBAL_IMPORT_FILE, isStaleEntry, parseMcpConfig, serializeMcpConfig, updateGlobalImport, type McpConfig, type McpEntry } from './mcpConfig.js';
 
 const serverDir = dirname(fileURLToPath(import.meta.url));
 const serverEntry = resolve(serverDir, 'dist/server.js');
@@ -32,19 +32,23 @@ function installSkills(): void {
 // ── --global: register the setup instructions in ~/.claude/CLAUDE.md ──────────
 if (process.argv[2] === '--global') {
   const claudeMd = resolve(homedir(), '.claude', 'CLAUDE.md');
-  const marker = 'simple-task-manager/CLAUDE.md';
-  const line = `@${resolve(serverDir, 'CLAUDE.md')}`;
+  const existing = existsSync(claudeMd) ? readFileSync(claudeMd, 'utf8') : '';
+  const { content, action } = updateGlobalImport(existing, resolve(serverDir, GLOBAL_IMPORT_FILE));
 
-  if (existsSync(claudeMd) && readFileSync(claudeMd, 'utf8').includes(marker)) {
+  if (action === 'unchanged') {
     console.log(`simple-task-manager already registered in ${claudeMd}.`);
   } else {
-    const existing = existsSync(claudeMd) ? readFileSync(claudeMd, 'utf8') : '';
-    const separator = existing.length && !existing.endsWith('\n') ? '\n' : '';
     mkdirSync(dirname(claudeMd), { recursive: true });
-    writeFileSync(claudeMd, existing + separator + line + '\n');
-    console.log(`Registered in ${claudeMd}`);
-    console.log(`Claude can now set up this MCP in any project.`);
-    console.log(`Start a new session and say: "setup the task manager"`);
+    writeFileSync(claudeMd, content);
+
+    if (action === 'migrated') {
+      console.log(`Repointed the import in ${claudeMd} at ${GLOBAL_IMPORT_FILE}.`);
+      console.log(`It used to pull in CLAUDE.md — this package's dev docs — on every session.`);
+    } else {
+      console.log(`Registered in ${claudeMd}`);
+      console.log(`Claude can now set up this MCP in any project.`);
+      console.log(`Start a new session and say: "setup the task manager"`);
+    }
   }
 
   installSkills();

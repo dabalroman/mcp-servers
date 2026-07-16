@@ -4,7 +4,10 @@
 
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { isStaleEntry, serializeMcpConfig, parseMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
+import {
+  isStaleEntry, serializeMcpConfig, parseMcpConfig, updateGlobalImport,
+  type McpConfig, type McpEntry
+} from './mcpConfig.js';
 
 // ── serializeMcpConfig ────────────────────────────────────────────────────────
 
@@ -103,5 +106,65 @@ describe('isStaleEntry — rewrite path detection', () => {
   test('returns false for empty args', () => {
     const e: McpEntry = { command: 'node', args: [] };
     assert.equal(isStaleEntry(e), false);
+  });
+});
+
+// ── updateGlobalImport ────────────────────────────────────────────────────────
+
+const SETUP = '/abs/path/mcp-servers/simple-task-manager/SETUP.md';
+const DEV_DOCS = '/abs/path/mcp-servers/simple-task-manager/CLAUDE.md';
+
+describe('updateGlobalImport — what --global writes into the global CLAUDE.md', () => {
+  test('appends the import to an empty file', () => {
+    const { content, action } = updateGlobalImport('', SETUP);
+    assert.equal(action, 'added');
+    assert.equal(content, `@${SETUP}\n`);
+  });
+
+  test('separates the import when the file has no trailing newline', () => {
+    const { content, action } = updateGlobalImport('# Rules\nBe nice.', SETUP);
+    assert.equal(action, 'added');
+    assert.equal(content, `# Rules\nBe nice.\n@${SETUP}\n`);
+  });
+
+  test('does not double up the newline when the file already ends with one', () => {
+    const { content } = updateGlobalImport('# Rules\n', SETUP);
+    assert.equal(content, `# Rules\n@${SETUP}\n`);
+  });
+
+  test('migrates an old CLAUDE.md import to SETUP.md in place', () => {
+    const existing = `# Rules\nBe nice.\n@${DEV_DOCS}\n`;
+    const { content, action } = updateGlobalImport(existing, SETUP);
+    assert.equal(action, 'migrated');
+    assert.equal(content, `# Rules\nBe nice.\n@${SETUP}\n`);
+    assert.ok(!content.includes(DEV_DOCS), 'the dev-docs import must be gone, not merely joined');
+  });
+
+  test('migrating rewrites in place and keeps surrounding content ordered', () => {
+    const existing = `# Top\n@${DEV_DOCS}\n# Bottom\n`;
+    const { content } = updateGlobalImport(existing, SETUP);
+    assert.equal(content, `# Top\n@${SETUP}\n# Bottom\n`);
+  });
+
+  test('is a no-op once the import already points at SETUP.md', () => {
+    const existing = `# Rules\n@${SETUP}\n`;
+    const { content, action } = updateGlobalImport(existing, SETUP);
+    assert.equal(action, 'unchanged');
+    assert.equal(content, existing);
+  });
+
+  test('is idempotent — a second --global run changes nothing', () => {
+    const first = updateGlobalImport(`@${DEV_DOCS}\n`, SETUP);
+    const second = updateGlobalImport(first.content, SETUP);
+    assert.equal(second.action, 'unchanged');
+    assert.equal(second.content, first.content);
+  });
+
+  test('an unrelated @import is left alone', () => {
+    const existing = `@/abs/path/other-tool/CLAUDE.md\n`;
+    const { content, action } = updateGlobalImport(existing, SETUP);
+    assert.equal(action, 'added');
+    assert.ok(content.includes('/abs/path/other-tool/CLAUDE.md'), 'must not hijack another import');
+    assert.ok(content.includes(`@${SETUP}`));
   });
 });

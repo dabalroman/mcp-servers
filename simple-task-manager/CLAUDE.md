@@ -10,26 +10,25 @@
 
 ---
 
-# simple-task-manager — Setup
-
-When the user asks to "set up the task manager", "install the task manager MCP", or similar:
-
-1. Run this command in the current project directory:
-   ```
-   npx tsx ~/.claude/mcp-servers/simple-task-manager/install.ts
-   ```
-   If an existing `.mcp.json` points at the old `server.js` path, the installer rewrites it to `dist/server.js` automatically.
-2. Tell the user to restart Claude Code to activate the MCP.
-
-Do not ask for confirmation — just run it.
-
----
-
 # simple-task-manager — Development
+
+**These are dev docs and they are deliberately not imported globally** — they load only when working
+in this repo. Content reaches an agent through three channels, and mixing them is a real cost:
+
+| Channel | Loads | Holds |
+|---|---|---|
+| `SETUP.md` | every session of every project (`@`-imported into `~/.claude/CLAUDE.md` by `install.ts --global`) | how to set the MCP up somewhere new — nothing else |
+| `instructions.ts` | on MCP connect | usage rules: task lifecycle, refinement-by-default |
+| `CLAUDE.md` (this file) | on demand, when working in this repo | everything about developing the package |
+
+`--global` used to import this file, so ~8k tokens of migration/pm2/tsconfig lore sat in every
+session of every unrelated project, competing with that project's own rules. Keep `SETUP.md` small:
+anything you are tempted to add there is almost certainly dev docs (belongs here) or a usage rule
+(belongs in `instructions.ts`).
 
 The package is **TypeScript** (strict mode, `noUncheckedIndexedAccess`). Source `.ts` files live at the package root; production runs from `dist/` (built by `tsc`).
 
-After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.ts`, `install.ts`, or `CLAUDE.md` — review `simple-task-manager/README.md` and update it to reflect the change. The README is the user-facing source of truth; keep it in sync.
+After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.ts`, `install.ts`, `SETUP.md`, or `CLAUDE.md` — review `simple-task-manager/README.md` and update it to reflect the change. The README is the user-facing source of truth; keep it in sync.
 
 ## File layout
 

@@ -35,6 +35,12 @@ git clone https://github.com/dabalroman/mcp-servers ~/.claude/mcp-servers
 cd ~/.claude/mcp-servers/simple-task-manager && npm install
 ```
 
+`npm install` runs the `prepare` script, which builds `dist/`, copies the slash-command skills into
+`~/.claude/commands`, and runs `install.ts --global` — adding a single `@…/SETUP.md` import to your
+`~/.claude/CLAUDE.md` so Claude knows how to set this MCP up in any project. `SETUP.md` is kept
+small on purpose: it loads in every session of every project. Re-run `npm install` after pulling to
+pick up skill and setup changes.
+
 
 ### Step 2 — Register in a project
 
