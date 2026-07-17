@@ -40,6 +40,16 @@ For each task in priority order (`getNext` ordering: bug > tool > feature > idea
 
 3b. **Generate summary**: produce a 2–3 line summary capturing: (1) what the task does, (2) the most important decision, (3) the user-visible outcome. Call `mcp__task-manager__update({ id, summary })` to persist it. The summary **must** be written before promoting to `plan` or `todo` — the server will reject the promotion if it is missing.
 
+3c. **Pros/Cons analysis (offer)**: Once the description is solid, ask the user: "Want me to run a quick pros/cons analysis before promoting?" If yes, spawn two Sonnet agents in parallel:
+   - **Advocate** (label: `advocate:#NN`): Enthusiastic about the change. Finds wins, surfaces benefits, identifies opportunities this unlocks. Prompt: "You are an optimistic senior engineer. Given this task description, argue FOR it: what problems does it solve, what doors does it open, what value does it deliver? Be specific and concrete. Under 200 words. Task: {title + description}"
+   - **Skeptic** (label: `skeptic:#NN`): Grumpy and adversarial. Finds hidden costs, maintenance burden, complexity creep, things that will bite back in 6 months. Prompt: "You are a grumpy senior architect who has been burned before. Given this task description, argue AGAINST it: what are the hidden costs, what technical debt does it introduce, what will break or become painful in 6 months, what's being overlooked? Be specific and brutally honest. Under 200 words. Task: {title + description}"
+   - Both agents use `model: "sonnet"`.
+   - Present both reports to the user. Then **continue the refinement session** — treat the skeptic's concerns as new input, just like user answers in step 2:
+     - Identify which concerns are real threats vs. speculative noise. State your assessment to the user.
+     - For real concerns: propose how the task approach should change to address them. Discuss with the user — argue your position, push back if you disagree with the skeptic, but take valid points seriously.
+     - Once aligned with the user, update the task description via `update()` so the spec itself reflects the decisions made (e.g. a different approach, a constraint, a scope reduction). Do NOT append a passive "Risks" section — the spec should read as if the concern was considered from the start.
+     - Then proceed to step 3b (summary) as normal.
+
 4. Once the description is specific enough that an implementer could work from it without guessing, confirm the summary looks good with the user, then ask "Promote #NN to **plan** or directly to **todo**?" Default to **todo** when unsure — `plan` is opt-in and only useful when the task needs a written implementation plan before coding starts. Call `mcp__task-manager__setStatus(id, 'plan')` or `mcp__task-manager__setStatus(id, 'todo')` only on confirmation. Note: `setStatus` will return an error if the summary is missing — write it first via `update({ id, summary: "..." })`.
 5. If the task is filed as `idea` but is now concretely scoped, ask whether to reclassify to `feature`.
 

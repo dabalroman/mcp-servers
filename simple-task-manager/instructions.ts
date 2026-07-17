@@ -15,14 +15,16 @@ You may pass status: 'todo' ONLY when one of these is true:
 If neither (a) nor (b) holds, omit the status field (or pass 'refinement') and let the next session do PM-style clarification. When in doubt, choose 'refinement' — it costs nothing and prevents premature implementation.
 
 ## Task lifecycle — always follow this order
-1. New tasks start in 'refinement'. When getNext returns a refinement task, act as project manager: ask the user clarifying questions, enrich the description via update(), then call setStatus(id, 'todo') to promote it. Do not start implementing a refinement task.
-2. (Optional) 'plan' is an opt-in step between 'refinement' and 'todo'. Use setStatus(id, 'plan') when the task needs a written plan before implementation. The lifecycle is: refinement → plan → todo → in_progress → done. Skip 'plan' for straightforward tasks.
-3. Call setStatus(id, 'in_progress') BEFORE starting any task in 'todo'.
-4. Call setStatus(id, 'done') AFTER the commit is made AND the user confirms. Never before.
+The strict sequence is: refinement → plan (optional) → todo → in_progress → done. Never skip statuses.
+
+1. **refinement**: Use /refine. Ask PM-style clarifying questions, enrich the description and summary via update(), then ask the user whether to promote to 'plan' or 'todo'. Do not implement.
+2. **plan** (optional): Enter Claude's plan mode. Write the implementation plan and upload it via update({ id, plan }). After the user approves the plan, ask to promote to 'todo' via setStatus(id, 'todo'). Do NOT set 'in_progress' here.
+3. **todo**: Ready for implementation. Set setStatus(id, 'in_progress') BEFORE writing any code. This transition happens only when you are about to implement — never during refinement or planning.
+4. **in_progress**: Implement, test, get user confirmation ("lgtm"). Only then commit and call setStatus(id, 'done').
 5. Use delete() only when the user explicitly asks to cancel or remove a task — not for completed work.
 
 ## Refinement — acting as project manager
-When a task is in 'refinement', your job is to surface it and ask targeted questions to clarify scope, acceptance criteria, edge cases, and technical constraints. Use update() to record the answers in the task description. Only promote to 'todo' (via setStatus) once the description is specific enough that an implementer could work from it without guessing. Ask for user confirmation before promoting.
+When a task is in 'refinement', your job is to surface it and ask targeted questions to clarify scope, acceptance criteria, edge cases, and technical constraints. Use update() to record the answers in the description and write a summary. Only promote to 'plan' or 'todo' (via setStatus) once the description is specific enough that an implementer could work from it without guessing. Ask for user confirmation before promoting. Default to 'todo' for straightforward tasks; use 'plan' when the task needs a written implementation plan first.
 
 ## Prioritization order for getNext
 bug > tool > feature > idea > other. Within each type: highest priority first, newest id first (FILO).
@@ -35,12 +37,12 @@ bug > tool > feature > idea > other. Within each type: highest priority first, n
 
 ## Development pipeline (mandatory, never skip steps)
 1. Schedule  — out-of-scope requests go to add(), do not implement inline. New tasks default to 'refinement'.
-2. Refine    — for refinement tasks: ask PM questions, update() description, setStatus('plan' or 'todo') when ready
-3. Plan      — opt-in: for features needing a written plan, setStatus('plan'), write a plan document, then setStatus('todo'). Skip for straightforward tasks.
-4. Implement — read relevant files before editing; no speculative changes beyond the task
+2. Refine    — /refine: ask PM questions, update() description + summary, promote to 'plan' or 'todo' on user confirmation.
+3. Plan      — opt-in: enter plan mode, write plan, upload via update({ id, plan }), promote to 'todo' on user approval. Do NOT set 'in_progress'.
+4. Implement — setStatus('in_progress') FIRST, then read files, code, test. Only transition to 'in_progress' when about to write code — never during refinement or planning.
 5. Build     — must succeed with zero errors
-6. Test      — verify end-to-end; wait for user confirmation before proceeding
-7. Commit    — stage files, write a clear commit message
+6. Test      — verify end-to-end; wait for user confirmation ("lgtm") before proceeding
+7. Commit    — stage files, write a clear commit message, setStatus('done')
 8. Next      — suggest what to do next via getNext or getAll
 
 ## Refs — structured relations with automatic mirroring
