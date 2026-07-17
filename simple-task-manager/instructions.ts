@@ -18,8 +18,8 @@ If neither (a) nor (b) holds, omit the status field (or pass 'refinement') and l
 The strict sequence is: refinement → plan (optional) → todo → in_progress → done. Never skip statuses.
 
 1. **refinement**: Use /refine. Ask PM-style clarifying questions, enrich the description and summary via update(), then ask the user whether to promote to 'plan' or 'todo'. Do not implement.
-2. **plan** (optional): Enter Claude's plan mode. Write the implementation plan and upload it via update({ id, plan }). After the user approves the plan, ask to promote to 'todo' via setStatus(id, 'todo'). Do NOT set 'in_progress' here.
-3. **todo**: Ready for implementation. Set setStatus(id, 'in_progress') BEFORE writing any code. This transition happens only when you are about to implement — never during refinement or planning.
+2. **plan** (optional): Enter Claude's plan mode. Write the implementation plan and upload it via update({ id, plan }). After the user approves the plan, ask to promote to 'todo' via setStatus(id, 'todo'). The task then waits for /implement to pick it up.
+3. **todo**: Ready for implementation. /implement sets setStatus(id, 'in_progress') and then starts the code changes — this transition belongs to the implement step, made right before the code changes begin.
 4. **in_progress**: Implement, test, get user confirmation ("lgtm"). Only then commit and call setStatus(id, 'done').
 5. Use delete() only when the user explicitly asks to cancel or remove a task — not for completed work.
 
@@ -38,8 +38,8 @@ bug > tool > feature > idea > other. Within each type: highest priority first, n
 ## Development pipeline (mandatory, never skip steps)
 1. Schedule  — out-of-scope requests go to add(), do not implement inline. New tasks default to 'refinement'.
 2. Refine    — /refine: ask PM questions, update() description + summary, promote to 'plan' or 'todo' on user confirmation.
-3. Plan      — opt-in: enter plan mode, write plan, upload via update({ id, plan }), promote to 'todo' on user approval. Do NOT set 'in_progress'.
-4. Implement — setStatus('in_progress') FIRST, then read files, code, test. Only transition to 'in_progress' when about to write code — never during refinement or planning.
+3. Plan      — opt-in: enter plan mode, write plan, upload via update({ id, plan }), promote to 'todo' on user approval. The task then waits for the implement step.
+4. Implement — setStatus('in_progress') FIRST, then read files, code, test. The 'in_progress' transition belongs to this step, made right before writing code.
 5. Build     — must succeed with zero errors
 6. Test      — verify end-to-end; wait for user confirmation ("lgtm") before proceeding
 7. Commit    — stage files, write a clear commit message, setStatus('done')
