@@ -36,7 +36,20 @@ For each task in priority order (`getNext` ordering: bug > tool > feature > idea
 
 1. Show the full task description.
 2. Ask targeted clarifying questions covering: scope, acceptance criteria, edge cases, technical constraints, file paths, out-of-scope items. Use `AskUserQuestion` for choice-style questions; ask in chat for open-ended ones.
-3. Use `mcp__task-manager__update` to fold the answers into the description. Lock the description with a "(locked YYYY-MM-DD)" marker on the section that contains the agreed decisions.
+3. Use `mcp__task-manager__update` to fold the answers into the description. Structure the description using the **Facts / Changes / Steps** format:
+
+   ```
+   Facts (current state)
+   - [bullet per relevant fact about how things work today]
+
+   Changes (what will be different)
+   - [bullet per concrete change this task introduces]
+
+   Steps (implementation order)
+   1. [numbered steps in the order an implementer should execute them]
+   ```
+
+   Each section is a flat list of single-line items — no paragraphs, no nested bullets, no prose. Facts describe the world as-is (file paths, existing APIs, data formats, constraints). Changes describe the target state delta. Steps are an ordered checklist an implementer can follow top-to-bottom. Lock sections with a "(locked YYYY-MM-DD)" marker once agreed.
 
 3b. **Generate summary**: produce a 2–3 line summary capturing: (1) what the task does, (2) the most important decision, (3) the user-visible outcome. Call `mcp__task-manager__update({ id, summary })` to persist it. The summary **must** be written before promoting to `plan` or `todo` — the server will reject the promotion if it is missing.
 
@@ -50,7 +63,18 @@ For each task in priority order (`getNext` ordering: bug > tool > feature > idea
      - Once aligned with the user, update the task description via `update()` so the spec itself reflects the decisions made (e.g. a different approach, a constraint, a scope reduction). Do NOT append a passive "Risks" section — the spec should read as if the concern was considered from the start.
      - Then proceed to step 3b (summary) as normal.
 
-4. Once the description is specific enough that an implementer could work from it without guessing, confirm the summary looks good with the user, then ask "Promote #NN to **plan** or directly to **todo**?" Default to **todo** when unsure — `plan` is opt-in and only useful when the task needs a written implementation plan before coding starts. Call `mcp__task-manager__setStatus(id, 'plan')` or `mcp__task-manager__setStatus(id, 'todo')` only on confirmation. Note: `setStatus` will return an error if the summary is missing — write it first via `update({ id, summary: "..." })`.
+4. **Confirmation summary**: Once the description and summary are written and all concerns are resolved, print a structured wrap-up before asking about promotion. Format:
+
+   ```
+   Task #NN is fully refined. [If skeptic ran: "The skeptic's concerns are resolved:"]
+   - [concern]: [resolution — one line each, e.g. "non-issue (verified X)", "handled with Y", "covered by task #MM", "not actionable (reason)"]
+
+   Promote #NN to plan or directly to todo? [Your recommendation with reasoning, e.g. "Given the scope (multiple files, pattern-establishing), I'd lean toward plan so we map out the implementation order before coding."]
+   ```
+
+   If the skeptic/advocate step was skipped (user declined), omit the concerns list and just state "Task #NN is fully refined." followed by the promotion question with recommendation.
+
+   Default to **todo** when unsure — `plan` is opt-in and only useful when the task needs a written implementation plan before coding starts. Call `mcp__task-manager__setStatus(id, 'plan')` or `mcp__task-manager__setStatus(id, 'todo')` only on confirmation. Note: `setStatus` will return an error if the summary is missing — write it first via `update({ id, summary: "..." })`.
 5. If the task is filed as `idea` but is now concretely scoped, ask whether to reclassify to `feature`.
 
 ### Step 4 — Move on
