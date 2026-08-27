@@ -34,7 +34,21 @@ Work through `todo` tasks one at a time by delegating each to a focused subagent
 
 Call `mcp__task-manager__setStatus(id, 'in_progress')` before doing anything else.
 
-### Step 4 — Implement
+### Step 4 — Break into a task list
+
+**Always do this before writing any code.** Read the task's plan (if it has one) and description, then decompose the work into concrete steps using `TaskCreate`. Each step should be a single reviewable unit — e.g. "Add `priority` column migration", "Update `getAll` handler to accept filter", "Add tests for priority filtering".
+
+Rules:
+- Create **all steps up front** before starting the first one. The user should see the full checklist immediately.
+- Each task gets a clear imperative `subject` and a short `description` saying what changes and where.
+- Set `activeForm` on each task (e.g. "Adding priority column migration") so the spinner is informative.
+- If the task-manager task has a `plan`, follow the plan's structure for the breakdown. If there is no plan, derive steps from the description.
+- Aim for 2–8 steps. A single-file typo fix still gets at least "Apply fix" + "Run verify". A large feature should not exceed ~8 — group related changes.
+- Mark each step `in_progress` (via `TaskUpdate`) right before you start it and `completed` right after.
+
+### Step 5 — Implement
+
+Work through the task list created in step 4, marking each step in_progress → completed as you go.
 
 **Classify the task first:**
 
@@ -50,17 +64,23 @@ A task is **complex** if it touches many files, requires design decisions, spans
 Read the relevant files, make the changes, add/update tests, run `npm run verify`. Stay in the main conversation — no subagent needed.
 
 **Complex task → spawn a focused subagent:**
-Pick the most specific type from the project's `CLAUDE.md` agent table (e.g. `voltagent-lang:react-specialist`, `voltagent-lang:node-specialist`, `voltagent-core-dev:fullstack-developer`). Pass the agent: task id, title, full description, relevant file paths and line numbers, fix approach, and these instructions: read files → implement → add/update tests → run `npm run verify` → report back with diff summary and verify result.
+Pick the most specific type from the project's `CLAUDE.md` agent table (e.g. `voltagent-lang:react-specialist`, `voltagent-lang:node-specialist`, `voltagent-core-dev:fullstack-developer`). Pass the agent: task id, title, full description, relevant file paths and line numbers, fix approach, the task list IDs for its steps, and these instructions: read files → implement → mark each TaskCreate step completed as you go → add/update tests → run `npm run verify` → report back with diff summary and verify result.
 
-### Step 5 — Relay to user
+### Debugging during implementation
+
+When a verify run fails or behaviour is unexpected and the root cause isn't obvious from the error alone:
+- **Ask the user to add temporary debug logs** (e.g. `console.log` at key decision points) and re-run. This gives you live feedback from the actual code path and is faster than guessing. Frame the request concretely: which file, which line, what to log.
+- Remove all debug logs before marking the step completed.
+
+### Step 6 — Relay to user
 
 Summarise what changed and the verify result. Tell the user exactly what to test (golden path + edge cases from the task description).
 
-### Step 6 — Wait for confirmation
+### Step 7 — Wait for confirmation
 
 **Stop here.** Do not commit. Do not move to the next task. Wait for the user to confirm the change works (e.g. "lgtm", "looks good", "ship it"). If the user reports a problem, fix it inline (simple) or spawn a follow-up agent (complex).
 
-### Step 7 — Commit and close
+### Step 8 — Commit and close
 
 Once the user confirms:
 
