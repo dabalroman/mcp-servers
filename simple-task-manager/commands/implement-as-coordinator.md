@@ -99,5 +99,7 @@ When every queued task is committed:
 
 ## Step 8 — Report
 
+**Before writing the final report, reconcile statuses**: `getById` every task that entered the queue and confirm each committed one is `done` in the MCP (agents set `in_progress` themselves and it is easy to close a task's neighbours but not the task). The report must not claim a task is finished while the tracker still shows it open.
+
 After each landed task: one short update (commit hash, what was verified, anything corrected).
 At the end: the commits table, deploy results, review findings and their fixes, what was skipped and why, the assumptions you made in the user's place, and — only now — any question you held back.
