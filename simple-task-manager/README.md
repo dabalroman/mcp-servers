@@ -98,7 +98,7 @@ It will try to write and run tests to ensure code quality.
 - `"Go on, fix that data-fetching bug"`
 
 ### /implement-as-coordinator
-Use this skill to hand a whole queue to Claude as a supervisor you can walk away from. Claude orders the tasks by file overlap and dependency, runs one Sonnet subagent per task through `/implement` (disjoint tasks in parallel), independently re-checks every hand-back, owns every build, commit and deploy (build all targets, one commit per task, on the current branch), then code-reviews the whole range and fixes what it finds. Questions are held until the final report.
+Use this skill to hand a whole queue to Claude as a supervisor you can walk away from. Claude orders the tasks by file overlap and dependency, runs one subagent per task through `/implement` (Sonnet for well-scoped work, Opus for new architecture or hazardous rewrites, picked per task; disjoint tasks in parallel), independently re-checks every hand-back, owns every build and deploy (build all targets), then code-reviews the whole change and fixes what it finds, all uncommitted. Questions are held until the final report, which asks for approval; only then does it commit, one commit per feature on the current branch.
 - `"/implement-as-coordinator #45 #50 #43"` — those tasks, in the order Claude decides
 - `"/implement-as-coordinator <scope>"` or no argument — every `todo` task in the scope / overall
 
