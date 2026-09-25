@@ -36,6 +36,7 @@ For each task in priority order (`getNext` ordering: bug > tool > feature > idea
 
 1. Show the full task description.
 2. Ask targeted clarifying questions covering: scope, acceptance criteria, edge cases, technical constraints, file paths, out-of-scope items. Use `AskUserQuestion` for choice-style questions; ask in chat for open-ended ones.
+   - **Explain the reasoning first.** Before every round of questions, write in chat, per question: what the term or concept refers to, which fact from the task or codebase raises the question, and how each answer changes the spec. Only then call `AskUserQuestion`. Never ask a question whose context the user has not yet seen.
 3. Use `mcp__task-manager__update` to fold the answers into the description. Structure the description using the **Facts / Changes / Steps** format:
 
    ```
