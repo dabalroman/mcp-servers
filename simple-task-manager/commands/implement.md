@@ -36,7 +36,7 @@ Call `mcp__task-manager__setStatus(id, 'in_progress')` before doing anything els
 
 ### Step 4 — Break into a task list
 
-**Always do this before writing any code.** Read the task's plan (if it has one) and description, then decompose the work into concrete steps using `TaskCreate`. Each step should be a single reviewable unit — e.g. "Add `priority` column migration", "Update `getAll` handler to accept filter", "Add tests for priority filtering".
+**Always do this before writing any code.** Read the task's description, plan (if it has one) and notes (if any) from `getById` — notes are as authoritative as the description, and the newest statement wins on conflict (newer note > older note > description), then decompose the work into concrete steps using `TaskCreate`. Each step should be a single reviewable unit — e.g. "Add `priority` column migration", "Update `getAll` handler to accept filter", "Add tests for priority filtering".
 
 Rules:
 - Create **all steps up front** before starting the first one. The user should see the full checklist immediately.

@@ -32,11 +32,11 @@ Tasks named later in the conversation ("add 46 to your queue") join the live que
 
 ## Step 1 — Build the queue
 
-1. Fetch every task (`getById`). Read **description, summary AND plan** — refinement often lives in `plan`.
+1. Fetch every task (`getById`). Read **description, summary, plan AND notes** — refinement often lives in `plan` or `notes`. Notes are as authoritative as the description; the newest statement wins on conflict.
 2. **Status gate.**
    - `todo` → queue it.
    - `refinement` → check first whether it is already refined in substance (locked Facts/Changes/Steps, a `plan`, or decisions the user just gave in this conversation). If so, promote with `setStatus(todo)`. If not, refine it yourself from the code and the conversation — the user said not to ask — writing your decisions into the **`plan` field**, then promote. Put only genuinely unresolvable questions in the final report and skip that task.
-   - **Never overwrite a refined description.** `update({description})` replaces the whole thing; if the task already carries locked decisions, add your notes to `plan` instead. If your note conflicts with a locked decision, the locked decision wins — say so in your note.
+   - **Never overwrite a refined description.** `update({description})` replaces the whole thing; if the task already carries locked decisions, record yours with `addNote({ taskId, body })` instead. If your note conflicts with a locked decision, the locked decision wins — say so in your note.
 3. **Order by file overlap and dependency**, not by id:
    - Two tasks that edit the same files run **sequentially**; tasks with disjoint file sets may run **in parallel** (max ~2 at once — each costs a full agent context).
    - A task whose verification depends on another task's fix (e.g. a regression harness that must be made trustworthy first) runs after it.

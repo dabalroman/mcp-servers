@@ -32,6 +32,16 @@ export type Task = {
   description: string;
   plan?: string;
   refs?: Ref[];
+  notes?: Note[];
+  noteCount?: number;
+  created_at: string;
+  updated_at: string;
+};
+
+export type Note = {
+  id: number;
+  task_id: number;
+  body: string;
   created_at: string;
   updated_at: string;
 };
@@ -305,6 +315,9 @@ export type Store = {
   getScopes(): ScopeEntry[];
   getById(id: number): Task | null;
   getAll(status?: StatusFilter): Task[];
+  addNote(taskId: number, body: string): Note | null;
+  updateNote(noteId: number, body: string): Note | null;
+  deleteNote(noteId: number): boolean;
   close(): void;
 };
 
@@ -362,6 +375,12 @@ export function createStore(dbPath: string): Store {
     WHERE id = ?
   `);
   const stmtSetTaskStatus   = db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`);
+  const stmtTouchTask       = db.prepare(`UPDATE tasks SET updated_at = datetime('now') WHERE id = ?`);
+  const stmtInsertNote      = db.prepare('INSERT INTO notes (task_id, body) VALUES (?, ?)');
+  const stmtSelectNote      = db.prepare('SELECT * FROM notes WHERE id = ?');
+  const stmtNotesFor        = db.prepare('SELECT * FROM notes WHERE task_id = ? ORDER BY created_at ASC, id ASC');
+  const stmtUpdateNote      = db.prepare(`UPDATE notes SET body = ?, updated_at = datetime('now') WHERE id = ?`);
+  const stmtDeleteNote      = db.prepare('DELETE FROM notes WHERE id = ?');
 
   function readRefsFor(id: number): Ref[] {
     return (stmtRefsFrom.all(id) as RefRow[]).map(refRowToObj);
@@ -370,7 +389,10 @@ export function createStore(dbPath: string): Store {
   function readTask(id: number): Task | null {
     const row = stmtSelectTask.get(id) as TaskRow | undefined;
     if (!row) return null;
-    return rowToTask(row, readRefsFor(id));
+    const task = rowToTask(row, readRefsFor(id));
+    const notes = stmtNotesFor.all(id) as Note[];
+    if (notes.length) task.notes = notes;
+    return task;
   }
 
   function readAllTasks(): Task[] {
@@ -394,7 +416,16 @@ export function createStore(dbPath: string): Store {
       arr.push(refRowToObj(r));
       refsByFrom.set(r.from_id, arr);
     }
-    return rows.map((row) => rowToTask(row, refsByFrom.get(row.id) ?? []));
+    const countRows = db.prepare(
+      `SELECT task_id, COUNT(*) AS n FROM notes WHERE task_id IN (${placeholders}) GROUP BY task_id`
+    ).all(...ids) as { task_id: number; n: number }[];
+    const noteCounts = new Map(countRows.map((r) => [r.task_id, r.n]));
+    return rows.map((row) => {
+      const task = rowToTask(row, refsByFrom.get(row.id) ?? []);
+      const n = noteCounts.get(row.id);
+      if (n) task.noteCount = n;
+      return task;
+    });
   }
 
   function getValidIds(): Set<number> {
@@ -525,7 +556,7 @@ export function createStore(dbPath: string): Store {
     return db.transaction(() => {
       const existing = stmtSelectTask.get(id);
       if (!existing) return false;
-      // FK ON DELETE CASCADE handles refs in both directions.
+      // FK ON DELETE CASCADE handles refs in both directions and notes.
       stmtDeleteTask.run(id);
       return true;
     })();
@@ -705,6 +736,43 @@ export function createStore(dbPath: string): Store {
       });
   }
 
+  function validNoteBody(body: string): string {
+    const trimmed = String(body ?? '').trim();
+    if (!trimmed) throw new Error('Validation failed: note body must not be empty or whitespace-only.');
+    return trimmed;
+  }
+
+  function addNote(taskId: number, body: string): Note | null {
+    const trimmed = validNoteBody(body);
+    return db.transaction(() => {
+      if (!stmtSelectTask.get(taskId)) return null;
+      const info = stmtInsertNote.run(taskId, trimmed);
+      stmtTouchTask.run(taskId);
+      return stmtSelectNote.get(Number(info.lastInsertRowid)) as Note;
+    })();
+  }
+
+  function updateNote(noteId: number, body: string): Note | null {
+    const trimmed = validNoteBody(body);
+    return db.transaction(() => {
+      const existing = stmtSelectNote.get(noteId) as Note | undefined;
+      if (!existing) return null;
+      stmtUpdateNote.run(trimmed, noteId);
+      stmtTouchTask.run(existing.task_id);
+      return stmtSelectNote.get(noteId) as Note;
+    })();
+  }
+
+  function deleteNote(noteId: number): boolean {
+    return db.transaction(() => {
+      const existing = stmtSelectNote.get(noteId) as Note | undefined;
+      if (!existing) return false;
+      stmtDeleteNote.run(noteId);
+      stmtTouchTask.run(existing.task_id);
+      return true;
+    })();
+  }
+
   function close(): void {
     db.close();
   }
@@ -726,6 +794,9 @@ export function createStore(dbPath: string): Store {
     getScopes,
     getById,
     getAll,
+    addNote,
+    updateNote,
+    deleteNote,
     close,
   };
 }

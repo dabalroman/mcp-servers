@@ -21,6 +21,7 @@ const MIGRATION_NAMES = [
   '20260514120000_add-plan-field',
   '20260519000000_drop-meta-counter-autoincrement-tasks',
   '20260519010000_add-plan-status',
+  '20261012120000_add-notes',
 ];
 
 let dir: string;
@@ -771,5 +772,99 @@ describe('summary — store always returns complete data', () => {
     const ok = store.setStatus(id, 'todo');
     assert.equal(ok, true);
     assert.equal(store.getById(id)?.status, 'todo');
+  });
+});
+
+describe('notes', () => {
+  function ageTask(id: number): void {
+    store.db.prepare(`UPDATE tasks SET updated_at = '2000-01-01 00:00:00' WHERE id = ?`).run(id);
+  }
+
+  test('addNote returns the note and getById lists notes in creation order', () => {
+    const { id } = makeTask();
+    const first = store.addNote(id, '  first  ');
+    assert.ok(first);
+    assert.equal(first.task_id, id);
+    assert.equal(first.body, 'first');
+    store.addNote(id, 'second');
+    assert.deepEqual(store.getById(id)?.notes?.map((n) => n.body), ['first', 'second']);
+  });
+
+  test('same created_at falls back to id order', () => {
+    const { id } = makeTask();
+    const a = store.addNote(id, 'a')!;
+    const b = store.addNote(id, 'b')!;
+    store.db.prepare(`UPDATE notes SET created_at = '2001-01-01 00:00:00'`).run();
+    store.db.prepare(`UPDATE notes SET created_at = '2000-01-01 00:00:00' WHERE id = ?`).run(b.id);
+    assert.deepEqual(store.getById(id)?.notes?.map((n) => n.id), [b.id, a.id]);
+    store.db.prepare(`UPDATE notes SET created_at = '2000-01-01 00:00:00'`).run();
+    assert.deepEqual(store.getById(id)?.notes?.map((n) => n.id), [a.id, b.id]);
+  });
+
+  test('updateNote replaces the body', () => {
+    const { id } = makeTask();
+    const note = store.addNote(id, 'old')!;
+    const updated = store.updateNote(note.id, 'new');
+    assert.equal(updated?.body, 'new');
+    assert.equal(store.getById(id)?.notes?.[0]?.body, 'new');
+  });
+
+  test('deleteNote removes the note', () => {
+    const { id } = makeTask();
+    const note = store.addNote(id, 'x')!;
+    assert.equal(store.deleteNote(note.id), true);
+    assert.equal(store.getById(id)?.notes, undefined);
+  });
+
+  test('empty or whitespace-only body throws', () => {
+    const { id } = makeTask();
+    assert.throws(() => store.addNote(id, '   '), /must not be empty/);
+    const note = store.addNote(id, 'x')!;
+    assert.throws(() => store.updateNote(note.id, ''), /must not be empty/);
+  });
+
+  test('unknown ids return null / false', () => {
+    assert.equal(store.addNote(999, 'x'), null);
+    assert.equal(store.updateNote(999, 'x'), null);
+    assert.equal(store.deleteNote(999), false);
+  });
+
+  test('every note mutation bumps the task updated_at', () => {
+    const { id } = makeTask();
+    ageTask(id);
+    const note = store.addNote(id, 'x')!;
+    assert.notEqual(store.getById(id)?.updated_at, '2000-01-01 00:00:00');
+    ageTask(id);
+    store.updateNote(note.id, 'y');
+    assert.notEqual(store.getById(id)?.updated_at, '2000-01-01 00:00:00');
+    ageTask(id);
+    store.deleteNote(note.id);
+    assert.notEqual(store.getById(id)?.updated_at, '2000-01-01 00:00:00');
+  });
+
+  test('deleting a task cascades its notes', () => {
+    const { id } = makeTask();
+    store.addNote(id, 'x');
+    store.addNote(id, 'y');
+    store.delete(id);
+    const { n } = store.db.prepare('SELECT COUNT(*) AS n FROM notes WHERE task_id = ?').get(id) as { n: number };
+    assert.equal(n, 0);
+  });
+
+  test('list reads carry noteCount but no notes', () => {
+    const { id } = makeTask({ scope: 's' });
+    store.addNote(id, 'x');
+    store.addNote(id, 'y');
+    for (const t of [store.getAll()[0], store.getByScope('s')[0], store.getNext(), store.load().active[0]]) {
+      assert.equal(t?.noteCount, 2);
+      assert.equal(t?.notes, undefined);
+    }
+  });
+
+  test('task without notes has neither notes nor noteCount', () => {
+    const { id } = makeTask();
+    assert.equal(store.getById(id)?.notes, undefined);
+    assert.equal(store.getById(id)?.noteCount, undefined);
+    assert.equal(store.getAll()[0]?.noteCount, undefined);
   });
 });

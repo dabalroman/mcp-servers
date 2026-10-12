@@ -239,6 +239,11 @@ These are called by Claude — you don't type them yourself.
 |---|---|
 | `add` | Schedule a new task. |
 | `update` | Edit any field in place. |
+| `replace` | Swap one exact, unique snippet in description or plan without re-sending the field. |
+| `uploadPlan` | Store an absolute-path `.md` file as a task's plan; the server reads it, so plan text never passes through a tool call. |
+| `addNote` | Append a note to a task without re-sending the description. |
+| `updateNote` | Replace one note's text. |
+| `deleteNote` | Remove one note. |
 | `setStatus` | Move a task through `refinement` → `plan` (opt-in) → `todo` → `in_progress` → `done`. |
 | `delete` | Permanently remove a task. |
 
@@ -248,7 +253,7 @@ These are called by Claude — you don't type them yourself.
 |---|---|
 | `getNext` | The single recommended next task. |
 | `getAll` | Tasks grouped by type. Default: non-done. |
-| `getById` | One task by number. |
+| `getById` | One task by number, including its notes. |
 | `getByType` | Tasks of one type. Default: non-done. |
 | `getByScope` | Tasks tagged with a scope. Default: non-done. |
 | `getScopes` | All scope tags with counts. |
@@ -275,6 +280,15 @@ Examples: `getAll({ status: "done" })` to see archived work; `getByScope({ scope
 | `health` | Sanity-check the setup; also reports the UI URL. |
 | `ui-start` | Start the UI server (idempotent). |
 | `ui-stop` | Stop the UI server. |
+
+### Notes — incremental additions to a task
+
+A task can carry any number of notes. Use them for decisions, findings, and spec changes made after refinement — not as a scratchpad or progress log.
+
+- `getById` returns `notes` (oldest first); list tools return only `noteCount`.
+- Notes are as authoritative as the description. **The newest statement wins**: a newer note overrides an older one, and any note overrides the description.
+- Adding, editing, or deleting a note bumps the task's `updated_at`. Deleting a task deletes its notes.
+- `/refine` folds notes back into the description and then deletes them.
 
 ### Refs — structured relations with automatic mirroring
 

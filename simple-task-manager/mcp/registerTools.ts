@@ -16,11 +16,18 @@ import {
 import {
   handleAdd,
   handleUpdate,
+  handleReplace,
+  handleUploadPlan,
+  handleAddNote,
+  handleUpdateNote,
+  handleDeleteNote,
   handleSetStatus,
   handleDelete,
   handleUiStart,
   handleUiStop,
 } from './mutationHandlers.js';
+
+const NOTES_RULE = 'Notes are as authoritative as the description; on conflict the newest statement wins (a newer note overrides an older note, any note overrides the description). Use notes for decisions, findings and spec changes made after refinement — not as a scratchpad or progress log.';
 
 const statusParam = z.enum(['refinement', 'plan', 'todo', 'in_progress', 'done', 'open']).optional()
   .describe('Filter by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a specific status (incl. "done") for exact match.');
@@ -61,7 +68,7 @@ export function registerTools(server: McpServer, store: Store): void {
   };
   server.tool(
     'getByType',
-    'Get tasks of a specific type — use for "show me all bugs", "list features", "what ideas do we have?". Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Sorted by priority desc then id desc. When a task has a summary, description is omitted — call getById for the full task.',
+    'Get tasks of a specific type — use for "show me all bugs", "list features", "what ideas do we have?". Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Sorted by priority desc then id desc. When a task has a summary, description is omitted; tasks with notes show noteCount instead of the bodies — call getById for the full task.',
     getByTypeSchema,
     async (args: z.infer<z.ZodObject<typeof getByTypeSchema>>): Promise<MCPContent> => handleGetByType(store, args)
   );
@@ -82,7 +89,7 @@ export function registerTools(server: McpServer, store: Store): void {
   };
   server.tool(
     'getNext',
-    'Get the single next actionable task — use for "what should I do next?", "what\'s next?", or any recommendation request. Sort order: in_progress first (resume interrupted work), then refinement (needs PM clarification), then plan (awaiting plan write), then todo, then highest priority, then newest id (FILO). Considers refinement, plan, todo, and in_progress tasks. Optional type filter narrows to one category. When no filter is given, apply the project prioritization order: bug > tool > feature > idea > other. IMPORTANT: if the returned task has status "refinement", do NOT start implementing — instead ask the user clarifying questions to refine the description, then promote to "todo" via setStatus. When a task has a summary, description is omitted — call getById for the full task.',
+    'Get the single next actionable task — use for "what should I do next?", "what\'s next?", or any recommendation request. Sort order: in_progress first (resume interrupted work), then refinement (needs PM clarification), then plan (awaiting plan write), then todo, then highest priority, then newest id (FILO). Considers refinement, plan, todo, and in_progress tasks. Optional type filter narrows to one category. When no filter is given, apply the project prioritization order: bug > tool > feature > idea > other. IMPORTANT: if the returned task has status "refinement", do NOT start implementing — instead ask the user clarifying questions to refine the description, then promote to "todo" via setStatus. When a task has a summary, description is omitted; tasks with notes show noteCount instead of the bodies — call getById for the full task.',
     getNextSchema,
     async (args: z.infer<z.ZodObject<typeof getNextSchema>>): Promise<MCPContent> => handleGetNext(store, args)
   );
@@ -91,7 +98,7 @@ export function registerTools(server: McpServer, store: Store): void {
   const getAllSchema = { status: statusParam };
   server.tool(
     'getAll',
-    'Get tasks grouped by type — use for "show me everything", "list all tasks", "full backlog". Groups appear in type order: bug, feature, idea, tool, other. Each group sorted by priority desc then id desc. Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Prefer getNext for a single recommendation; prefer getByType when the user asks about one specific type. When a task has a summary, description is omitted — call getById for the full task.',
+    'Get tasks grouped by type — use for "show me everything", "list all tasks", "full backlog". Groups appear in type order: bug, feature, idea, tool, other. Each group sorted by priority desc then id desc. Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Prefer getNext for a single recommendation; prefer getByType when the user asks about one specific type. When a task has a summary, description is omitted; tasks with notes show noteCount instead of the bodies — call getById for the full task.',
     getAllSchema,
     async (args: z.infer<z.ZodObject<typeof getAllSchema>>): Promise<MCPContent> => handleGetAll(store, args)
   );
@@ -100,7 +107,7 @@ export function registerTools(server: McpServer, store: Store): void {
   const getByIdSchema = { id: z.coerce.number().int().positive().describe('The numeric task ID to look up') };
   server.tool(
     'getById',
-    'Get a single task by its numeric ID — returns the full task including both summary (if set) and description. Other list methods omit description when summary is present — use this when you need the full body. Use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Returns an error listing valid IDs if not found.',
+    'Get a single task by its numeric ID — returns the full task including both summary (if set) and description, plus notes (oldest first) when the task has any. Other list methods omit description when summary is present and show only noteCount — use this when you need the full body. Notes are as authoritative as the description; newest statement wins on conflict. Use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Returns an error listing valid IDs if not found.',
     getByIdSchema,
     async (args: z.infer<z.ZodObject<typeof getByIdSchema>>): Promise<MCPContent> => handleGetById(store, args)
   );
@@ -128,15 +135,76 @@ export function registerTools(server: McpServer, store: Store): void {
     summary: z.string().nullable().optional()
       .describe('Short 2–3 line summary of the task. Pass null or empty string to clear it. Should capture: what the task does, the most important decision, and the user-visible outcome.'),
     plan: z.string().nullable().optional()
-      .describe('New plan content (markdown). Pass null or empty string to clear.'),
+      .describe('New plan content (markdown). Pass null or empty string to clear. For plans saved in a .md file, prefer uploadPlan.'),
     refs: refsSchema.nullable()
       .describe('Full replacement list of related-task references, or null / empty array to clear all refs. Each entry: { id, relation? } where relation is one of the canonical values. Defaults to "relates to". The server automatically updates the inverse on each referenced task — only specify one side. This replaces the existing refs list entirely — include all refs you want to keep.'),
   };
   server.tool(
     'update',
-    'Patch any fields of an existing task in place — use when the user asks to edit, rename, reprioritize, retype, rescope, or update the refs/description of a task. Only the fields you provide are changed; omitted fields keep their current values. Returns { success: true, task } with the full updated task, or { success: false, error }. Refs pointing to nonexistent IDs or self-references are silently dropped.',
+    'Patch any fields of an existing task in place — use when the user asks to edit, rename, reprioritize, retype, rescope, or update the refs/description of a task. Only the fields you provide are changed; omitted fields keep their current values. Returns { success: true, task } with the updated task (plan and note bodies omitted, noteCount instead — use getById), or { success: false, error }. Refs pointing to nonexistent IDs or self-references are silently dropped.',
     updateSchema,
     async (args: z.infer<z.ZodObject<typeof updateSchema>>): Promise<MCPContent> => handleUpdate(store, args)
+  );
+
+  // ── replace ────────────────────────────────────────────────────────────────────
+  const replaceSchema = {
+    id: z.coerce.number().int().positive().describe('Task ID to edit'),
+    field: z.enum(['description', 'plan']).default('description').describe('Which field to edit. Default: description.'),
+    anchor: z.string().min(1).describe('Exact snippet to find — case- and whitespace-sensitive, no regex. Must occur exactly once in the field; extend it with surrounding text if it is not unique.'),
+    replace_with: z.string().describe('Text to put in place of the anchor. Empty string deletes the anchor.'),
+  };
+  server.tool(
+    'replace',
+    'Surgical edit of a task\'s description or plan: swaps one exact, unique snippet for new text without re-sending the whole field. Prefer over update for small edits. The anchor must match exactly once — 0 matches or 2+ matches return an error (with the count) and nothing is written. Returns a slim { success, id, field } without the task body — call getById if you need to see the result.',
+    replaceSchema,
+    async (args: z.infer<z.ZodObject<typeof replaceSchema>>): Promise<MCPContent> => handleReplace(store, args)
+  );
+
+  // ── uploadPlan ─────────────────────────────────────────────────────────────────
+  const uploadPlanSchema = {
+    id: z.coerce.number().int().positive().describe('Task ID to store the plan on'),
+    path: z.string().min(1).describe('Absolute path to a .md file'),
+  };
+  server.tool(
+    'uploadPlan',
+    "Store a markdown file as a task's plan. The server reads the file, so you don't paste plan text into update(). Use this whenever the plan already exists as a .md file (e.g. the plan-mode file). Re-uploading replaces the stored plan; the DB copy is canonical and the file is left on disk. Returns { success, id, bytes }; read the plan back with getById.",
+    uploadPlanSchema,
+    async (args: z.infer<z.ZodObject<typeof uploadPlanSchema>>): Promise<MCPContent> => handleUploadPlan(store, args)
+  );
+
+  // ── addNote ────────────────────────────────────────────────────────────────────
+  const addNoteSchema = {
+    taskId: z.coerce.number().int().positive().describe('Task ID to attach the note to'),
+    body: z.string().min(1).describe('Note text. Must not be empty or whitespace-only.'),
+  };
+  server.tool(
+    'addNote',
+    `Append a note to a task without re-sending the description. Prefer this over update({ description }) for incremental additions. ${NOTES_RULE} Bumps the task's updated_at. Returns { success, note }.`,
+    addNoteSchema,
+    async (args: z.infer<z.ZodObject<typeof addNoteSchema>>): Promise<MCPContent> => handleAddNote(store, args)
+  );
+
+  // ── updateNote ─────────────────────────────────────────────────────────────────
+  const updateNoteSchema = {
+    noteId: z.coerce.number().int().positive().describe('Note ID — from the notes array returned by getById'),
+    body: z.string().min(1).describe('Replacement note text. Must not be empty or whitespace-only.'),
+  };
+  server.tool(
+    'updateNote',
+    `Replace the body of an existing note. ${NOTES_RULE} Bumps the parent task's updated_at. Returns { success, note }.`,
+    updateNoteSchema,
+    async (args: z.infer<z.ZodObject<typeof updateNoteSchema>>): Promise<MCPContent> => handleUpdateNote(store, args)
+  );
+
+  // ── deleteNote ─────────────────────────────────────────────────────────────────
+  const deleteNoteSchema = {
+    noteId: z.coerce.number().int().positive().describe('Note ID to remove'),
+  };
+  server.tool(
+    'deleteNote',
+    "Permanently remove a note — e.g. after /refine has folded it into the description. Bumps the parent task's updated_at. Returns { success }.",
+    deleteNoteSchema,
+    async (args: z.infer<z.ZodObject<typeof deleteNoteSchema>>): Promise<MCPContent> => handleDeleteNote(store, args)
   );
 
   // ── getByScope ────────────────────────────────────────────────────────────────
@@ -146,7 +214,7 @@ export function registerTools(server: McpServer, store: Store): void {
   };
   server.tool(
     'getByScope',
-    'Get tasks tagged with a specific scope — use when the user asks "what tasks are there for svg-path-joiner?" or "show me everything related to eink-frame". Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Sorted by priority desc then id desc. Scope values are set via add or update. Empty results may indicate a wrong/typo\'d scope; use getScopes to discover valid values. When a task has a summary, description is omitted — call getById for the full task.',
+    'Get tasks tagged with a specific scope — use when the user asks "what tasks are there for svg-path-joiner?" or "show me everything related to eink-frame". Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Sorted by priority desc then id desc. Scope values are set via add or update. Empty results may indicate a wrong/typo\'d scope; use getScopes to discover valid values. When a task has a summary, description is omitted; tasks with notes show noteCount instead of the bodies — call getById for the full task.',
     getByScopeSchema,
     async (args: z.infer<z.ZodObject<typeof getByScopeSchema>>): Promise<MCPContent> => handleGetByScope(store, args)
   );
@@ -183,7 +251,7 @@ export function registerTools(server: McpServer, store: Store): void {
   const deleteSchema = { id: z.coerce.number().int().positive().describe('The numeric task ID to permanently remove') };
   server.tool(
     'delete',
-    'Permanently remove a task from the database. Use ONLY when the user explicitly asks to delete, remove, drop, or cancel a task — not when work is finished (use setStatus(done) for that). Cascade-removes refs from/to this task. This is irreversible.',
+    'Permanently remove a task from the database. Use ONLY when the user explicitly asks to delete, remove, drop, or cancel a task — not when work is finished (use setStatus(done) for that). Cascade-removes refs from/to this task and its notes. This is irreversible.',
     deleteSchema,
     async (args: z.infer<z.ZodObject<typeof deleteSchema>>): Promise<MCPContent> => handleDelete(store, args)
   );

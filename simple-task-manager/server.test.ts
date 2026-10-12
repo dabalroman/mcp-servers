@@ -10,7 +10,7 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createStore, type AddInput, type Store } from './tasks.js';
@@ -27,6 +27,11 @@ import {
 import {
   handleAdd,
   handleUpdate,
+  handleReplace,
+  handleUploadPlan,
+  handleAddNote,
+  handleUpdateNote,
+  handleDeleteNote,
   handleSetStatus,
   handleDelete,
   handleUiStart,
@@ -323,6 +328,133 @@ describe('setStatus handler — summary enforcement', () => {
   });
 });
 
+describe('replace handler', () => {
+  test('single match in description is replaced; ack has no task body', () => {
+    const { id } = addTask({ description: 'alpha beta gamma' });
+    const resp = handleReplace(store, { id, field: 'description', anchor: 'beta', replace_with: 'delta' });
+    assert.ok(!resp.isError);
+    assert.deepEqual(decode(resp), { success: true, id, field: 'description' });
+    assert.equal(store.getById(id)!.description, 'alpha delta gamma');
+  });
+
+  test('single match in plan is replaced', () => {
+    const { id } = addTask({ plan: 'step one\nstep two' });
+    const resp = handleReplace(store, { id, field: 'plan', anchor: 'step two', replace_with: 'step 2' });
+    assert.ok(!resp.isError);
+    assert.equal(store.getById(id)!.plan, 'step one\nstep 2');
+  });
+
+  test('empty replace_with deletes the anchor', () => {
+    const { id } = addTask({ description: 'keep REMOVE keep' });
+    handleReplace(store, { id, field: 'description', anchor: 'REMOVE ', replace_with: '' });
+    assert.equal(store.getById(id)!.description, 'keep keep');
+  });
+
+  test('0 matches errors and leaves field unchanged', () => {
+    const { id } = addTask({ description: 'alpha' });
+    const resp = handleReplace(store, { id, field: 'description', anchor: 'ALPHA', replace_with: 'x' });
+    assert.ok(resp.isError);
+    assert.ok((decode(resp).error as string).includes('not found'));
+    assert.equal(store.getById(id)!.description, 'alpha');
+  });
+
+  test('2 matches errors with count and leaves field unchanged', () => {
+    const { id } = addTask({ description: 'foo bar foo' });
+    const resp = handleReplace(store, { id, field: 'description', anchor: 'foo', replace_with: 'x' });
+    assert.ok(resp.isError);
+    assert.ok((decode(resp).error as string).includes('matched 2 times'));
+    assert.equal(store.getById(id)!.description, 'foo bar foo');
+  });
+
+  test('overlapping matches count as 2', () => {
+    const { id } = addTask({ description: 'aaa' });
+    const resp = handleReplace(store, { id, field: 'description', anchor: 'aa', replace_with: 'x' });
+    assert.ok(resp.isError);
+    assert.ok((decode(resp).error as string).includes('matched 2 times'));
+  });
+
+  test('task with no plan errors as not found', () => {
+    const { id } = addTask();
+    const resp = handleReplace(store, { id, field: 'plan', anchor: 'x', replace_with: 'y' });
+    assert.ok(resp.isError);
+    assert.ok((decode(resp).error as string).includes('not found'));
+  });
+
+  test('unknown id errors', () => {
+    const resp = handleReplace(store, { id: 9999, field: 'description', anchor: 'x', replace_with: 'y' });
+    assert.ok(resp.isError);
+    assert.ok((decode(resp).error as string).includes('Task #9999 not found'));
+  });
+
+  test('$& in replace_with is inserted literally', () => {
+    const { id } = addTask({ description: 'price: X' });
+    handleReplace(store, { id, field: 'description', anchor: 'X', replace_with: '$& $1' });
+    assert.equal(store.getById(id)!.description, 'price: $& $1');
+  });
+});
+
+describe('uploadPlan handler', () => {
+  function planFile(name: string, body: string): string {
+    const p = join(dir, name);
+    writeFileSync(p, body);
+    return p;
+  }
+
+  test('stores file content as plan; ack has no plan/task; source file kept', () => {
+    const { id } = addTask();
+    const path = planFile('plan.md', '# Plan\n\nstep é');
+    const resp = handleUploadPlan(store, { id, path });
+    assert.ok(!resp.isError);
+    assert.deepEqual(decode(resp), { success: true, id, bytes: Buffer.byteLength('# Plan\n\nstep é', 'utf8') });
+    assert.equal(store.getById(id)?.plan, '# Plan\n\nstep é');
+    assert.ok(existsSync(path));
+  });
+
+  test('re-upload replaces the plan', () => {
+    const { id } = addTask();
+    handleUploadPlan(store, { id, path: planFile('a.md', 'first') });
+    handleUploadPlan(store, { id, path: planFile('b.md', 'second') });
+    assert.equal(store.getById(id)?.plan, 'second');
+  });
+
+  test('relative path errors', () => {
+    const { id } = addTask();
+    const resp = handleUploadPlan(store, { id, path: 'plan.md' });
+    assert.ok(resp.isError);
+    assert.match(decode(resp).error as string, /absolute/);
+  });
+
+  test('non-.md errors; .MD accepted', () => {
+    const { id } = addTask();
+    const bad = handleUploadPlan(store, { id, path: planFile('plan.txt', 'x') });
+    assert.ok(bad.isError);
+    assert.match(decode(bad).error as string, /\.md/);
+    const ok = handleUploadPlan(store, { id, path: planFile('PLAN.MD', 'x') });
+    assert.ok(!ok.isError);
+  });
+
+  test('missing file errors and names the path', () => {
+    const { id } = addTask();
+    const path = join(dir, 'nope.md');
+    const resp = handleUploadPlan(store, { id, path });
+    assert.ok(resp.isError);
+    assert.ok((decode(resp).error as string).includes(path));
+  });
+
+  test('whitespace-only file errors and leaves existing plan', () => {
+    const { id } = addTask({ plan: 'keep me' });
+    const resp = handleUploadPlan(store, { id, path: planFile('empty.md', ' \n\t') });
+    assert.ok(resp.isError);
+    assert.equal(store.getById(id)?.plan, 'keep me');
+  });
+
+  test('unknown id returns not-found error', () => {
+    const resp = handleUploadPlan(store, { id: 9999, path: planFile('p.md', 'x') });
+    assert.ok(resp.isError);
+    assert.match(decode(resp).error as string, /not found/i);
+  });
+});
+
 describe('update handler — summaryReminder', () => {
   test('updating a refinement task without summary returns summaryReminder', async () => {
     const { id } = addTask({ status: 'refinement' });
@@ -366,6 +498,23 @@ describe('update handler — summaryReminder', () => {
 });
 
 describe('plan field — MCP layer', () => {
+  test('update response omits plan but stores it', () => {
+    const { id } = addTask();
+    const resp = handleUpdate(store, { id, plan: 'x' });
+    const { task } = decode(resp) as { task: { plan?: string } };
+    assert.equal(task.plan, undefined);
+    assert.equal(store.getById(id)?.plan, 'x');
+  });
+
+  test('update response omits note bodies but keeps noteCount', () => {
+    const { id } = addTask();
+    store.addNote(id, 'n1');
+    store.addNote(id, 'n2');
+    const { task } = decode(handleUpdate(store, { id, priority: 'high' })) as { task: { notes?: unknown; noteCount?: number } };
+    assert.equal(task.notes, undefined);
+    assert.equal(task.noteCount, 2);
+  });
+
   test('add handler accepts plan and persists it; getById returns it', () => {
     const resp = handleAdd(store, {
       type: 'feature',
@@ -941,5 +1090,66 @@ describe('getAll handler', () => {
     const bugs = tasks.bug ?? [];
     assert.ok(bugs.every((t) => t.status === 'todo'), 'only todo tasks when status=todo');
     assert.equal(bugs.length, 1);
+  });
+});
+
+describe('note handlers', () => {
+  test('addNote returns the note', () => {
+    const { id } = addTask();
+    const resp = handleAddNote(store, { taskId: id, body: 'decided X' });
+    assert.equal(resp.isError, undefined);
+    const body = decode(resp) as { success: boolean; note: { task_id: number; body: string } };
+    assert.equal(body.success, true);
+    assert.equal(body.note.task_id, id);
+    assert.equal(body.note.body, 'decided X');
+  });
+
+  test('addNote on unknown task returns not-found', () => {
+    const resp = handleAddNote(store, { taskId: 999, body: 'x' });
+    assert.equal(resp.isError, true);
+    assert.match(String(decode(resp)['error']), /Task #999 not found/);
+  });
+
+  test('empty body is rejected by addNote and updateNote', () => {
+    const { id } = addTask();
+    assert.equal(handleAddNote(store, { taskId: id, body: '  ' }).isError, true);
+    const note = store.addNote(id, 'x')!;
+    assert.equal(handleUpdateNote(store, { noteId: note.id, body: ' ' }).isError, true);
+    assert.equal(store.getById(id)?.notes?.[0]?.body, 'x');
+  });
+
+  test('updateNote and deleteNote round-trip', () => {
+    const { id } = addTask();
+    const note = store.addNote(id, 'x')!;
+    const upd = decode(handleUpdateNote(store, { noteId: note.id, body: 'y' })) as { note: { body: string } };
+    assert.equal(upd.note.body, 'y');
+    assert.deepEqual(decode(handleDeleteNote(store, { noteId: note.id })), { success: true });
+    assert.equal(store.getById(id)?.notes, undefined);
+  });
+
+  test('unknown noteId returns a note-not-found error', () => {
+    for (const resp of [handleUpdateNote(store, { noteId: 999, body: 'x' }), handleDeleteNote(store, { noteId: 999 })]) {
+      assert.equal(resp.isError, true);
+      assert.equal(decode(resp)['error'], 'Note #999 not found.');
+    }
+  });
+
+  test('getById includes notes in order', async () => {
+    const { id } = addTask();
+    store.addNote(id, 'first');
+    store.addNote(id, 'second');
+    const task = decode(await handleGetById(store, { id }))['task'] as { notes: { body: string }[] };
+    assert.deepEqual(task.notes.map((n) => n.body), ['first', 'second']);
+  });
+
+  test('getAll and getByScope show noteCount without bodies', async () => {
+    const { id } = addTask({ scope: 'area' });
+    store.addNote(id, 'a');
+    const all = decode(await handleGetAll(store))['tasks'] as Record<string, Record<string, unknown>[]>;
+    const scoped = decode(await handleGetByScope(store, { scope: 'area' }))['tasks'] as Record<string, unknown>[];
+    for (const t of [all['bug']![0]!, scoped[0]!]) {
+      assert.equal(t['noteCount'], 1);
+      assert.equal('notes' in t, false);
+    }
   });
 });

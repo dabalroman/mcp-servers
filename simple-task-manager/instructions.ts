@@ -18,13 +18,24 @@ If neither (a) nor (b) holds, omit the status field (or pass 'refinement') and l
 The strict sequence is: refinement → plan (optional) → todo → in_progress → done. Never skip statuses.
 
 1. **refinement**: Use /refine. Ask PM-style clarifying questions, enrich the description and summary via update(), then ask the user whether to promote to 'plan' or 'todo'. Do not implement.
-2. **plan** (optional): Enter Claude's plan mode. Write the implementation plan and upload it via update({ id, plan }). After the user approves the plan, ask to promote to 'todo' via setStatus(id, 'todo'). The task then waits for /implement to pick it up.
+2. **plan** (optional): Enter Claude's plan mode. Write the implementation plan to a .md file and upload it via uploadPlan({ id, path }) (absolute path). The DB copy is canonical; the .md is scratch — to revise, edit it and call uploadPlan again. After the user approves the plan, ask to promote to 'todo' via setStatus(id, 'todo'). The task then waits for /implement to pick it up.
 3. **todo**: Ready for implementation. /implement sets setStatus(id, 'in_progress') and then starts the code changes — this transition belongs to the implement step, made right before the code changes begin.
 4. **in_progress**: Implement, test, get user confirmation ("lgtm"). Only then commit and call setStatus(id, 'done').
 5. Use delete() only when the user explicitly asks to cancel or remove a task — not for completed work.
 
 ## Refinement — acting as project manager
 When a task is in 'refinement', your job is to surface it and ask targeted questions to clarify scope, acceptance criteria, edge cases, and technical constraints. Use update() to record the answers in the description and write a summary. Only promote to 'plan' or 'todo' (via setStatus) once the description is specific enough that an implementer could work from it without guessing. Ask for user confirmation before promoting. Default to 'todo' for straightforward tasks; use 'plan' when the task needs a written implementation plan first.
+
+## Small edits
+For small edits to a task's description or plan, use replace({ id, field, anchor, replace_with }) instead of re-sending the whole field via update().
+
+## Notes
+- A task can carry 1-N notes. getById returns them (oldest first); list tools show only noteCount.
+- Notes are as authoritative as the description. On conflict the newest statement wins: a newer note overrides an older note, and any note overrides the description.
+- Purpose: decisions, findings, and spec changes made after refinement. Not a scratchpad or progress log.
+- Read notes via getById (alongside plan) before implementing a task.
+- For incremental additions prefer addNote({ taskId, body }) over rewriting the description with update(). Edit with updateNote, remove with deleteNote.
+- /refine folds existing notes into the description, then deletes the folded notes.
 
 ## Prioritization order for getNext
 bug > tool > feature > idea > other. Within each type: highest priority first, newest id first (FILO).
@@ -38,7 +49,7 @@ bug > tool > feature > idea > other. Within each type: highest priority first, n
 ## Development pipeline (mandatory, never skip steps)
 1. Schedule  — out-of-scope requests go to add(), do not implement inline. New tasks default to 'refinement'.
 2. Refine    — /refine: ask PM questions, update() description + summary, promote to 'plan' or 'todo' on user confirmation.
-3. Plan      — opt-in: enter plan mode, write plan, upload via update({ id, plan }), promote to 'todo' on user approval. The task then waits for the implement step.
+3. Plan      — opt-in: enter plan mode, write plan to a .md file, upload via uploadPlan({ id, path }) (DB copy is canonical; re-upload to revise), promote to 'todo' on user approval. The task then waits for the implement step.
 4. Implement — setStatus('in_progress') FIRST, then read files, code, test. The 'in_progress' transition belongs to this step, made right before writing code.
 5. Build     — must succeed with zero errors
 6. Test      — verify end-to-end; wait for user confirmation ("lgtm") before proceeding

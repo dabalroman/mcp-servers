@@ -52,6 +52,8 @@ For each task in priority order (`getNext` ordering: bug > tool > feature > idea
 
    Each section is a flat list of single-line items — no paragraphs, no nested bullets, no prose. Facts describe the world as-is (file paths, existing APIs, data formats, constraints). Changes describe the target state delta. Steps are an ordered checklist an implementer can follow top-to-bottom. Lock sections with a "(locked YYYY-MM-DD)" marker once agreed.
 
+3a. **Fold notes.** If `getById` returned `notes`, fold each into Facts/Changes/Steps — notes are as authoritative as the description and the newest statement wins on conflict (newer note > older note > description). Once the description reflects a note, remove it with `mcp__task-manager__deleteNote({ noteId })`.
+
 3b. **Generate summary**: produce a 2–3 line summary capturing: (1) what the task does, (2) the most important decision, (3) the user-visible outcome. Call `mcp__task-manager__update({ id, summary })` to persist it. The summary **must** be written before promoting to `plan` or `todo` — the server will reject the promotion if it is missing.
 
 3c. **Pros/Cons analysis (offer)**: Once the description is solid, ask the user: "Want me to run a quick pros/cons analysis before promoting?" If yes, spawn two Sonnet agents in parallel:

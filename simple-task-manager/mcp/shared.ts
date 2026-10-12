@@ -14,11 +14,13 @@ export const errorText = (obj: unknown): MCPContent => ({ content: [{ type: 'tex
 // adds noise without value. Agents that need the body call getById.
 // plan is always stripped from list responses regardless of summary — plans can be
 // long markdown documents and are only needed during /implement (use getById).
-export function toListTask<T extends Task>(task: T): Omit<T, 'plan'> | Omit<T, 'plan' | 'description'> {
-  const { plan: _plan, ...withoutPlan } = task;
-  if (!withoutPlan.summary) return withoutPlan as Omit<T, 'plan'>;
+// notes are stripped too (lists carry noteCount); the store never attaches them
+// to list reads, this is a guard against leaking bodies.
+export function toListTask<T extends Task>(task: T): Omit<T, 'plan' | 'notes'> | Omit<T, 'plan' | 'notes' | 'description'> {
+  const { plan: _plan, notes: _notes, ...withoutPlan } = task;
+  if (!withoutPlan.summary) return withoutPlan as Omit<T, 'plan' | 'notes'>;
   const { description: _desc, ...rest } = withoutPlan;
-  return rest as Omit<T, 'plan' | 'description'>;
+  return rest as Omit<T, 'plan' | 'notes' | 'description'>;
 }
 
 export function allIdsSorted(store: Store): number[] {
