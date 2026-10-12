@@ -800,6 +800,30 @@ describe('notes', () => {
     assert.deepEqual(store.getById(id)?.notes?.map((n) => n.body), ['first', 'second']);
   });
 
+  test('loadWithNotes attaches ordered bodies per task; load() keeps noteCount only', () => {
+    const { id } = makeTask();
+    const { id: other } = makeTask();
+    const { id: bare } = makeTask();
+    const a = store.addNote(id, 'a')!;
+    const b = store.addNote(id, 'b')!;
+    store.addNote(other, 'o');
+    store.db.prepare(`UPDATE notes SET created_at = '2001-01-01 00:00:00'`).run();
+    store.db.prepare(`UPDATE notes SET created_at = '2000-01-01 00:00:00' WHERE id = ?`).run(b.id);
+
+    const find = (r: ReturnType<typeof store.load>, tid: number) =>
+      [...r.active, ...r.done].find((t) => t.id === tid)!;
+    const full = store.loadWithNotes();
+    assert.deepEqual(find(full, id).notes?.map((n) => n.id), [b.id, a.id]);
+    assert.equal(find(full, id).noteCount, 2);
+    assert.deepEqual(find(full, other).notes?.map((n) => n.body), ['o']);
+    assert.equal(find(full, bare).notes, undefined);
+
+    const plain = store.load();
+    assert.equal(find(plain, id).notes, undefined);
+    assert.equal(find(plain, id).noteCount, 2);
+    assert.equal(find(plain, other).notes, undefined);
+  });
+
   test('same created_at falls back to id order', () => {
     const { id } = makeTask();
     const a = store.addNote(id, 'a')!;

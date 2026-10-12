@@ -16,6 +16,10 @@ export function createTaskStore({ dbPath }: TaskStoreOptions) {
     return store.load();
   }
 
+  function loadWithNotes(): LoadResult {
+    return store.loadWithNotes();
+  }
+
   async function add(input: AddInput): Promise<number> {
     return store.add(input).id;
   }
@@ -40,7 +44,7 @@ export function createTaskStore({ dbPath }: TaskStoreOptions) {
     store.close();
   }
 
-  return { load, add, setStatus, updateTask, deleteTask, dataVersion, close };
+  return { load, loadWithNotes, add, setStatus, updateTask, deleteTask, dataVersion, close };
 }
 
 export type TaskStore = ReturnType<typeof createTaskStore>;

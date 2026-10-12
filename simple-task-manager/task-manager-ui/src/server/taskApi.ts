@@ -52,7 +52,7 @@ export function createTaskApi({ dbPath }: TaskApiOptions) {
 
   return {
     list() {
-      return store.load();
+      return store.loadWithNotes();
     },
 
     async add(body: AddInput) {

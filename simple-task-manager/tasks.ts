@@ -303,6 +303,7 @@ export type Store = {
   readonly db: DB;
   dataVersion(): number;
   load(): LoadResult;
+  loadWithNotes(): LoadResult;
   add(input: AddInput): { id: number };
   update(id: number, patch: UpdatePatch): { task: Task } | null;
   setStatus(id: number, status: TaskStatus): boolean;
@@ -401,15 +402,15 @@ export function createStore(dbPath: string): Store {
     return task;
   }
 
-  function readAllTasks(): Task[] {
+  function readAllTasks(withNotes = false): Task[] {
     const rows = stmtSelectAllTasks.all() as TaskRow[];
-    return attachRefs(rows);
+    return attachRefs(rows, withNotes);
   }
 
   // Bulk-load refs for a set of task rows in one query, then join in memory.
   // O(1) SQLite round-trips regardless of result set size — replaces the
   // N+1 pattern of calling readRefsFor(row.id) inside a .map().
-  function attachRefs(rows: TaskRow[]): Task[] {
+  function attachRefs(rows: TaskRow[], withNotes = false): Task[] {
     if (rows.length === 0) return [];
     const ids = rows.map((r) => r.id);
     const placeholders = ids.map(() => '?').join(', ');
@@ -426,10 +427,23 @@ export function createStore(dbPath: string): Store {
       `SELECT task_id, COUNT(*) AS n FROM notes WHERE task_id IN (${placeholders}) GROUP BY task_id`
     ).all(...ids) as { task_id: number; n: number }[];
     const noteCounts = new Map(countRows.map((r) => [r.task_id, r.n]));
+    const notesByTask = new Map<number, Note[]>();
+    if (withNotes) {
+      const noteRows = db.prepare(
+        `SELECT id, task_id, body, created_at, updated_at FROM notes WHERE task_id IN (${placeholders}) ORDER BY created_at ASC, id ASC`
+      ).all(...ids) as Note[];
+      for (const n of noteRows) {
+        const arr = notesByTask.get(n.task_id) ?? [];
+        arr.push(n);
+        notesByTask.set(n.task_id, arr);
+      }
+    }
     return rows.map((row) => {
       const task = rowToTask(row, refsByFrom.get(row.id) ?? []);
       const n = noteCounts.get(row.id);
       if (n) task.noteCount = n;
+      const notes = notesByTask.get(row.id);
+      if (notes) task.notes = notes;
       return task;
     });
   }
@@ -483,11 +497,18 @@ export function createStore(dbPath: string): Store {
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────
-  function load(): LoadResult {
-    const all = readAllTasks();
+  function splitByDone(all: Task[]): LoadResult {
     const active = all.filter((t) => t.status !== 'done');
     const done = all.filter((t) => t.status === 'done');
     return { active, done };
+  }
+
+  function load(): LoadResult {
+    return splitByDone(readAllTasks());
+  }
+
+  function loadWithNotes(): LoadResult {
+    return splitByDone(readAllTasks(true));
   }
 
   function add(input: AddInput): { id: number } {
@@ -787,6 +808,7 @@ export function createStore(dbPath: string): Store {
     db, // exposed for advanced cases; avoid using directly — prefer dataVersion() for polling
     dataVersion: () => db.pragma('data_version', { simple: true }) as number,
     load,
+    loadWithNotes,
     add,
     update,
     setStatus,

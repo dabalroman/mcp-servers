@@ -7,9 +7,32 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { TYPE_LABELS, PRIORITY_CLASSES, STATUS_LABELS, STATUS_CLASSES } from './constants';
-import type { Task, TaskStatus } from '@/types/task';
+import type { Note, Task, TaskStatus } from '@/types/task';
 
 const STATUSES: TaskStatus[] = ['refinement', 'plan', 'todo', 'in_progress', 'done'];
+
+function formatSqliteUtc(ts: string): string {
+  return new Date(ts.replace(' ', 'T') + 'Z').toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function NotesSection({ notes }: { notes: Note[] }) {
+  return (
+    <div className="flex flex-col gap-2 mt-2">
+      <span className="text-xs tracking-widest uppercase text-muted-foreground">Notes</span>
+      {notes.map((note) => (
+        <div key={note.id} className="flex flex-col gap-1 border-l border-border pl-3">
+          <span className="text-xs text-muted-foreground/60">
+            {formatSqliteUtc(note.created_at)}
+            {note.updated_at !== note.created_at && <span className="ml-2 italic">edited</span>}
+          </span>
+          <div className="text-sm text-muted-foreground leading-relaxed prose-task">
+            <Markdown remarkPlugins={[remarkGfm]}>{note.body}</Markdown>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export type TaskCardProps = {
   task: Task;
@@ -24,6 +47,8 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
   const [expanded, setExpanded] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const hasSummary = Boolean(task.summary);
+  const notes = task.notes ?? [];
+  const noteCount = task.noteCount ?? notes.length;
 
   const idButtonClass =
     'text-xs tracking-widest border border-border px-2 py-1 shrink-0 text-muted-foreground cursor-pointer hover:border-primary/60 hover:text-foreground transition-colors';
@@ -132,6 +157,7 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
               <Markdown remarkPlugins={[remarkGfm]}>{task.description ?? ''}</Markdown>
             </div>
           )}
+          {expanded && notes.length > 0 && <NotesSection notes={notes} />}
           <button
             type="button"
             onClick={() => setExpanded((e) => !e)}
@@ -143,6 +169,13 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
             }
             <span>{expanded ? 'Hide details' : 'Show details'}</span>
           </button>
+          {!expanded && noteCount > 0 && (
+            <div className="flex flex-wrap gap-2 mt-2">
+              <span className="text-xs tracking-widest uppercase border border-border px-2 py-1 text-muted-foreground">
+                {noteCount} {noteCount === 1 ? 'note' : 'notes'}
+              </span>
+            </div>
+          )}
           {task.refs && task.refs.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-2">
               {task.refs.map((ref) => (
@@ -170,6 +203,7 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
           ) : (
             <span className="text-sm text-muted-foreground/40 italic">No description.</span>
           )}
+          {notes.length > 0 && <NotesSection notes={notes} />}
           {task.refs && task.refs.length > 0 && (
             <div className="flex flex-wrap gap-2 mt-2">
               {task.refs.map((ref) => (

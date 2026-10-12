@@ -5,6 +5,7 @@ import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { createTaskApi } from './taskApi.js';
+import { createStore } from '../../../tasks.js';
 
 function makeReq(): IncomingMessage {
   return new EventEmitter() as unknown as IncomingMessage;
@@ -94,5 +95,17 @@ describe('dispose()', () => {
     const chunksBefore = res.chunks.length;
 
     expect(res.chunks.length).toBe(chunksBefore);
+  });
+});
+
+describe('list', () => {
+  it('includes note bodies', async () => {
+    const { id } = await api.add({ type: 'bug', priority: 'medium', title: 'Noted', description: '' });
+    const writer = createStore(dbPath);
+    writer.addNote(id, 'a note');
+    writer.close();
+
+    const { active } = api.list();
+    expect(active.find((t) => t.id === id)?.notes?.map((n) => n.body)).toEqual(['a note']);
   });
 });

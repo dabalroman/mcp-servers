@@ -6,7 +6,7 @@ Standalone web UI for the `simple-task-manager` MCP. Sibling package to `simple-
 
 - Express HTTP server on port `TASK_UI_PORT` (default **7374**, prints URL to stderr on startup).
 - Server runs via tsx — no compile step (`node --import tsx server.ts`). MCP spawns it with `cwd` set to this package so node resolves the `tsx` loader from local `node_modules`.
-- Static client bundled by Vite to `dist/`. Built on `npm install` via `prepare`. `dist/` is gitignored.
+- Static client bundled by Vite to `dist/`. Built on `npm install` via `prepare`. `dist/` is tracked in git — commit the rebuilt bundle alongside client changes.
 - Imports the tasks store directly from `../tasks.js` (the parent simple-task-manager package) via relative path — **no vendor mirror**, no `EXPECTED_MIGRATIONS` validation. Schema changes touch the MCP only; this package picks up the change at next tsx import.
 
 ## File layout
@@ -51,4 +51,6 @@ The MCP spawns this server with `stdio: ['ignore', 'pipe', 'pipe']` and pipes bo
 
 ## When the public store surface changes
 
-`taskStore.ts` wraps the MCP store. If the MCP's `Store` interface gains or loses a method that this package uses (today: `load`, `add`, `update`, `setStatus`, `delete`, `dataVersion`, `close`), update the wrapper in the same commit.
+`taskStore.ts` wraps the MCP store. If the MCP's `Store` interface gains or loses a method that this package uses (today: `load`, `loadWithNotes`, `add`, `update`, `setStatus`, `delete`, `dataVersion`, `close`), update the wrapper in the same commit.
+
+`taskApi.list()` uses `loadWithNotes()` — same as `load()` plus note bodies (oldest first) via one bulk query. MCP list tools keep `load()` (noteCount only); don't switch them, or every list call ships every note body to the model.

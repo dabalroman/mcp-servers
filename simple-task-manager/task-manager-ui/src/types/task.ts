@@ -22,6 +22,14 @@ export type TaskRef = {
   nonCanonical?: true;
 };
 
+export type Note = {
+  id: number;
+  task_id: number;
+  body: string;
+  created_at: string;
+  updated_at: string;
+};
+
 export type Task = {
   id: number;
   type: TaskType;
@@ -33,6 +41,8 @@ export type Task = {
   plan?: string;
   scope?: string;
   refs?: TaskRef[];
+  notes?: Note[];
+  noteCount?: number;
   created_at: string;
   updated_at: string;
 };

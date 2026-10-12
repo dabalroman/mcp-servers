@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createTaskStore } from './taskStore.js';
+import { createStore } from '../../../tasks.js';
 
 let dir: string;
 let dbPath: string;
@@ -117,5 +118,23 @@ describe('dataVersion', () => {
     other.close();
     const after = store.dataVersion();
     expect(after).not.toBe(before);
+  });
+});
+
+describe('loadWithNotes', () => {
+  it('includes note bodies written by another connection while load() keeps noteCount only', async () => {
+    const id = await store.add({ type: 'bug', priority: 'high', title: 'Noted', description: '' });
+    const writer = createStore(dbPath);
+    writer.addNote(id, 'first');
+    writer.addNote(id, 'second');
+    writer.close();
+
+    const withNotes = store.loadWithNotes().active.find((t) => t.id === id);
+    expect(withNotes?.notes?.map((n) => n.body)).toEqual(['first', 'second']);
+    expect(withNotes?.noteCount).toBe(2);
+
+    const plain = store.load().active.find((t) => t.id === id);
+    expect(plain?.notes).toBeUndefined();
+    expect(plain?.noteCount).toBe(2);
   });
 });
