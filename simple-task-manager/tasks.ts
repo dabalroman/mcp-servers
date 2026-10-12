@@ -19,6 +19,7 @@ export type Ref = {
   id: number;
   relation: Relation;
   nonCanonical?: boolean;
+  title?: string;
 };
 
 export type Task = {
@@ -360,6 +361,9 @@ export function createStore(dbPath: string): Store {
   const stmtSelectAllIds    = db.prepare('SELECT id FROM tasks ORDER BY id');
   const stmtDeleteTask      = db.prepare('DELETE FROM tasks WHERE id = ?');
   const stmtRefsFrom        = db.prepare('SELECT from_id, to_id, relation, non_canonical FROM refs WHERE from_id = ?');
+  const stmtRefsFromTitled  = db.prepare(
+    'SELECT r.from_id, r.to_id, r.relation, r.non_canonical, t.title FROM refs r JOIN tasks t ON t.id = r.to_id WHERE r.from_id = ?'
+  );
   const stmtRefsAll         = db.prepare('SELECT from_id, to_id, relation, non_canonical FROM refs');
   const stmtInsertRef       = db.prepare(
     'INSERT OR REPLACE INTO refs (from_id, to_id, relation, non_canonical) VALUES (?, ?, ?, ?)'
@@ -389,7 +393,9 @@ export function createStore(dbPath: string): Store {
   function readTask(id: number): Task | null {
     const row = stmtSelectTask.get(id) as TaskRow | undefined;
     if (!row) return null;
-    const task = rowToTask(row, readRefsFor(id));
+    const refs = (stmtRefsFromTitled.all(id) as (RefRow & { title: string })[])
+      .map((r) => ({ ...refRowToObj(r), title: r.title }));
+    const task = rowToTask(row, refs);
     const notes = stmtNotesFor.all(id) as Note[];
     if (notes.length) task.notes = notes;
     return task;

@@ -107,7 +107,7 @@ export function registerTools(server: McpServer, store: Store): void {
   const getByIdSchema = { id: z.coerce.number().int().positive().describe('The numeric task ID to look up') };
   server.tool(
     'getById',
-    'Get a single task by its numeric ID — returns the full task including both summary (if set) and description, plus notes (oldest first) when the task has any. Other list methods omit description when summary is present and show only noteCount — use this when you need the full body. Notes are as authoritative as the description; newest statement wins on conflict. Use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Returns an error listing valid IDs if not found.',
+    'Get a single task by its numeric ID — returns the full task including both summary (if set) and description, plus notes (oldest first) when the task has any, and refs as { id, relation, title } so you can tell what each linked task is without fetching it. Other list methods omit description when summary is present and show only noteCount — use this when you need the full body. Notes are as authoritative as the description; newest statement wins on conflict. Use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Returns an error listing valid IDs if not found.',
     getByIdSchema,
     async (args: z.infer<z.ZodObject<typeof getByIdSchema>>): Promise<MCPContent> => handleGetById(store, args)
   );

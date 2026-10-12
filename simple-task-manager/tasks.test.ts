@@ -169,11 +169,21 @@ describe('add', () => {
   test('persists refs', () => {
     const { id: a } = makeTask();
     const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
-    assert.deepEqual(store.getById(b)?.refs, [{ id: a, relation: 'blocks' }]);
+    assert.deepEqual(store.getById(b)?.refs, [{ id: a, relation: 'blocks', title: 'Test' }]);
   });
 });
 
 describe('getById', () => {
+  test('refs carry the referenced task title; list reads do not', () => {
+    const { id: a } = makeTask({ title: 'Target' });
+    const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'Source', description: '', refs: [{ id: a, relation: 'blocks' }] });
+    assert.equal(store.getById(b)?.refs?.[0]?.title, 'Target');
+    store.update(a, { title: 'Renamed' });
+    assert.equal(store.getById(b)?.refs?.[0]?.title, 'Renamed');
+    const listed = store.getAll().find((t) => t.id === b);
+    assert.equal(listed?.refs?.[0]?.title, undefined);
+  });
+
   test('returns null for unknown id', () => {
     assert.equal(store.getById(999), null);
   });
@@ -212,7 +222,7 @@ describe('update', () => {
     const { id: b } = makeTask();
     const { id: c } = store.add({ type: 'bug', priority: 'high', title: 'C', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.update(c, { refs: [{ id: b, relation: 'depends on' }] });
-    assert.deepEqual(store.getById(c)?.refs, [{ id: b, relation: 'depends on' }]);
+    assert.deepEqual(store.getById(c)?.refs, [{ id: b, relation: 'depends on', title: 'Test' }]);
   });
 
   test('clears refs with null', () => {
@@ -304,7 +314,7 @@ describe('refs — store-level mirroring', () => {
   test('writes inverse on canonical ref', () => {
     const { id: a } = makeTask();
     const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
-    assert.deepEqual(store.getById(a)?.refs, [{ id: b, relation: 'is blocked by' }]);
+    assert.deepEqual(store.getById(a)?.refs, [{ id: b, relation: 'is blocked by', title: 'B' }]);
   });
 
   test('removes inverse when ref is removed', () => {
@@ -318,7 +328,7 @@ describe('refs — store-level mirroring', () => {
     const { id: a } = makeTask();
     const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.update(b, { refs: [{ id: a, relation: 'causes' }] });
-    assert.deepEqual(store.getById(a)?.refs, [{ id: b, relation: 'is caused by' }]);
+    assert.deepEqual(store.getById(a)?.refs, [{ id: b, relation: 'is caused by', title: 'B' }]);
   });
 
   test('"relates to" is symmetric on both sides', () => {

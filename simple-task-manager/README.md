@@ -253,7 +253,7 @@ These are called by Claude — you don't type them yourself.
 |---|---|
 | `getNext` | The single recommended next task. |
 | `getAll` | Tasks grouped by type. Default: non-done. |
-| `getById` | One task by number, including its notes. |
+| `getById` | One task by number, including its notes and the titles of linked tasks. |
 | `getByType` | Tasks of one type. Default: non-done. |
 | `getByScope` | Tasks tagged with a scope. Default: non-done. |
 | `getScopes` | All scope tags with counts. |
