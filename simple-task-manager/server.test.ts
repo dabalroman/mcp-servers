@@ -266,7 +266,7 @@ describe('list-mode stripping (server layer)', () => {
     assert.equal(task.description, 'Long desc.');
   });
 
-  test('getRelated: anchor full, outbound/inbound stripped', async () => {
+  test('getRelated: anchor and outbound/inbound all list mode', async () => {
     const { id: a } = addWithSummary({ type: 'bug', title: 'A', description: 'A desc.', summary: 'A gist.' });
     const { id: b } = store.add({ type: 'bug', priority: 'medium', title: 'B', description: 'B desc.', summary: 'B gist.', refs: [{ id: a, relation: 'blocks' }] });
     const payload = decode(await handleGetRelated(store, { id: b })) as {
@@ -274,7 +274,7 @@ describe('list-mode stripping (server layer)', () => {
       outbound: { summary?: string; description?: string }[];
     };
     assert.equal(payload.task.summary, 'B gist.');
-    assert.equal(payload.task.description, 'B desc.');
+    assert.equal(payload.task.description, undefined);
     assert.equal(payload.outbound[0]?.summary, 'A gist.');
     assert.equal(payload.outbound[0]?.description, undefined);
   });
@@ -651,15 +651,19 @@ describe('plan field — MCP layer', () => {
     assert.ok(all.every((t) => t.plan === undefined), 'plan must not appear in getAll results');
   });
 
-  test('getRelated: anchor task retains plan, outbound/inbound strip it', async () => {
+  test('getRelated strips plan and note bodies from the anchor and related tasks', async () => {
     const { id: a } = store.add({ type: 'bug', priority: 'medium', title: 'A', description: '', plan: 'plan A' });
     const { id: b } = store.add({ type: 'bug', priority: 'medium', title: 'B', description: '', plan: 'plan B', refs: [{ id: a, relation: 'blocks' }] });
     const payload = decode(await handleGetRelated(store, { id: b })) as {
       task: { plan?: string };
       outbound: { plan?: string }[];
     };
-    assert.equal(payload.task.plan, 'plan B', 'anchor task should include plan');
+    assert.equal(payload.task.plan, undefined, 'anchor should not include plan');
     assert.equal(payload.outbound[0]?.plan, undefined, 'outbound should not include plan');
+    store.addNote(b, 'n');
+    const withNote = decode(await handleGetRelated(store, { id: b })) as { task: { notes?: unknown; noteCount?: number } };
+    assert.equal(withNote.task.notes, undefined);
+    assert.equal(withNote.task.noteCount, 1);
   });
 });
 

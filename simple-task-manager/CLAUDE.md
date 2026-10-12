@@ -95,7 +95,7 @@ The sibling `task-manager-ui` imports `tasks.ts` directly via a relative path �
 The `summary` column exists in the schema (version 1). The token-saving behaviour lives entirely in the **MCP layer** (`mcp/`), not in `tasks.ts`:
 
 - `tasks.ts` always returns complete task objects (both `summary` and `description`). No stripping in the storage layer.
-- `mcp/shared.ts` exports a `toListTask(task)` helper that **always drops `plan` and `notes`** (both can be long; only `getById` needs them — lists carry `noteCount`), and additionally drops `description` when `summary` is present. Applied to every list-method result in `mcp/queryHandlers.ts` (getAll, getByStatus, getByScope, getByType, getNext, getRelated outbound/inbound). `getById` and the `getRelated` anchor task always return all fields.
+- `mcp/shared.ts` exports a `toListTask(task)` helper that **always drops `plan` and `notes`** (both can be long; only `getById` needs them — lists carry `noteCount`), and additionally drops `description` when `summary` is present. Applied to every list-method result in `mcp/queryHandlers.ts` (getAll, getByStatus, getByScope, getByType, getNext, getRelated anchor + outbound/inbound). `getRelated` applies it to the anchor task too (with `noteCount` from its notes); only `getById` returns all fields.
 - Adding a new list tool: always apply `.map(toListTask)` to its results inside the handler.
 - `handleSetStatus` blocks `refinement → todo` if the task has no summary. `handleUpdate` on a refinement task without summary returns a `summaryReminder` field.
 - The refine skill (`~/.claude/commands/refine.md`) generates the summary as step 3b before promoting.

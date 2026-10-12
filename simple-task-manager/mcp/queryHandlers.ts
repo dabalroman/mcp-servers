@@ -44,8 +44,9 @@ export async function handleGetByScope(store: Store, { scope, status }: { scope:
 export async function handleGetRelated(store: Store, { id, status }: { id: number; status?: StatusFilter }): Promise<MCPContent> {
   const result = store.getRelated(id, status);
   if (!result) return notFoundError(id, store);
+  const { notes, ...anchor } = result.task;
   return text({
-    task: result.task,
+    task: { ...toListTask(anchor), ...(notes ? { noteCount: notes.length } : {}) },
     outbound: result.outbound.map((t) => ({ ...toListTask(t), refRelation: t.refRelation })),
     inbound:  result.inbound.map((t)  => ({ ...toListTask(t), refRelation: t.refRelation })),
   });

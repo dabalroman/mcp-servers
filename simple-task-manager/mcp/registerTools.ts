@@ -226,7 +226,7 @@ export function registerTools(server: McpServer, store: Store): void {
   };
   server.tool(
     'getRelated',
-    'Get tasks related to a given task — returns the task itself, outbound (tasks that #X references, decorated with refRelation), and inbound (tasks that reference #X). Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. The anchor task is full view (summary + description); outbound and inbound entries follow list mode (summary when present, description otherwise).',
+    'Get tasks related to a given task — returns the task itself, outbound (tasks that #X references, decorated with refRelation), and inbound (tasks that reference #X). Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Every entry, the anchor included, is list mode: summary when present, description otherwise; no plan; noteCount instead of note bodies. Call getById for the full task.',
     getRelatedSchema,
     async (args: z.infer<z.ZodObject<typeof getRelatedSchema>>): Promise<MCPContent> => handleGetRelated(store, args)
   );
