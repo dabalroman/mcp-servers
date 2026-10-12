@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
-import { isAbsolute } from 'node:path';
 import { text, errorText, notFoundError, probeTcp, type MCPContent } from './shared.js';
 import type { AddInput, Store, TaskStatus, UpdatePatch } from '../tasks.js';
+import { checkPlanPath, defaultPlanRoots } from './planPath.js';
 import { uiPkgDir, uiServerEntry, getUiChild, setUiChild, spawnUi } from './uiChild.js';
 
 const UI_PORT = parseInt(process.env['TASK_UI_PORT'] ?? '7374', 10);
@@ -49,12 +49,16 @@ export function handleReplace(
   return text({ success: true, id, field });
 }
 
-export function handleUploadPlan(store: Store, { id, path }: { id: number; path: string }): MCPContent {
-  if (!isAbsolute(path)) return errorText({ error: `path must be absolute: ${path}` });
-  if (!/\.md$/i.test(path)) return errorText({ error: `path must be a .md file: ${path}` });
+export function handleUploadPlan(
+  store: Store,
+  { id, path }: { id: number; path: string },
+  roots: string[] = defaultPlanRoots(),
+): MCPContent {
+  const checked = checkPlanPath(path, roots);
+  if (!checked.ok) return errorText({ error: checked.error });
   let content: string;
   try {
-    content = readFileSync(path, 'utf8');
+    content = readFileSync(checked.path, 'utf8');
   } catch (err) {
     return errorText({ error: `cannot read ${path}: ${err instanceof Error ? err.message : String(err)}` });
   }

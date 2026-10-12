@@ -10,8 +10,8 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { join, posix, win32 } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createStore, type AddInput, type Store } from './tasks.js';
 import {
@@ -38,6 +38,7 @@ import {
   handleUiStop,
 } from './mcp/mutationHandlers.js';
 import type { MCPContent } from './mcp/shared.js';
+import { isWithin } from './mcp/planPath.js';
 
 let dir: string;
 let dbPath: string;
@@ -452,6 +453,89 @@ describe('uploadPlan handler', () => {
     const resp = handleUploadPlan(store, { id: 9999, path: planFile('p.md', 'x') });
     assert.ok(resp.isError);
     assert.match(decode(resp).error as string, /not found/i);
+  });
+});
+
+describe('uploadPlan path guard', () => {
+  let outside: string;
+  beforeEach(() => { outside = mkdtempSync(join(tmpdir(), 'stm-outside-')); });
+  afterEach(() => { rmSync(outside, { recursive: true, force: true }); });
+
+  test('file outside every allowed root is rejected', () => {
+    const { id } = addTask();
+    const path = join(outside, 'plan.md');
+    writeFileSync(path, 'x');
+    const resp = handleUploadPlan(store, { id, path }, [dir]);
+    assert.ok(resp.isError);
+    assert.match(decode(resp).error as string, /outside the allowed plan directories/);
+    assert.equal(store.getById(id)?.plan, undefined);
+  });
+
+  test('.. segments that escape the root are rejected', () => {
+    const { id } = addTask();
+    writeFileSync(join(outside, 'plan.md'), 'x');
+    const path = join(dir, '..', outside.split(/[\\/]/).pop()!, 'plan.md');
+    const resp = handleUploadPlan(store, { id, path }, [dir]);
+    assert.ok(resp.isError);
+    assert.match(decode(resp).error as string, /outside/);
+  });
+
+  test('symlink inside a root pointing outside is rejected', (t) => {
+    const { id } = addTask();
+    const target = join(outside, 'secret.md');
+    writeFileSync(target, 'x');
+    const link = join(dir, 'link.md');
+    try {
+      symlinkSync(target, link);
+    } catch {
+      t.skip('symlinks need extra privileges on this platform');
+      return;
+    }
+    const resp = handleUploadPlan(store, { id, path: link }, [dir]);
+    assert.ok(resp.isError);
+    assert.match(decode(resp).error as string, /outside/);
+  });
+
+  test('directory named *.md is rejected', () => {
+    const { id } = addTask();
+    const path = join(dir, 'folder.md');
+    mkdirSync(path);
+    const resp = handleUploadPlan(store, { id, path }, [dir]);
+    assert.ok(resp.isError);
+    assert.match(decode(resp).error as string, /not a regular file/);
+  });
+
+  test('file in a nested folder of a root is accepted', () => {
+    const { id } = addTask();
+    mkdirSync(join(dir, 'sub'));
+    const path = join(dir, 'sub', 'plan.md');
+    writeFileSync(path, 'nested');
+    assert.ok(!handleUploadPlan(store, { id, path }, [dir]).isError);
+    assert.equal(store.getById(id)?.plan, 'nested');
+  });
+
+  test('missing root is ignored, not an error', () => {
+    const { id } = addTask();
+    const path = join(dir, 'plan.md');
+    writeFileSync(path, 'x');
+    assert.ok(!handleUploadPlan(store, { id, path }, [join(outside, 'nope'), dir]).isError);
+  });
+});
+
+describe('isWithin', () => {
+  test('posix', () => {
+    assert.equal(isWithin('/a/b', '/a/b/c.md', posix), true);
+    assert.equal(isWithin('/a/b', '/a/b/..x.md', posix), true);
+    assert.equal(isWithin('/a/b', '/a/bc/c.md', posix), false);
+    assert.equal(isWithin('/a/b', '/a/c.md', posix), false);
+    assert.equal(isWithin('/a/b', '/a/b', posix), false);
+  });
+
+  test('win32: case-insensitive, other drives and prefix siblings rejected', () => {
+    assert.equal(isWithin('C:\\Users\\Me\\proj', 'c:\\users\\me\\PROJ\\plan.md', win32), true);
+    assert.equal(isWithin('C:\\proj', 'D:\\proj\\plan.md', win32), false);
+    assert.equal(isWithin('C:\\proj', 'C:\\projx\\plan.md', win32), false);
+    assert.equal(isWithin('C:\\proj', 'C:\\proj\\..\\other\\plan.md', win32), false);
   });
 });
 

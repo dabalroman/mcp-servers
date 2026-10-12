@@ -240,7 +240,7 @@ These are called by Claude — you don't type them yourself.
 | `add` | Schedule a new task. |
 | `update` | Edit any field in place. |
 | `replace` | Swap one exact, unique snippet in description or plan without re-sending the field. |
-| `uploadPlan` | Store an absolute-path `.md` file as a task's plan; the server reads it, so plan text never passes through a tool call. |
+| `uploadPlan` | Store an absolute-path `.md` file as a task's plan; the server reads it, so plan text never passes through a tool call. Only reads from the project root, `~/.claude/plans/` (where plan mode saves) and the OS temp dir. |
 | `addNote` | Append a note to a task without re-sending the description. |
 | `updateNote` | Replace one note's text. |
 | `deleteNote` | Remove one note. |

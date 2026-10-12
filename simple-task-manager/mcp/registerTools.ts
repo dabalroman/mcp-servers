@@ -163,11 +163,11 @@ export function registerTools(server: McpServer, store: Store): void {
   // ── uploadPlan ─────────────────────────────────────────────────────────────────
   const uploadPlanSchema = {
     id: z.coerce.number().int().positive().describe('Task ID to store the plan on'),
-    path: z.string().min(1).describe('Absolute path to a .md file'),
+    path: z.string().min(1).describe('Absolute path to a .md file inside the project root (folder of TASKS_DB), ~/.claude/plans/, or the OS temp dir'),
   };
   server.tool(
     'uploadPlan',
-    "Store a markdown file as a task's plan. The server reads the file, so you don't paste plan text into update(). Use this whenever the plan already exists as a .md file (e.g. the plan-mode file). Re-uploading replaces the stored plan; the DB copy is canonical and the file is left on disk. Returns { success, id, bytes }; read the plan back with getById.",
+    "Store a markdown file as a task's plan. The server reads the file, so you don't paste plan text into update(). Use this whenever the plan already exists as a .md file (e.g. the plan-mode file). Re-uploading replaces the stored plan; the DB copy is canonical and the file is left on disk. Only files under the project root (folder of TASKS_DB), ~/.claude/plans/ or the OS temp dir are accepted; symlinks are resolved before the check. Returns { success, id, bytes }; read the plan back with getById.",
     uploadPlanSchema,
     async (args: z.infer<z.ZodObject<typeof uploadPlanSchema>>): Promise<MCPContent> => handleUploadPlan(store, args)
   );

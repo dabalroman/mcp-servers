@@ -18,7 +18,7 @@ If neither (a) nor (b) holds, omit the status field (or pass 'refinement') and l
 The strict sequence is: refinement → plan (optional) → todo → in_progress → done. Never skip statuses.
 
 1. **refinement**: Use /refine. Ask PM-style clarifying questions, enrich the description and summary via update(), then ask the user whether to promote to 'plan' or 'todo'. Do not implement.
-2. **plan** (optional): Enter Claude's plan mode. Write the implementation plan to a .md file and upload it via uploadPlan({ id, path }) (absolute path). The DB copy is canonical; the .md is scratch — to revise, edit it and call uploadPlan again. After the user approves the plan, ask to promote to 'todo' via setStatus(id, 'todo'). The task then waits for /implement to pick it up.
+2. **plan** (optional): Enter Claude's plan mode. Write the implementation plan to a .md file and upload it via uploadPlan({ id, path }) (absolute path under the project root, ~/.claude/plans/, or the OS temp dir). The DB copy is canonical; the .md is scratch — to revise, edit it and call uploadPlan again. After the user approves the plan, ask to promote to 'todo' via setStatus(id, 'todo'). The task then waits for /implement to pick it up.
 3. **todo**: Ready for implementation. /implement sets setStatus(id, 'in_progress') and then starts the code changes — this transition belongs to the implement step, made right before the code changes begin.
 4. **in_progress**: Implement, test, get user confirmation ("lgtm"). Only then commit and call setStatus(id, 'done').
 5. Use delete() only when the user explicitly asks to cancel or remove a task — not for completed work.
