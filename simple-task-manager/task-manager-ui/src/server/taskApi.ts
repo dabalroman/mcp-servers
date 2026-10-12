@@ -39,7 +39,7 @@ export function createTaskApi({ dbPath }: TaskApiOptions) {
 
     heartbeatTimer = setInterval(() => {
       for (const res of watchers) {
-        try { res.write(': ping\n\n'); } catch { /* client gone */ }
+        try { res.write('event: ping\ndata: {}\n\n'); } catch { /* client gone */ }
       }
     }, 20_000);
     if (typeof heartbeatTimer.unref === 'function') heartbeatTimer.unref();

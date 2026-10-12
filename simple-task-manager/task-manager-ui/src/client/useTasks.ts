@@ -1,4 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { WATCHDOG_INTERVAL_MS, isStreamStale, shouldRefetchOnReturn } from './streamHealth';
 import type { Task, TaskRef, TaskStatus, TaskType, TaskPriority } from '@/types/task';
 
 export type TasksPayload = {
@@ -38,21 +39,75 @@ async function fetchTasks(): Promise<TasksPayload> {
 
 export function useTasks() {
   const [data, setData] = useState<TasksPayload>({ active: [], done: [] });
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
+  const fetchSeq = useRef(0);
+
   const refresh = useCallback(() => {
-    fetchTasks().then(setData).catch(setError);
+    const seq = ++fetchSeq.current;
+    fetchTasks()
+      .then((payload) => {
+        if (seq !== fetchSeq.current) return; // a newer fetch is in flight
+        setData(payload);
+        setError(null);
+        setLoading(false);
+      })
+      .catch((err: Error) => {
+        if (seq === fetchSeq.current) setError(err);
+      });
   }, []);
 
   useEffect(() => {
     refresh();
 
-    const es = new EventSource('/api/tasks/stream');
-    es.addEventListener('tasks-changed', refresh);
-    es.addEventListener('connected', refresh); // re-fetch after reconnect to catch missed events
-    es.onerror = () => {};
+    let es: EventSource | null = null;
+    let lastSeen = Date.now();
+    let hiddenAt: number | null = null;
 
-    return () => es.close();
+    const alive = () => { lastSeen = Date.now(); };
+    const onChange = () => { alive(); refresh(); };
+
+    const open = () => {
+      es?.close();
+      lastSeen = Date.now(); // a stream still connecting must not look stale
+      es = new EventSource('/api/tasks/stream');
+      es.addEventListener('tasks-changed', onChange);
+      es.addEventListener('connected', onChange); // re-fetch after reconnect to catch missed events
+      es.addEventListener('ping', alive);
+    };
+
+    const reopenIfClosed = () => {
+      if (es?.readyState === EventSource.CLOSED) open();
+    };
+
+    const onVisibility = () => {
+      const now = Date.now();
+      if (document.visibilityState === 'hidden') {
+        hiddenAt = now;
+        return;
+      }
+      if (es?.readyState === EventSource.CLOSED || isStreamStale(lastSeen, now)) open();
+      else if (shouldRefetchOnReturn(hiddenAt, now)) refresh();
+      hiddenAt = null;
+    };
+
+    open();
+    const watchdog = setInterval(() => {
+      if (document.visibilityState === 'visible' && isStreamStale(lastSeen, Date.now())) open();
+    }, WATCHDOG_INTERVAL_MS);
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('focus', reopenIfClosed);
+    window.addEventListener('online', reopenIfClosed);
+
+    return () => {
+      es?.close();
+      clearInterval(watchdog);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('focus', reopenIfClosed);
+      window.removeEventListener('online', reopenIfClosed);
+    };
   }, [refresh]);
 
   const add = useCallback(async (body: NewTaskInput): Promise<number> => {
@@ -80,5 +135,5 @@ export function useTasks() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }, []);
 
-  return { data, error, refresh, add, update, remove };
+  return { data, loading, error, refresh, add, update, remove };
 }

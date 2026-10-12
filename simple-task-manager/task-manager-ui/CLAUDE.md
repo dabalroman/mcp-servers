@@ -15,7 +15,7 @@ Standalone web UI for the `simple-task-manager` MCP. Sibling package to `simple-
 |---|---|
 | `server.ts` | Express bootstrap: mounts `/api/tasks`, serves built client from `dist/`, SPA fallback. Reads `TASK_UI_PORT`, `TASKS_DB`, `AUTO_OPEN_TASK_UI`. |
 | `src/server/taskStore.ts` | Thin wrapper over the MCP's `createStore`. Adds `isValidationError(err)` helper. |
-| `src/server/taskApi.ts` | REST + SSE handlers. Self-write broadcast on every mutation + 1s `data_version` poll for external writes. |
+| `src/server/taskApi.ts` | REST + SSE handlers. Self-write broadcast on every mutation + 1s `data_version` poll for external writes. The 20s SSE heartbeat must stay a named `event: ping`, not a `: ping` comment — `EventSource` never exposes comments, and the `useTasks` watchdog reopens the stream after 45s without one. |
 | `src/server/taskRouter.ts` | connect/express middleware that fronts the API. Used by both `server.ts` and the Vite dev plugin. |
 | `src/client/*` | The React SPA (TaskManager, TaskCard, TaskForm, useTasks, helpers). Copied from random-tools and stripped of the tool-registry coupling. |
 | `src/components/*` | Shared UI: ToolHeader + shadcn primitives (Button, Dialog, Sonner). |

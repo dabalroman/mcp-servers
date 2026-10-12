@@ -18,7 +18,7 @@ const COLLAPSE_KEY = 'task-manager:collapse';
 type Tab = 'active' | 'done';
 
 export default function TaskManager() {
-  const { data, error, add, update, remove } = useTasks();
+  const { data, loading, error, add, update, remove } = useTasks();
   const [tab, setTab] = useState<Tab>('active');
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
@@ -117,6 +117,8 @@ export default function TaskManager() {
         id: 'tasks-fetch-error',
         description: 'Is the server running?',
       });
+    } else {
+      toast.dismiss('tasks-fetch-error');
     }
   }, [error]);
 
@@ -129,6 +131,9 @@ export default function TaskManager() {
   const counts: Record<Tab, number> = { active: active.length, done: done.length };
 
   function renderTaskList(groups: ReturnType<typeof groupTasks>, noTasksMsg: string, showReopen: boolean) {
+    if (loading) {
+      return <p className="text-muted-foreground text-base">loading…</p>;
+    }
     const tasks = groups.flatMap((g) => g.tasks);
     if (tasks.length === 0) {
       return <p className="text-muted-foreground text-base">{noTasksMsg}</p>;
@@ -216,7 +221,7 @@ export default function TaskManager() {
             >
               <span className="text-xs">{t}</span>
               <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
-                {counts[t]}
+                {loading ? '…' : counts[t]}
               </span>
             </button>
           ))}
