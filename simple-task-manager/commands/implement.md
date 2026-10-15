@@ -1,5 +1,5 @@
 ---
-description: Implement todo tasks via subagents — one at a time, confirm before each, commit on lgtm. Args: "#NN" | fuzzy scope (e.g. "svg joiner") | empty for all.
+description: Implement todo tasks via subagents — one at a time, confirm before each, OCR code review before relay, commit on lgtm. Args: "#NN" | fuzzy scope (e.g. "svg joiner") | empty for all.
 ---
 
 # Implement
@@ -43,7 +43,7 @@ Rules:
 - Each task gets a clear imperative `subject` and a short `description` saying what changes and where.
 - Set `activeForm` on each task (e.g. "Adding priority column migration") so the spinner is informative.
 - If the task-manager task has a `plan`, follow the plan's structure for the breakdown. If there is no plan, derive steps from the description.
-- Aim for 2–8 steps. A single-file typo fix still gets at least "Apply fix" + "Run verify". A large feature should not exceed ~8 — group related changes.
+- Aim for 2–8 steps. A single-file typo fix still gets at least "Apply fix" + "Run verify" + "Run OCR review". A large feature should not exceed ~8 — group related changes.
 - Mark each step `in_progress` (via `TaskUpdate`) right before you start it and `completed` right after.
 
 ### Step 5 — Implement
@@ -72,15 +72,34 @@ When a verify run fails or behaviour is unexpected and the root cause isn't obvi
 - **Ask the user to add temporary debug logs** (e.g. `console.log` at key decision points) and re-run. This gives you live feedback from the actual code path and is faster than guessing. Frame the request concretely: which file, which line, what to log.
 - Remove all debug logs before marking the step completed.
 
-### Step 6 — Relay to user
+### Step 6 — Code review (OCR)
 
-Summarise what changed and the verify result. Tell the user exactly what to test (golden path + edge cases from the task description).
+**Mandatory before relaying to the user — no code is committed without it.** Uses [open-code-review](https://github.com/alibaba/open-code-review) (`ocr` CLI, installed globally via npm) in **delegation mode**: OCR picks the files and resolves per-language review rules, you do the review yourself. No OCR LLM/API key is involved. The step-4 task list always includes a "Run OCR review" step.
 
-### Step 7 — Wait for confirmation
+**Always run it — assume `ocr` is installed.** Don't probe with `which`/`--version` first; just run step 1. Only if that command fails with `command not found` (exit 127), skip the rest of this step, tell the user verbatim **"Skipping code review, OCR not installed"**, carry that line into the step-7 summary, and continue. Any other `ocr` error is not a skip — report it and resolve it before relaying.
+
+1. **Preview** — from the repo root: `ocr delegate preview --format json -b "<task #id title + one-line goal>"`. Workspace mode covers staged, unstaged and untracked changes. A `git ... older than the minimum supported version` warning is expected and harmless.
+2. **Scope** — keep only `reviewable_files` this task created or modified. Pre-existing dirty files unrelated to the task are recorded as `skipped: not part of this task`.
+3. **Rules** — `ocr delegate rule --format json <path...>` for the in-scope files. Rules are grouped; apply each group's checklist to its files.
+4. **Review every in-scope file** — tracked: `git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"`; untracked (`added`): read the whole file. Read surrounding code as needed. Don't stop at the first finding. Each file ends `reviewed` or `skipped` with a concrete reason.
+5. **Classify** each finding as `path:line`, category (bug, security, performance, maintainability, test, style, documentation), severity (critical, high, medium, low). Discard likely false positives.
+6. **Address the issues:**
+   - **critical / high / medium** — fix them, then re-run `npm run verify`.
+   - **low** — fix if trivial, otherwise list them for the user.
+   - A finding you deliberately don't fix (out of scope, contradicts the task/plan, false positive on reflection) stays in the report with the reason.
+   - If fixes were non-trivial, re-run steps 1–5 on the changed files once.
+
+For complex tasks the review runs in the main conversation after the subagent reports back, not inside the subagent — the reviewer shouldn't be the author.
+
+### Step 7 — Relay to user
+
+Summarise what changed and the verify result. Include the OCR review summary: files reviewed/skipped (coverage), findings fixed, and any findings left open with reasons. Tell the user exactly what to test (golden path + edge cases from the task description).
+
+### Step 8 — Wait for confirmation
 
 **Stop here.** Do not commit. Do not move to the next task. Wait for the user to confirm the change works (e.g. "lgtm", "looks good", "ship it"). If the user reports a problem, fix it inline (simple) or spawn a follow-up agent (complex).
 
-### Step 8 — Commit and close
+### Step 9 — Commit and close
 
 Once the user confirms:
 
