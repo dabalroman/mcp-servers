@@ -64,7 +64,8 @@ The brief must contain:
 - The verification the agent does itself: host-side checks/tests, with exact commands and expected output, plus "prove unchanged-by-contract outputs are unchanged" (diffs, checksums) rather than asserting it.
 - Prohibitions: **no build tool run, no deploy/flash, no commit, no push, no CLAUDE.md edits** (report the proposed wording), no stray files (`__pycache__`, temp scripts).
 - Comment style: terse, non-obvious *why* only.
-- The report you want back: files changed, check outputs, the proof diffs, proposed CLAUDE.md wording, a suggested commit message in the project's style, and "confirm you ran no build and no deploy".
+- "Run `/implement`'s OCR code review step and fix its findings before handing back — it is not optional."
+- The report you want back: files changed, check outputs, the proof diffs, the OCR review summary (coverage, findings fixed, findings left open with reasons — or "Skipping code review, OCR not installed"), proposed CLAUDE.md wording, a suggested commit message in the project's style, and "confirm you ran no build and no deploy".
 
 While agents run, do useful non-overlapping work (prepare the review rules, draft docs), never anything in their files.
 
@@ -89,7 +90,7 @@ Follow the project's own deploy/verify protocol from CLAUDE.md exactly (pre-flig
 
 When every queued task has landed and built:
 
-1. Review the whole uncommitted change (working tree + index against `HEAD`). If `ocr` (Open Code Review) is installed, use **delegation mode only** (`ocr delegate preview` in workspace mode, `ocr delegate rule <paths>`) — never configure a paid LLM endpoint. Otherwise review the diff directly.
+1. Review the whole uncommitted change (working tree + index against `HEAD`) with `ocr` (Open Code Review) in **delegation mode only** (`ocr delegate preview` in workspace mode, `ocr delegate rule <paths>`) — never configure a paid LLM endpoint. Assume it is installed and just run it; only if the command fails with `command not found` (exit 127), tell the user **"Skipping code review, OCR not installed"**, review the diff directly, and carry that line into the final report. Agents already ran OCR per task; this pass reviews the combined change.
 2. Make sure the review rules cover the new code: a repo-local rule file written for an earlier, narrower purpose (e.g. "only V1 matters") will silently suppress real bugs in new code — widen it before reviewing.
 3. Dispatch per-file-group reviews to `sonnet` agents; verify every finding yourself against the code before accepting it. Drop anything you cannot tie to a concrete failure.
 4. Fix accepted findings (inline if small, otherwise an agent whose model you pick by the Step 2 rules), same verify → build-all → redeploy loop. Fixes fold into their task's change; never commit them separately.

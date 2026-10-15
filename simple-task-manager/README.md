@@ -4,7 +4,7 @@ A persistent task manager for [Claude Code](https://claude.ai/code), exposed as 
 
 **Batteries included** - behavioral rules are embedded in the server and loaded automatically when Claude connects.
 
-**Skills included** - Use `/refine`, `/implement`, `/implement-as-coordinator` and `/autopilot` skills to make it flow!
+**Skills included** - Use `/refine`, `/implement` and `/implement-as-coordinator` skills to make it flow!
 
 **Web UI included** - When Claude starts the MCP, it also spawns a bundled web app at <http://localhost:7374>.
 
@@ -101,11 +101,6 @@ It will try to write and run tests to ensure code quality.
 Use this skill to hand a whole queue to Claude as a supervisor you can walk away from. Claude orders the tasks by file overlap and dependency, runs one subagent per task through `/implement` (Sonnet for well-scoped work, Opus for new architecture or hazardous rewrites, picked per task; disjoint tasks in parallel), independently re-checks every hand-back, owns every build and deploy (build all targets), then code-reviews the whole change and fixes what it finds, all uncommitted. Questions are held until the final report, which asks for approval; only then does it commit, one commit per feature on the current branch.
 - `"/implement-as-coordinator #45 #50 #43"` — those tasks, in the order Claude decides
 - `"/implement-as-coordinator <scope>"` or no argument — every `todo` task in the scope / overall
-
-### /autopilot
-Use this skill to batch-implement every `todo` task in a scope. Claude works through them one branch per task, runs the full pipeline (plan → implement → tests → commit) without per-task confirmation, and stops only at hard blockers. You review the resulting branches locally and merge the good ones.
-- `"/autopilot <scope>"` — Claude works through every `todo` task tagged with `<scope>`
-- `"/autopilot"` — Claude lists scopes and asks which one
 
 &nbsp;
 &nbsp;
