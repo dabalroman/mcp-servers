@@ -4,7 +4,7 @@ A persistent task manager for [Claude Code](https://claude.ai/code), exposed as 
 
 **Batteries included** - behavioral rules are embedded in the server and loaded automatically when Claude connects.
 
-**Skills included** - Use `/refine`, `/implement` and `/implement-as-coordinator` skills to make it flow!
+**Skills included** - Use `/refine`, `/implement`, `/implement-as-coordinator` and `/assess` skills to make it flow!
 
 **Web UI included** - When Claude starts the MCP, it also spawns a bundled web app at <http://localhost:7374>.
 
@@ -101,6 +101,11 @@ It will try to write and run tests to ensure code quality.
 Use this skill to hand a whole queue to Claude as a supervisor you can walk away from. Claude orders the tasks by file overlap and dependency, runs one subagent per task through `/implement` (Sonnet for well-scoped work, Opus for new architecture or hazardous rewrites, picked per task; disjoint tasks in parallel), independently re-checks every hand-back, owns every build and deploy (build all targets), then code-reviews the whole change and fixes what it finds, all uncommitted. Questions are held until the final report, which asks for approval; only then does it commit, one commit per feature on the current branch.
 - `"/implement-as-coordinator #45 #50 #43"` — those tasks, in the order Claude decides
 - `"/implement-as-coordinator <scope>"` or no argument — every `todo` task in the scope / overall
+
+### /assess
+Use this skill to step back and judge a scope as a product. Claude first saves and reviews real-usage evidence, recording each trial against fixed checks, and you give the go/no-go verdict. Then an advocate and a skeptic agent argue about the product over two rounds. Claude synthesises their arguments into ranked suggestions, and only the ones you pick become tasks.
+- `"/assess #283"` — run the evaluation task #283
+- `"/assess vault ai"` — assess a scope
 
 &nbsp;
 &nbsp;
