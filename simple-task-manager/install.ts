@@ -62,10 +62,10 @@ if (process.argv[2] === '--global') {
 // fast. node_modules may be absent on a fresh checkout — install first if so.
 if (!existsSync(resolve(serverDir, 'node_modules'))) {
   console.log('node_modules not found — running npm install...');
-  execFileSync('npm', ['install'], { cwd: serverDir, stdio: 'inherit' });
+  execFileSync('npm', ['install'], { cwd: serverDir, stdio: 'inherit', shell: process.platform === 'win32' });
 }
 console.log('Building dist/ from current source...');
-execFileSync('npm', ['run', 'build'], { cwd: serverDir, stdio: 'inherit' });
+execFileSync('npm', ['run', 'build'], { cwd: serverDir, stdio: 'inherit', shell: process.platform === 'win32' });
 
 // ── per-project: write .mcp.json ───────────────────────────────────────────────
 const projectDir = resolve(process.argv[2] ?? process.cwd());
