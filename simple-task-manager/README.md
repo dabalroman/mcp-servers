@@ -87,7 +87,7 @@ Then try some prompts:
 ## Skills included 
 
 ### /refine
-Use this skill to refine any task. Claude will act as a PM and ask great questions about your task, and then update the description with refined version.
+Use this skill to refine any task. Claude acts as a PM. It first looks at the task as a product decision: who it serves, what the user gets, how you would know it worked, and which related ideas are worth filing separately. Then it asks the technical questions and rewrites the description in Goal / Facts / Changes / Steps form.
 - `"/refine #143"`
 - `"Let's /refine mcp tasks"`
 
