@@ -12,6 +12,7 @@ import {
   RELATIONS,
   type AddInput,
   type Store,
+  type Task,
 } from './tasks.js';
 
 const MIGRATION_NAMES = [
@@ -22,6 +23,7 @@ const MIGRATION_NAMES = [
   '20260519000000_drop-meta-counter-autoincrement-tasks',
   '20260519010000_add-plan-status',
   '20261012120000_add-notes',
+  '20261020120000_add-epic-type-and-parent',
 ];
 
 let dir: string;
@@ -900,5 +902,169 @@ describe('notes', () => {
     assert.equal(store.getById(id)?.notes, undefined);
     assert.equal(store.getById(id)?.noteCount, undefined);
     assert.equal(store.getAll()[0]?.noteCount, undefined);
+  });
+});
+
+describe('epics', () => {
+  function makeEpic(overrides: Partial<AddInput> = {}): number {
+    return makeTask({ type: 'epic', title: 'Roadmap', description: 'Order: A then B', ...overrides }).id;
+  }
+
+  test('add with parentId links the child; getById carries parentId and epicTitle', () => {
+    const epic = makeEpic();
+    const { id } = makeTask({ parentId: epic });
+    const t = store.getById(id);
+    assert.equal(t?.parentId, epic);
+    assert.equal(t?.epicTitle, 'Roadmap');
+  });
+
+  test('rejects a parent that does not exist', () => {
+    assert.throws(() => makeTask({ parentId: 999 }), /Validation failed: parent #999 does not exist/);
+  });
+
+  test('rejects a parent that is not an epic', () => {
+    const { id: plain } = makeTask();
+    assert.throws(() => makeTask({ parentId: plain }), /parent #\d+ is not an epic/);
+    const { id } = makeTask();
+    assert.throws(() => store.update(id, { parentId: plain }), /is not an epic/);
+  });
+
+  test('rejects an epic with a parent (no nesting) on add and on update', () => {
+    const epic = makeEpic();
+    assert.throws(() => makeEpic({ parentId: epic }), /epics cannot have a parent/);
+    const other = makeEpic({ title: 'Other' });
+    assert.throws(() => store.update(other, { parentId: epic }), /epics cannot have a parent/);
+  });
+
+  test('rejects retyping a task with a parent into an epic', () => {
+    const epic = makeEpic();
+    const { id } = makeTask({ parentId: epic });
+    assert.throws(() => store.update(id, { type: 'epic' }), /epics cannot have a parent/);
+    assert.equal(store.getById(id)?.type, 'bug');
+  });
+
+  test('rejects retyping an epic that still has children; allowed once emptied', () => {
+    const epic = makeEpic();
+    const { id: child } = makeTask({ parentId: epic });
+    assert.throws(() => store.update(epic, { type: 'feature' }), new RegExp(`epic #${epic} still has children`));
+    assert.equal(store.getById(epic)?.type, 'epic');
+    store.update(child, { parentId: null });
+    store.update(epic, { type: 'feature' });
+    assert.equal(store.getById(epic)?.type, 'feature');
+  });
+
+  test('a failed update leaves the task unchanged', () => {
+    const { id } = makeTask({ title: 'Keep me' });
+    assert.throws(() => store.update(id, { title: 'Changed', parentId: 999 }));
+    assert.equal(store.getById(id)?.title, 'Keep me');
+  });
+
+  test('parentId: null clears the parent; omitting it keeps it', () => {
+    const epic = makeEpic();
+    const { id } = makeTask({ parentId: epic });
+    store.update(id, { title: 'Renamed' });
+    assert.equal(store.getById(id)?.parentId, epic);
+    store.update(id, { parentId: null });
+    const t = store.getById(id);
+    assert.equal(t?.parentId, undefined);
+    assert.equal(t?.epicTitle, undefined);
+    assert.equal(t?.epic, undefined);
+  });
+
+  test('getById on a child injects the epic text and all its notes', () => {
+    const epic = makeEpic({ summary: 'gist' });
+    store.addNote(epic, 'first');
+    store.addNote(epic, 'second');
+    const { id } = makeTask({ parentId: epic });
+    const t = store.getById(id);
+    assert.equal(t?.epic?.id, epic);
+    assert.equal(t?.epic?.title, 'Roadmap');
+    assert.equal(t?.epic?.status, 'refinement');
+    assert.equal(t?.epic?.summary, 'gist');
+    assert.equal(t?.epic?.description, 'Order: A then B');
+    assert.deepEqual(t?.epic?.notes?.map((n) => n.body), ['first', 'second']);
+    assert.equal(t?.children, undefined);
+  });
+
+  test('getById on an epic lists children ordered by id and carries no epic', () => {
+    const epic = makeEpic();
+    const { id: a } = makeTask({ parentId: epic, title: 'A', priority: 'low' });
+    makeTask({ title: 'Unrelated' });
+    const { id: b } = makeTask({ parentId: epic, title: 'B', type: 'feature', priority: 'high' });
+    store.setStatus(a, 'done');
+    const t = store.getById(epic);
+    assert.deepEqual(t?.children, [
+      { id: a, title: 'A', status: 'done', type: 'bug', priority: 'low' },
+      { id: b, title: 'B', status: 'refinement', type: 'feature', priority: 'high' },
+    ]);
+    assert.equal(t?.epic, undefined);
+  });
+
+  test('an epic with no children gets an empty children array', () => {
+    assert.deepEqual(store.getById(makeEpic())?.children, []);
+  });
+
+  test('update echo (readTask) stays slim: no epic or children', () => {
+    const epic = makeEpic();
+    const { id } = makeTask({ parentId: epic });
+    const echo = store.update(id, { title: 'x' })?.task;
+    assert.equal(echo?.parentId, epic);
+    assert.equal(echo?.epic, undefined);
+    const epicEcho = store.update(epic, { title: 'y' })?.task;
+    assert.equal(epicEcho?.children, undefined);
+  });
+
+  test('list reads carry parentId and epicTitle but never epic or children', () => {
+    const epic = makeEpic();
+    store.addNote(epic, 'n');
+    const { id } = makeTask({ parentId: epic, scope: 's' });
+    const find = (ts: { id: number }[]) => ts.find((t) => t.id === id) as Task;
+    store.update(id, { refs: [{ id: epic, relation: 'relates to' }] });
+    const rel = store.getRelated(epic);
+    const reads = [
+      find(store.getAll()),
+      find(store.getByType('bug')),
+      find(store.getByScope('s')),
+      find(store.load().active),
+      find(rel!.inbound),
+      store.getNext('bug')!,
+    ];
+    for (const t of reads) {
+      assert.equal(t.id, id);
+      assert.equal(t.parentId, epic);
+      assert.equal(t.epicTitle, 'Roadmap');
+      assert.equal(t.epic, undefined);
+      assert.equal(t.children, undefined);
+    }
+    const epicRead = store.getByType('epic')[0];
+    assert.equal(epicRead?.children, undefined);
+    assert.equal(epicRead?.epic, undefined);
+  });
+
+  test('getAll and getByType list epics; epic sorts after other', () => {
+    const epic = makeEpic();
+    makeTask({ type: 'other' });
+    assert.deepEqual(store.getByType('epic').map((t) => t.id), [epic]);
+    const types = store.getAll().map((t) => t.type);
+    assert.ok(types.lastIndexOf('other') < types.indexOf('epic'));
+  });
+
+  test('getNext skips epics, with and without a type filter', () => {
+    makeEpic({ priority: 'critical' });
+    assert.equal(store.getNext(), null);
+    assert.equal(store.getNext('epic'), null);
+    const { id } = makeTask({ type: 'other', priority: 'low' });
+    assert.equal(store.getNext()?.id, id);
+    assert.equal(store.getNext('epic'), null);
+  });
+
+  test('deleting an epic detaches its children instead of deleting them', () => {
+    const epic = makeEpic();
+    const { id } = makeTask({ parentId: epic });
+    assert.ok(store.delete(epic));
+    const t = store.getById(id);
+    assert.ok(t);
+    assert.equal(t.parentId, undefined);
+    assert.equal(t.epic, undefined);
   });
 });

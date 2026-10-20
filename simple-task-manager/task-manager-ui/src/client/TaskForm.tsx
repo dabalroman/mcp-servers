@@ -17,11 +17,12 @@ type FormState = {
   description: string;
   summary: string;
   scope: string;
+  parentId: number | null;
   refs: TaskRef[];
   status: InitialStatus | undefined;
 };
 
-const EMPTY: FormState = { title: '', type: 'feature', priority: 'medium', description: '', summary: '', scope: '', refs: [], status: 'refinement' };
+const EMPTY: FormState = { title: '', type: 'feature', priority: 'medium', description: '', summary: '', scope: '', parentId: null, refs: [], status: 'refinement' };
 
 const INITIAL_STATUSES: InitialStatus[] = ['refinement', 'plan', 'todo'];
 
@@ -48,6 +49,7 @@ function deriveForm(initial: Task | null): FormState {
     description: initial.description ?? '',
     summary: initial.summary ?? '',
     scope: initial.scope ?? '',
+    parentId: initial.parentId ?? null,
     refs: initial.refs ?? [],
     status: deriveStatus(initial.status),
   };
@@ -60,6 +62,7 @@ function formsEqual(a: FormState, b: FormState): boolean {
     a.description === b.description &&
     a.summary === b.summary &&
     a.scope === b.scope &&
+    a.parentId === b.parentId &&
     a.status === b.status &&
     a.refs.length === b.refs.length &&
     a.refs.every((r, i) => r.id === b.refs[i]?.id && r.relation === b.refs[i]?.relation);
@@ -189,7 +192,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
     onOpenChange(requestedOpen);
   }
 
-  const set = <K extends keyof Omit<FormState, 'refs'>>(k: K) =>
+  const set = <K extends keyof Omit<FormState, 'refs' | 'parentId'>>(k: K) =>
     (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
       setForm((f) => ({ ...f, [k]: e.target.value as FormState[K] }));
 
@@ -270,6 +273,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
 
   const selectedIds = new Set(form.refs.map((r) => r.id));
   const editingId = initial?.id;
+  const epics = allTasks.filter((t) => t.type === 'epic' && t.id !== editingId);
 
   const candidates = allTasks.filter((t) =>
     t.id !== editingId &&
@@ -287,7 +291,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
     if (!form.title.trim() || submitting) return;
     setSubmitting(true);
     try {
-      const ok = await onSubmit(form);
+      const ok = await onSubmit(form.type === 'epic' ? { ...form, parentId: null } : form);
       if (ok) onOpenChange(false);
     } finally {
       setSubmitting(false);
@@ -401,6 +405,20 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
               </div>
             </div>
           </div>
+
+          {form.type !== 'epic' && (
+            <label className="flex flex-col gap-1">
+              <span className="text-xs tracking-widest text-muted-foreground uppercase">Parent epic</span>
+              <select
+                value={form.parentId ?? ''}
+                onChange={(e) => setForm((f) => ({ ...f, parentId: e.target.value === '' ? null : Number(e.target.value) }))}
+                className="bg-background border border-border px-2 h-9 text-base text-foreground focus:outline-none focus:border-primary min-w-0"
+              >
+                <option value="">none</option>
+                {epics.map((t) => <option key={t.id} value={t.id}>#{t.id} {t.title}</option>)}
+              </select>
+            </label>
+          )}
 
           <label className="flex flex-col gap-1">
             <span className="text-xs tracking-widest text-muted-foreground uppercase">Description</span>

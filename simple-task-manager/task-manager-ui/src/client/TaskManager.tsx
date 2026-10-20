@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TaskListControls, loadViewState } from '@/components/TaskListControls';
 import { cn } from '@/lib/utils';
-import { sortTasks, groupTasks } from '@/lib/taskView';
+import { sortTasks, groupTasks, nestEpicChildren, epicProgress } from '@/lib/taskView';
 import type { ViewState } from '@/lib/taskView';
 import { useTasks } from './useTasks';
 import { TaskCard } from './TaskCard';
@@ -16,6 +16,10 @@ import type { Task, TaskStatus, TaskType } from '@/types/task';
 const COLLAPSE_KEY = 'task-manager:collapse';
 
 type Tab = 'active' | 'done';
+
+// Tree rail: each child draws its own segment (bridging the gap-2 above it) plus a
+// tick to its title row; the last segment stops at its tick.
+const EPIC_RAIL = 'relative ml-2 pl-5 before:absolute before:left-0 before:-top-2 before:bottom-0 before:border-l before:border-primary/40 after:absolute after:left-0 after:top-6 after:w-4 after:border-t after:border-primary/40 last:before:bottom-auto last:before:h-8';
 
 export default function TaskManager() {
   const { data, loading, error, add, update, remove } = useTasks();
@@ -64,7 +68,7 @@ export default function TaskManager() {
     setFormOpen(true);
   }
 
-  async function handleFormSubmit(form: { title: string; type: TaskType; priority: Task['priority']; description: string; summary: string; scope: string; refs: import('@/types/task').TaskRef[]; status?: 'refinement' | 'plan' | 'todo' }): Promise<boolean> {
+  async function handleFormSubmit(form: { title: string; type: TaskType; priority: Task['priority']; description: string; summary: string; scope: string; parentId: number | null; refs: import('@/types/task').TaskRef[]; status?: 'refinement' | 'plan' | 'todo' }): Promise<boolean> {
     const scope = form.scope || undefined;
     const refs = form.refs.length ? form.refs : undefined;
     try {
@@ -76,11 +80,12 @@ export default function TaskManager() {
           description: form.description,
           summary: form.summary || null,
           scope: scope ?? null,
+          parentId: form.parentId,
           refs: form.refs.length ? form.refs : null,
           ...(form.status !== undefined && { status: form.status }),
         });
       } else {
-        const newId = await add({ title: form.title, type: form.type, priority: form.priority, description: form.description, summary: form.summary || undefined, scope, refs, status: form.status ?? 'refinement' });
+        const newId = await add({ title: form.title, type: form.type, priority: form.priority, description: form.description, summary: form.summary || undefined, scope, ...(form.parentId !== null && { parentId: form.parentId }), refs, status: form.status ?? 'refinement' });
         const toastId = `task-added-${newId}`;
         toast.success(
           <button
@@ -105,7 +110,8 @@ export default function TaskManager() {
         scope: form.scope || null,
         error: err,
       });
-      toast.error(editing ? `Failed to save #${editing.id}.` : 'Failed to add task.');
+      const reason = err instanceof Error && err.message.startsWith('Validation failed') ? ` ${err.message}` : '';
+      toast.error((editing ? `Failed to save #${editing.id}.` : 'Failed to add task.') + reason);
       return false;
     }
   }
@@ -130,6 +136,46 @@ export default function TaskManager() {
   const tabs: Tab[] = ['active', 'done'];
   const counts: Record<Tab, number> = { active: active.length, done: done.length };
 
+  const progress = epicProgress([...active, ...done]);
+
+  function renderCards(list: Task[], showReopen: boolean) {
+    const { roots, childrenByEpic } = nestEpicChildren(list);
+    return roots.map((task) => {
+      const kids = childrenByEpic.get(task.id);
+      const collapseKey = `epic:${task.id}`;
+      const collapsed = kids !== undefined && isCollapsed(localStorage, COLLAPSE_KEY, collapseKey);
+      return (
+        <div key={task.id} className="flex flex-col gap-2">
+          <TaskCard
+            task={task}
+            onStatus={handleStatus}
+            onEdit={openEdit}
+            onRefClick={navigateToRef}
+            highlighted={highlightedId === task.id}
+            showReopen={showReopen}
+            progress={task.type === 'epic' ? progress.get(task.id) : undefined}
+            collapsed={collapsed}
+            onToggleCollapse={kids ? () => toggleCollapse(collapseKey) : undefined}
+            sticky={kids !== undefined && !collapsed}
+          />
+          {kids && !collapsed && kids.map((child) => (
+            <div key={child.id} className={EPIC_RAIL}>
+              <TaskCard
+                task={child}
+                onStatus={handleStatus}
+                onEdit={openEdit}
+                onRefClick={navigateToRef}
+                highlighted={highlightedId === child.id}
+                showReopen={showReopen}
+                nested
+              />
+            </div>
+          ))}
+        </div>
+      );
+    });
+  }
+
   function renderTaskList(groups: ReturnType<typeof groupTasks>, noTasksMsg: string, showReopen: boolean) {
     if (loading) {
       return <p className="text-muted-foreground text-base">loading…</p>;
@@ -142,17 +188,7 @@ export default function TaskManager() {
     if (view.groupBy === 'none') {
       return (
         <div className="flex flex-col gap-2">
-          {tasks.map((task) => (
-            <TaskCard
-              key={task.id}
-              task={task}
-              onStatus={handleStatus}
-              onEdit={openEdit}
-              onRefClick={navigateToRef}
-              highlighted={highlightedId === task.id}
-              showReopen={showReopen}
-            />
-          ))}
+          {renderCards(tasks, showReopen)}
         </div>
       );
     }
@@ -184,17 +220,7 @@ export default function TaskManager() {
               </button>
               {!collapsed && (
                 <div hidden={collapsed} className="flex flex-col gap-2">
-                  {sectionTasks.map((task) => (
-                    <TaskCard
-                      key={task.id}
-                      task={task}
-                      onStatus={handleStatus}
-                      onEdit={openEdit}
-                      onRefClick={navigateToRef}
-                      highlighted={highlightedId === task.id}
-                      showReopen={showReopen}
-                    />
-                  ))}
+                  {renderCards(sectionTasks, showReopen)}
                 </div>
               )}
             </section>

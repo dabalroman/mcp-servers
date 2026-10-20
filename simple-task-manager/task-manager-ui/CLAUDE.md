@@ -22,6 +22,10 @@ Standalone web UI for the `simple-task-manager` MCP. Sibling package to `simple-
 | `src/types/task.ts` | Shared client types — independent of the MCP's tasks.ts to keep the client compile-time clean. Shape must stay aligned. |
 | `vite.config.ts` | Vite plugin mounts the task API on the dev middleware stack so `vite` is enough for full-stack dev. |
 
+## Epics
+
+`Task.parentId`/`epicTitle` come from the store's list reads. `lib/taskView.ts` `nestEpicChildren` nests a child under its epic only when the epic is in the same rendered list (section), so other groupings, scopes and the Done tab show the child flat with an `EPIC #N` pill. `epicProgress` counts done/total over active+done so it doesn't change with the tab. Nested children hang off a tree rail (`EPIC_RAIL` in `TaskManager.tsx`: each child draws its own segment + tick, so the nesting stays legible after the epic scrolls away), and the epic card is `sticky top-0` while its children are shown — but not while the card is expanded, since it can outgrow the viewport. Epic collapse state reuses `collapseState` under key `epic:<id>`; `useRefNavigation` expands the epic before scrolling to a nested child. `TaskForm` hides the parent picker for epics and forces `parentId: null`; the store's epic rules arrive as HTTP 400 and `useTasks` keeps the `Validation failed: …` reason so the save toast can show it.
+
 ## Env vars
 
 | Name | Default | Purpose |

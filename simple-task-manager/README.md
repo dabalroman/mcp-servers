@@ -146,6 +146,8 @@ When you ask "what's next?", Claude recommends in this order:
 4. `idea` — exploratory, needs refinement
 5. `other` — case-by-case
 
+`epic` tasks are never recommended — see [Epics](#epics--shared-context-for-a-group-of-tasks).
+
 Within each type: highest priority first, newest id first.
 
 ### Workflow pipeline
@@ -253,7 +255,7 @@ These are called by Claude — you don't type them yourself.
 |---|---|
 | `getNext` | The single recommended next task. |
 | `getAll` | Tasks grouped by type. Default: non-done. |
-| `getById` | One task by number, including its notes and the titles of linked tasks. |
+| `getById` | One task by number, including its notes and the titles of linked tasks. A task in an epic also carries the epic's full text; an epic carries its children. |
 | `getByType` | Tasks of one type. Default: non-done. |
 | `getByScope` | Tasks tagged with a scope. Default: non-done. |
 | `getScopes` | All scope tags with counts. |
@@ -289,6 +291,18 @@ A task can carry any number of notes. Use them for decisions, findings, and spec
 - Notes are as authoritative as the description. **The newest statement wins**: a newer note overrides an older one, and any note overrides the description.
 - Adding, editing, or deleting a note bumps the task's `updated_at`. Deleting a task deletes its notes.
 - `/refine` folds notes back into the description and then deletes them.
+
+### Epics — shared context for a group of tasks
+
+An epic (`type: "epic"`) is an umbrella for a group of tasks. It holds what a fresh session would otherwise have to be told again: the goal, the order of work, the rules. Epics are never implemented directly and `getNext` never returns one.
+
+- Put a task in an epic with `parentId` on `add` or `update`; pass `parentId: null` to take it out. A task has at most one epic.
+- The parent must be an epic. Epics cannot be nested, and an epic that still has children cannot be changed to another type. Breaking a rule returns an error and changes nothing.
+- `getById` on a child also returns `epic`: the epic's full description and every note, so the agent sees the bigger picture without being told. `getById` on an epic returns `children` (id, title, status, type, priority), ordered by id.
+- List tools (`getAll`, `getByType`, `getNext`, …) carry only `parentId` and `epicTitle`, never the epic's text.
+- Skills add a note to the epic when a child is committed (`#NN done, commit <sha>`), so the epic accumulates progress for the next session.
+- Claude changes an epic's status only when you ask. When the last open child is marked `done`, `setStatus` returns an `epicReminder` and Claude asks whether to close the epic.
+- Deleting an epic detaches its children; they are kept.
 
 ### Refs — structured relations with automatic mirroring
 

@@ -1,4 +1,4 @@
-export type TaskType = 'bug' | 'feature' | 'idea' | 'tool' | 'other';
+export type TaskType = 'bug' | 'feature' | 'idea' | 'tool' | 'other' | 'epic';
 export type TaskPriority = 'critical' | 'high' | 'medium' | 'low';
 export type TaskStatus = 'refinement' | 'plan' | 'todo' | 'in_progress' | 'done';
 
@@ -40,6 +40,8 @@ export type Task = {
   summary?: string;
   plan?: string;
   scope?: string;
+  parentId?: number;
+  epicTitle?: string;
   refs?: TaskRef[];
   notes?: Note[];
   noteCount?: number;

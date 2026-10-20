@@ -16,7 +16,12 @@ export function handleAdd(store: Store, args: AddInput): MCPContent {
 }
 
 export function handleUpdate(store: Store, { id, ...patch }: UpdatePatch & { id: number }): MCPContent {
-  const result = store.update(id, patch);
+  let result: ReturnType<Store['update']>;
+  try {
+    result = store.update(id, patch);
+  } catch (err) {
+    return errorText({ error: err instanceof Error ? err.message : String(err) });
+  }
   if (!result) return notFoundError(id, store, { withAre: true });
   // plan and note bodies omitted from the echo (can be large); getById returns them
   const { plan: _plan, notes, ...rest } = result.task;
@@ -100,11 +105,19 @@ export function handleSetStatus(store: Store, { id, status }: { id: number; stat
       return errorText({ error: `Task #${id} must have a summary before being promoted to todo. Call update({ id: ${id}, summary: "2–3 line gist" }) first, then retry setStatus.` });
     }
   }
+  const wasDone = status === 'done' && store.getById(id)?.status === 'done';
   const ok = store.setStatus(id, status);
   if (!ok) return notFoundError(id, store, { withAre: true });
-  const result: { success: true; knowledgeReminder?: string } = { success: true };
+  const result: { success: true; knowledgeReminder?: string; epicReminder?: string } = { success: true };
   if (status === 'done') {
     result.knowledgeReminder = 'Task closed. Before moving on: (1) identify non-obvious decisions, gotchas, conventions, or architecture changes from this task; (2) update the closest relevant CLAUDE.md with anything genuinely new — keep entries terse and deduped; (3) prune or correct any entries now stale or contradicted. Skip if nothing worth capturing.';
+    const epic = wasDone ? undefined : store.getById(id)?.epic;
+    if (epic && epic.status !== 'done') {
+      const children = store.getById(epic.id)?.children ?? [];
+      if (children.every((c) => c.status === 'done')) {
+        result.epicReminder = `That was the last open child of epic #${epic.id} (${epic.title}). Ask the user whether to close the epic — do not close it yourself.`;
+      }
+    }
   }
   return text(result);
 }

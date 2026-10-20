@@ -121,4 +121,5 @@ On approval:
 3. **Check the index**: `git diff --cached --name-status`. Agents' `git mv` / `git rm --cached` pre-stage changes; make sure each commit holds exactly what it claims and builds on its own.
 4. Commit **one commit per approved feature/task** in the project's message style, with review fixes, feedback rounds and version bumps folded in, never split out. Tasks that touched the same files, or that the user approved as one, go in one commit. Include the version file in the last commit so the tree ends clean. Work the user did not approve stays uncommitted.
 5. `mcp__task-manager__setStatus(id, 'done')` for each committed task, then **reconcile**: `getById` every task that entered the queue and confirm each committed one is `done` (agents set `in_progress` themselves and it is easy to close a task's neighbours but not the task).
-6. Report the commit hashes.
+6. For each committed task that has an `epic` (from `getById`), `mcp__task-manager__addNote` on the epic: `"#NN done, commit <sha>. <anything the next child needs to know>"`. If a `setStatus(done)` response carried `epicReminder`, put the question to the user in the report; never change an epic's status unless they ask.
+7. Report the commit hashes.

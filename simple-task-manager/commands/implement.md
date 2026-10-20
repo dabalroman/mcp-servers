@@ -104,8 +104,9 @@ Summarise what changed and the verify result. Include the OCR review summary: fi
 Once the user confirms:
 
 1. Stage the changed files and commit with a clear message. **No `Co-Authored-By` line.**
-2. Call `mcp__task-manager__setStatus(id, 'done')`.
-3. Go back to step 1 (which will show the next task and ask for confirmation before starting it).
+2. Call `mcp__task-manager__setStatus(id, 'done')`. If the response carries `epicReminder`, ask the user whether to close the epic; never change an epic's status unless they ask.
+3. If the task has an `epic` (from `getById`), call `mcp__task-manager__addNote` on the epic: `"#NN done, commit <sha>. <anything the next child needs to know>"`.
+4. Go back to step 1 (which will show the next task and ask for confirmation before starting it).
 
 ## Why this pattern works
 

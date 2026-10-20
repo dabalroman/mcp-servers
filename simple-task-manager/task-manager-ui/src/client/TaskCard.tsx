@@ -2,11 +2,12 @@ import { useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
-import { ChevronDown, ChevronUp, FileText } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { TYPE_LABELS, PRIORITY_CLASSES, STATUS_LABELS, STATUS_CLASSES } from './constants';
+import type { EpicProgress } from '@/lib/taskView';
 import type { Note, Task, TaskStatus } from '@/types/task';
 
 const STATUSES: TaskStatus[] = ['refinement', 'plan', 'todo', 'in_progress', 'done'];
@@ -41,9 +42,14 @@ export type TaskCardProps = {
   onRefClick?: (id: number) => void;
   highlighted?: boolean;
   showReopen?: boolean;
+  progress?: EpicProgress;
+  collapsed?: boolean;
+  onToggleCollapse?: () => void;
+  nested?: boolean;
+  sticky?: boolean;
 };
 
-export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = false, showReopen = false }: TaskCardProps) {
+export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = false, showReopen = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false }: TaskCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const hasSummary = Boolean(task.summary);
@@ -89,6 +95,8 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
       className={cn(
         'border bg-card flex flex-col gap-0 transition-[border-color,box-shadow] duration-500 overflow-hidden',
         task.status === 'done' && 'opacity-60',
+        // An expanded card can be taller than the viewport; only pin the compact one.
+        sticky && !expanded && 'sticky top-0 z-10',
         highlighted ? 'border-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.4)]' : 'border-border',
       )}
     >
@@ -102,6 +110,20 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
         </button>
 
         <div className="flex items-start gap-2 md:flex-1 md:min-w-0">
+          {onToggleCollapse && (
+            <button
+              type="button"
+              aria-expanded={!collapsed}
+              aria-label={collapsed ? 'Expand epic' : 'Collapse epic'}
+              onClick={onToggleCollapse}
+              className="inline-flex items-center h-[1.625rem] text-muted-foreground hover:text-foreground transition-colors shrink-0"
+            >
+              {collapsed
+                ? <ChevronRight className="w-4 h-4" strokeWidth={1.5} />
+                : <ChevronDown className="w-4 h-4" strokeWidth={1.5} />
+              }
+            </button>
+          )}
           <span className="text-base text-foreground leading-[1.625rem] break-words min-w-0">{task.title}</span>
         </div>
 
@@ -123,6 +145,25 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
             >
               <FileText className="w-4 h-4" strokeWidth={1.5} />
             </button>
+          )}
+
+          {task.parentId !== undefined && !nested && (
+            <button
+              type="button"
+              onClick={() => onRefClick?.(task.parentId!)}
+              className={cn(
+                'text-xs tracking-widest uppercase border border-border px-2 py-1 text-muted-foreground transition-colors max-w-48 truncate',
+                onRefClick && 'hover:border-primary/60 hover:text-foreground cursor-pointer',
+              )}
+            >
+              EPIC #{task.parentId}{task.epicTitle && <span className="ml-1 normal-case tracking-normal text-muted-foreground/50">{task.epicTitle}</span>}
+            </button>
+          )}
+
+          {progress && progress.total > 0 && (
+            <span className="text-xs tracking-widest border border-border px-2 py-1 shrink-0 text-muted-foreground">
+              {progress.done}/{progress.total}
+            </span>
           )}
 
           {task.scope && (

@@ -22,7 +22,7 @@ const STATUS_RANK: Record<TaskStatus, number> = { in_progress: 5, todo: 4, plan:
 
 const PRIORITY_ORDER: TaskPriority[] = ['critical', 'high', 'medium', 'low'];
 const STATUS_ORDER: TaskStatus[] = ['in_progress', 'todo', 'plan', 'refinement', 'done'];
-const TYPE_ORDER: TaskType[] = ['bug', 'tool', 'feature', 'idea', 'other'];
+const TYPE_ORDER: TaskType[] = ['bug', 'tool', 'feature', 'idea', 'other', 'epic'];
 
 const NO_SCOPE = '(no scope)';
 
@@ -107,4 +107,36 @@ export function groupTasks(tasks: Task[], groupBy: GroupBy, groupDir: SortDir = 
   }
 
   return sections;
+}
+
+export type EpicProgress = { done: number; total: number };
+
+// A child nests only when its epic is in the same list; otherwise it stays a root.
+export function nestEpicChildren(tasks: Task[]): { roots: Task[]; childrenByEpic: Map<number, Task[]> } {
+  const epicIds = new Set(tasks.filter((t) => t.type === 'epic').map((t) => t.id));
+  const roots: Task[] = [];
+  const childrenByEpic = new Map<number, Task[]>();
+  for (const task of tasks) {
+    if (task.parentId !== undefined && epicIds.has(task.parentId)) {
+      const bucket = childrenByEpic.get(task.parentId);
+      if (bucket) bucket.push(task);
+      else childrenByEpic.set(task.parentId, [task]);
+    } else {
+      roots.push(task);
+    }
+  }
+  return { roots, childrenByEpic };
+}
+
+// Pass active + done together so the count is independent of the current tab.
+export function epicProgress(allTasks: Task[]): Map<number, EpicProgress> {
+  const progress = new Map<number, EpicProgress>();
+  for (const task of allTasks) {
+    if (task.parentId === undefined) continue;
+    const p = progress.get(task.parentId) ?? { done: 0, total: 0 };
+    p.total += 1;
+    if (task.status === 'done') p.done += 1;
+    progress.set(task.parentId, p);
+  }
+  return progress;
 }

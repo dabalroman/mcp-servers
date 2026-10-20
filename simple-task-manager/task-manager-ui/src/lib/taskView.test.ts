@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sortTasks, groupTasks, getSectionValue } from './taskView';
+import { sortTasks, groupTasks, getSectionValue, nestEpicChildren, epicProgress } from './taskView';
 import type { SortDir } from './taskView';
 import type { Task } from '@/types/task';
 
@@ -181,4 +181,44 @@ describe('getSectionValue', () => {
   it('type', () => expect(getSectionValue(t, 'type')).toBe('bug'));
   it('priority', () => expect(getSectionValue(t, 'priority')).toBe('high'));
   it('none', () => expect(getSectionValue(t, 'none')).toBe(''));
+});
+
+describe('nestEpicChildren', () => {
+  const epic = makeTask({ id: 10, type: 'epic' });
+  const a = makeTask({ id: 11, parentId: 10 });
+  const b = makeTask({ id: 12, parentId: 10 });
+  const orphan = makeTask({ id: 13, parentId: 99 });
+  const plain = makeTask({ id: 14 });
+
+  it('nests children under an epic in the same list, preserving order', () => {
+    const { roots, childrenByEpic } = nestEpicChildren([a, epic, b, plain]);
+    expect(roots.map((t) => t.id)).toEqual([10, 14]);
+    expect(childrenByEpic.get(10)!.map((t) => t.id)).toEqual([11, 12]);
+  });
+
+  it('keeps a child flat when its epic is not in the list', () => {
+    const { roots, childrenByEpic } = nestEpicChildren([orphan, plain]);
+    expect(roots.map((t) => t.id)).toEqual([13, 14]);
+    expect(childrenByEpic.size).toBe(0);
+  });
+
+  it('leaves an epic with no children as a plain root', () => {
+    const { roots, childrenByEpic } = nestEpicChildren([epic]);
+    expect(roots).toEqual([epic]);
+    expect(childrenByEpic.size).toBe(0);
+  });
+});
+
+describe('epicProgress', () => {
+  it('counts done and total children per epic across the given tasks', () => {
+    const p = epicProgress([
+      makeTask({ id: 1, parentId: 10, status: 'done' }),
+      makeTask({ id: 2, parentId: 10, status: 'todo' }),
+      makeTask({ id: 3, parentId: 20, status: 'done' }),
+      makeTask({ id: 4 }),
+    ]);
+    expect(p.get(10)).toEqual({ done: 1, total: 2 });
+    expect(p.get(20)).toEqual({ done: 1, total: 1 });
+    expect(p.has(4)).toBe(false);
+  });
 });

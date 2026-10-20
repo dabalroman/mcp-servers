@@ -62,10 +62,16 @@ export function useRefNavigation(
       const targetTab: Tab = location?.tab ?? 'active';
       const key = sectionKey(location?.sectionValue ?? '');
 
+      // A child under a collapsed epic is not in the DOM; expand it first.
+      const parentId = (active.find((t) => t.id === targetId) ?? done.find((t) => t.id === targetId))?.parentId;
+      const epicKey = parentId === undefined ? null : `epic:${parentId}`;
+      const epicWasCollapsed = epicKey !== null && isCollapsed(localStorage, COLLAPSE_STORAGE_KEY, epicKey);
+      if (epicKey !== null && epicWasCollapsed) setCollapsed(localStorage, COLLAPSE_STORAGE_KEY, epicKey, false);
+
       if (tab !== targetTab) {
         pendingNav.current = { id: targetId, sectionKey: key };
         setTab(targetTab);
-      } else if (isCollapsed(localStorage, COLLAPSE_STORAGE_KEY, key)) {
+      } else if (epicWasCollapsed || isCollapsed(localStorage, COLLAPSE_STORAGE_KEY, key)) {
         setCollapsed(localStorage, COLLAPSE_STORAGE_KEY, key, false);
         pendingScrollId.current = targetId;
         setCollapseVersion((v) => v + 1);

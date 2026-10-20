@@ -9,7 +9,7 @@ import type { Database as DB } from 'better-sqlite3';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
-export type TaskType = 'bug' | 'feature' | 'idea' | 'tool' | 'other';
+export type TaskType = 'bug' | 'feature' | 'idea' | 'tool' | 'other' | 'epic';
 export type TaskStatus = 'refinement' | 'plan' | 'todo' | 'in_progress' | 'done';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'critical';
 
@@ -32,12 +32,27 @@ export type Task = {
   summary?: string;
   description: string;
   plan?: string;
+  parentId?: number;
+  epicTitle?: string;
+  epic?: EpicContext;
+  children?: EpicChild[];
   refs?: Ref[];
   notes?: Note[];
   noteCount?: number;
   created_at: string;
   updated_at: string;
 };
+
+export type EpicContext = {
+  id: number;
+  title: string;
+  status: TaskStatus;
+  summary?: string;
+  description: string;
+  notes?: Note[];
+};
+
+export type EpicChild = { id: number; title: string; status: TaskStatus; type: TaskType; priority: TaskPriority };
 
 export type Note = {
   id: number;
@@ -49,7 +64,7 @@ export type Note = {
 
 const PRIORITY_ORDER: Record<TaskPriority, number> = { critical: 4, high: 3, medium: 2, low: 1 };
 const STATUS_ORDER: Record<TaskStatus, number> = { in_progress: 4, refinement: 3, plan: 2, todo: 1, done: 0 };
-export const ALL_TYPES: TaskType[] = ['bug', 'feature', 'idea', 'tool', 'other'];
+export const ALL_TYPES: TaskType[] = ['bug', 'feature', 'idea', 'tool', 'other', 'epic'];
 
 export const RELATIONS = [
   'blocks', 'is blocked by',
@@ -201,6 +216,7 @@ type TaskRow = {
   summary: string | null;
   description: string | null;
   plan: string | null;
+  parent_id: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -221,6 +237,7 @@ function rowToTask(row: TaskRow, refs: Ref[]): Task {
   if (row.scope) t.scope = row.scope;
   if (row.summary) t.summary = row.summary;
   if (row.plan) t.plan = row.plan;
+  if (row.parent_id !== null) t.parentId = row.parent_id;
   if (refs && refs.length) t.refs = refs;
   return t;
 }
@@ -259,6 +276,7 @@ export type AddInput = {
   plan?: string;
   refs?: Ref[];
   status?: TaskStatus;
+  parentId?: number;
 };
 
 export type UpdatePatch = {
@@ -270,6 +288,7 @@ export type UpdatePatch = {
   summary?: string | null;
   plan?: string | null;
   refs?: Ref[] | null;
+  parentId?: number | null;
 };
 
 export type LoadResult = {
@@ -355,7 +374,7 @@ export function createStore(dbPath: string): Store {
 
   // Prepared statements
   const stmtInsertTask      = db.prepare(
-    'INSERT INTO tasks (title, type, status, priority, scope, summary, description, plan) VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO tasks (title, type, status, priority, scope, summary, description, plan, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
   );
   const stmtSelectTask      = db.prepare('SELECT * FROM tasks WHERE id = ?');
   const stmtSelectAllTasks  = db.prepare('SELECT * FROM tasks');
@@ -376,7 +395,7 @@ export function createStore(dbPath: string): Store {
   const stmtDeleteMirror    = db.prepare('DELETE FROM refs WHERE from_id = ? AND to_id = ? AND relation = ?');
   const stmtUpdateTask      = db.prepare(`
     UPDATE tasks
-    SET title = ?, type = ?, priority = ?, scope = ?, summary = ?, description = ?, plan = ?, updated_at = datetime('now')
+    SET title = ?, type = ?, priority = ?, scope = ?, summary = ?, description = ?, plan = ?, parent_id = ?, updated_at = datetime('now')
     WHERE id = ?
   `);
   const stmtSetTaskStatus   = db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`);
@@ -386,6 +405,8 @@ export function createStore(dbPath: string): Store {
   const stmtNotesFor        = db.prepare('SELECT * FROM notes WHERE task_id = ? ORDER BY created_at ASC, id ASC');
   const stmtUpdateNote      = db.prepare(`UPDATE notes SET body = ?, updated_at = datetime('now') WHERE id = ?`);
   const stmtDeleteNote      = db.prepare('DELETE FROM notes WHERE id = ?');
+  const stmtChildrenOf      = db.prepare('SELECT id, title, status, type, priority FROM tasks WHERE parent_id = ? ORDER BY id');
+  const stmtHasChildren     = db.prepare('SELECT 1 FROM tasks WHERE parent_id = ? LIMIT 1');
 
   function readRefsFor(id: number): Ref[] {
     return (stmtRefsFrom.all(id) as RefRow[]).map(refRowToObj);
@@ -399,7 +420,24 @@ export function createStore(dbPath: string): Store {
     const task = rowToTask(row, refs);
     const notes = stmtNotesFor.all(id) as Note[];
     if (notes.length) task.notes = notes;
+    if (row.parent_id !== null) {
+      const parent = stmtSelectTask.get(row.parent_id) as TaskRow | undefined;
+      if (parent) task.epicTitle = parent.title;
+    }
     return task;
+  }
+
+  // Throws on an invalid epic link. selfId is set on update, for the
+  // "epic still has children" check when the type changes away from epic.
+  function assertParent(selfType: TaskType, parentId: number | null, selfId?: number, prevType?: TaskType): void {
+    if (selfId !== undefined && prevType === 'epic' && selfType !== 'epic' && stmtHasChildren.get(selfId)) {
+      throw new Error(`Validation failed: epic #${selfId} still has children — move them off it first.`);
+    }
+    if (parentId === null) return;
+    if (selfType === 'epic') throw new Error('Validation failed: epics cannot have a parent.');
+    const parent = stmtSelectTask.get(parentId) as TaskRow | undefined;
+    if (!parent) throw new Error(`Validation failed: parent #${parentId} does not exist.`);
+    if (parent.type !== 'epic') throw new Error(`Validation failed: parent #${parentId} is not an epic.`);
   }
 
   function readAllTasks(withNotes = false): Task[] {
@@ -438,8 +476,18 @@ export function createStore(dbPath: string): Store {
         notesByTask.set(n.task_id, arr);
       }
     }
+    const parentIds = [...new Set(rows.flatMap((r) => (r.parent_id !== null ? [r.parent_id] : [])))];
+    const epicTitles = new Map<number, string>();
+    if (parentIds.length) {
+      const titleRows = db.prepare(
+        `SELECT id, title FROM tasks WHERE id IN (${parentIds.map(() => '?').join(', ')})`
+      ).all(...parentIds) as { id: number; title: string }[];
+      for (const t of titleRows) epicTitles.set(t.id, t.title);
+    }
     return rows.map((row) => {
       const task = rowToTask(row, refsByFrom.get(row.id) ?? []);
+      const epicTitle = row.parent_id !== null ? epicTitles.get(row.parent_id) : undefined;
+      if (epicTitle !== undefined) task.epicTitle = epicTitle;
       const n = noteCounts.get(row.id);
       if (n) task.noteCount = n;
       const notes = notesByTask.get(row.id);
@@ -512,11 +560,12 @@ export function createStore(dbPath: string): Store {
   }
 
   function add(input: AddInput): { id: number } {
-    const { type, priority, title, description = '', scope, summary, plan, refs, status = 'refinement' } = input;
+    const { type, priority, title, description = '', scope, summary, plan, refs, status = 'refinement', parentId } = input;
     const trimmedTitle = String(title ?? '').trim();
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
 
     return db.transaction(() => {
+      assertParent(type, parentId ?? null);
       const info = stmtInsertTask.run(
         trimmedTitle,
         type,
@@ -525,7 +574,8 @@ export function createStore(dbPath: string): Store {
         scope?.trim() || null,
         summary?.trim() || null,
         description.trim(),
-        plan?.trim() || null
+        plan?.trim() || null,
+        parentId ?? null
       );
       const newId = Number(info.lastInsertRowid);
 
@@ -555,9 +605,12 @@ export function createStore(dbPath: string): Store {
         plan: patch.plan === null
           ? null
           : patch.plan !== undefined ? (patch.plan.trim() || null) : existing.plan,
+        parentId: patch.parentId !== undefined ? patch.parentId : existing.parent_id,
       };
 
-      stmtUpdateTask.run(next.title, next.type, next.priority, next.scope, next.summary, next.description, next.plan, id);
+      // Only re-validate when the link can change, so plan/description edits never trip it.
+      if (patch.type !== undefined || patch.parentId !== undefined) assertParent(next.type, next.parentId, id, existing.type);
+      stmtUpdateTask.run(next.title, next.type, next.priority, next.scope, next.summary, next.description, next.plan, next.parentId, id);
 
       if (patch.refs !== undefined) {
         const oldRefs = readRefsFor(id);
@@ -583,7 +636,8 @@ export function createStore(dbPath: string): Store {
     return db.transaction(() => {
       const existing = stmtSelectTask.get(id);
       if (!existing) return false;
-      // FK ON DELETE CASCADE handles refs in both directions and notes.
+      // FK ON DELETE CASCADE handles refs in both directions and notes;
+      // ON DELETE SET NULL detaches an epic's children.
       stmtDeleteTask.run(id);
       return true;
     })();
@@ -632,12 +686,13 @@ export function createStore(dbPath: string): Store {
       rows = db.prepare(`
         SELECT * FROM tasks
         WHERE status IN ('todo', 'in_progress', 'refinement', 'plan')
-        AND type = ?
+        AND type = ? AND type != 'epic'
       `).all(type) as TaskRow[];
     } else {
       rows = db.prepare(`
         SELECT * FROM tasks
         WHERE status IN ('todo', 'in_progress', 'refinement', 'plan')
+        AND type != 'epic'
       `).all() as TaskRow[];
     }
     const tasks = attachRefs(rows);
@@ -685,8 +740,22 @@ export function createStore(dbPath: string): Store {
       .sort((a, b) => ('open' in b ? b.open : 0) - ('open' in a ? a.open : 0));
   }
 
+  // Injection lives here, not in readTask: update() echoes readTask and must stay slim.
   function getById(id: number): Task | null {
-    return readTask(id);
+    const task = readTask(id);
+    if (!task) return null;
+    if (task.parentId !== undefined) {
+      const epic = stmtSelectTask.get(task.parentId) as TaskRow | undefined;
+      if (epic) {
+        const ctx: EpicContext = { id: epic.id, title: epic.title, status: epic.status, description: epic.description ?? '' };
+        if (epic.summary) ctx.summary = epic.summary;
+        const notes = stmtNotesFor.all(epic.id) as Note[];
+        if (notes.length) ctx.notes = notes;
+        task.epic = ctx;
+      }
+    }
+    if (task.type === 'epic') task.children = stmtChildrenOf.all(id) as EpicChild[];
+    return task;
   }
 
   function getAll(status?: StatusFilter): Task[] {

@@ -10,6 +10,8 @@ import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
 import { createStore, loadMigrations } from './tasks.js';
 
+const EPIC_MIGRATION = '20261020120000_add-epic-type-and-parent';
+
 let dir: string;
 let dbPath: string;
 
@@ -240,5 +242,65 @@ describe('migration file name validation', () => {
         `Migration "${file}" exports name="${mod.name}" but expected "${stem}"`
       );
     }
+  });
+});
+
+describe('add-epic-type-and-parent migration', () => {
+  // Build a DB as it was before the migration: every earlier migration applied.
+  function seedPreEpicDb(): void {
+    const db = new Database(dbPath);
+    db.pragma('foreign_keys = OFF');
+    db.exec(`CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    const earlier = loadMigrations().filter((m) => m.name !== EPIC_MIGRATION);
+    earlier.forEach((m, i) => {
+      m.up(db);
+      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(i + 1, m.name);
+    });
+    db.pragma(`user_version = ${earlier.length}`);
+    const ins = db.prepare('INSERT INTO tasks (title, type, status, priority, description) VALUES (?, ?, ?, ?, ?)');
+    ins.run('First', 'bug', 'todo', 'high', 'one');
+    ins.run('Second', 'feature', 'plan', 'low', 'two');
+    db.prepare('INSERT INTO refs (from_id, to_id, relation) VALUES (1, 2, ?)').run('depends on');
+    db.prepare('INSERT INTO refs (from_id, to_id, relation) VALUES (2, 1, ?)').run('is depended on by');
+    db.prepare('INSERT INTO notes (task_id, body) VALUES (1, ?)').run('a note');
+    db.close();
+  }
+
+  test('preserves tasks, refs and notes; adds parent_id, self-FK and index', () => {
+    seedPreEpicDb();
+    const store = createStore(dbPath);
+    store.close();
+
+    const db = new Database(dbPath);
+    const tasks = db.prepare('SELECT id, title, type, status, priority, description, parent_id FROM tasks ORDER BY id').all();
+    assert.deepEqual(tasks, [
+      { id: 1, title: 'First', type: 'bug', status: 'todo', priority: 'high', description: 'one', parent_id: null },
+      { id: 2, title: 'Second', type: 'feature', status: 'plan', priority: 'low', description: 'two', parent_id: null },
+    ]);
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM refs').get() as { n: number }).n, 2);
+    assert.deepEqual(db.prepare('SELECT body FROM notes WHERE task_id = 1').all(), [{ body: 'a note' }]);
+
+    const fks = db.pragma('foreign_key_list(tasks)') as { table: string; from: string; on_delete: string }[];
+    assert.deepEqual(fks.map((f) => [f.from, f.table, f.on_delete]), [['parent_id', 'tasks', 'SET NULL']]);
+    const idx = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_tasks_parent_id'").get();
+    assert.ok(idx, 'idx_tasks_parent_id must exist');
+    assert.deepEqual(db.pragma('foreign_key_check'), []);
+    const last = (db.prepare('SELECT name FROM schema_migrations ORDER BY version DESC LIMIT 1').get() as { name: string }).name;
+    assert.equal(last, EPIC_MIGRATION);
+    db.close();
+  });
+
+  test('the rebuilt table accepts type epic and keeps ON DELETE CASCADE on refs and notes', () => {
+    seedPreEpicDb();
+    const store = createStore(dbPath);
+    const { id } = store.add({ type: 'epic', priority: 'low', title: 'E' });
+    store.delete(1);
+    assert.equal(store.getById(id)?.type, 'epic');
+    const n = (store.db.prepare('SELECT COUNT(*) AS n FROM notes WHERE task_id = 1').get() as { n: number }).n;
+    const r = (store.db.prepare('SELECT COUNT(*) AS n FROM refs').get() as { n: number }).n;
+    store.close();
+    assert.equal(n, 0);
+    assert.equal(r, 0);
   });
 });

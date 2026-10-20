@@ -1241,3 +1241,124 @@ describe('note handlers', () => {
     }
   });
 });
+
+describe('epics — MCP layer', () => {
+  const epicId = (): number => addTask({ type: 'epic', title: 'Roadmap', description: 'Rules' }).id;
+
+  test('add handler accepts parentId; getById handler returns epic and children', async () => {
+    const epic = epicId();
+    store.addNote(epic, 'ctx');
+    const added = decode(handleAdd(store, { type: 'feature', priority: 'low', title: 'Kid', description: '', status: 'refinement', parentId: epic }));
+    const kid = decode(await handleGetById(store, { id: added.id as number })).task as { epic: { id: number; description: string; notes: { body: string }[] } };
+    assert.equal(kid.epic.id, epic);
+    assert.equal(kid.epic.description, 'Rules');
+    assert.equal(kid.epic.notes[0]?.body, 'ctx');
+    const parent = decode(await handleGetById(store, { id: epic })).task as { children: { id: number }[] };
+    assert.deepEqual(parent.children.map((c) => c.id), [added.id]);
+  });
+
+  test('handleUpdate returns an error (not a throw) on an invalid parent', () => {
+    const { id } = addTask();
+    const { id: plain } = addTask();
+    const resp = handleUpdate(store, { id, parentId: plain });
+    assert.ok(resp.isError);
+    assert.match(decode(resp).error as string, /is not an epic/);
+    assert.equal(store.getById(id)?.parentId, undefined);
+  });
+
+  test('handleUpdate with parentId: null detaches', () => {
+    const epic = epicId();
+    const { id } = addTask({ parentId: epic });
+    const resp = handleUpdate(store, { id, parentId: null });
+    assert.ok(!resp.isError);
+    assert.equal(store.getById(id)?.parentId, undefined);
+  });
+
+  test('list handlers carry parentId and epicTitle and never epic or children', async () => {
+    const epic = epicId();
+    store.addNote(epic, 'ctx');
+    const { id } = addTask({ parentId: epic, scope: 's' });
+    store.update(id, { refs: [{ id: epic, relation: 'relates to' }] });
+
+    type Row = { id: number; parentId?: number; epicTitle?: string; epic?: unknown; children?: unknown };
+    const flat: Row[] = [];
+    const walk = (v: unknown): void => {
+      if (Array.isArray(v)) v.forEach(walk);
+      else if (v && typeof v === 'object') {
+        if ('id' in v && 'title' in v) flat.push(v as Row);
+        else Object.values(v).forEach(walk);
+      }
+    };
+    walk(decode(await handleGetAll(store, {})));
+    const related = decode(await handleGetRelated(store, { id: epic })) as { task: Row; inbound: Row[] };
+    const rows = [
+      ...flat,
+      ...(decode(await handleGetByType(store, { type: 'epic' })).tasks as Row[]),
+      ...(decode(await handleGetByType(store, { type: 'bug' })).tasks as Row[]),
+      ...(decode(await handleGetByScope(store, { scope: 's' })).tasks as Row[]),
+      (decode(await handleGetNext(store, {})).task as Row),
+      related.task,
+      ...related.inbound,
+    ];
+    const kids = rows.filter((r) => r.id === id);
+    assert.ok(kids.length >= 5, 'child must show up in every list read');
+    for (const r of kids) {
+      assert.equal(r.parentId, epic);
+      assert.equal(r.epicTitle, 'Roadmap');
+    }
+    for (const r of rows) {
+      assert.equal(r.epic, undefined);
+      assert.equal(r.children, undefined);
+    }
+  });
+
+  test('getNext handler never returns an epic', async () => {
+    epicId();
+    assert.equal(decode(await handleGetNext(store, {})).task ?? null, null);
+    assert.equal(decode(await handleGetNext(store, { type: 'epic' })).task ?? null, null);
+  });
+
+  describe('epicReminder', () => {
+    test('absent while siblings are open, present on the last child', () => {
+      const epic = epicId();
+      const { id: a } = addTask({ parentId: epic });
+      const { id: b } = addTask({ parentId: epic });
+      assert.equal(decode(handleSetStatus(store, { id: a, status: 'done' })).epicReminder, undefined);
+      const last = decode(handleSetStatus(store, { id: b, status: 'done' }));
+      assert.match(last.epicReminder as string, new RegExp(`epic #${epic} \\(Roadmap\\)`));
+      assert.match(last.epicReminder as string, /do not close it yourself/);
+      assert.equal(store.getById(epic)?.status, 'refinement', 'the epic must not be closed by the handler');
+    });
+
+    test('absent when the epic is already done', () => {
+      const epic = epicId();
+      const { id } = addTask({ parentId: epic });
+      store.setStatus(epic, 'done');
+      assert.equal(decode(handleSetStatus(store, { id, status: 'done' })).epicReminder, undefined);
+    });
+
+    test('absent for a task without an epic and for non-done transitions', () => {
+      const epic = epicId();
+      const { id: kid } = addTask({ parentId: epic });
+      const { id: loose } = addTask();
+      assert.equal(decode(handleSetStatus(store, { id: loose, status: 'done' })).epicReminder, undefined);
+      assert.equal(decode(handleSetStatus(store, { id: kid, status: 'todo' })).epicReminder, undefined);
+    });
+
+    test('not repeated when an already-done last child is set to done again', () => {
+      const epic = epicId();
+      const { id } = addTask({ parentId: epic });
+      assert.ok(decode(handleSetStatus(store, { id, status: 'done' })).epicReminder);
+      assert.equal(decode(handleSetStatus(store, { id, status: 'done' })).epicReminder, undefined);
+    });
+  });
+
+  test('deleting an epic through the handler detaches its children', async () => {
+    const epic = epicId();
+    const { id } = addTask({ parentId: epic });
+    handleDelete(store, { id: epic });
+    const t = decode(await handleGetById(store, { id })).task as { parentId?: number; epic?: unknown };
+    assert.equal(t.parentId, undefined);
+    assert.equal(t.epic, undefined);
+  });
+});

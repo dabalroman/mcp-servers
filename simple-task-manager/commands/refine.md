@@ -34,7 +34,7 @@ Print a one-line summary per candidate (id, title, type, scope) so the user sees
 
 For each task in priority order (`getNext` ordering: bug > tool > feature > idea > other; within type, priority desc, id desc):
 
-1. Show the full task description.
+1. Show the full task description. If `getById` returns an `epic`, read it first (text and notes): keep the task's Goal and Steps consistent with the epic's order and rules, and flag any conflict to the user instead of silently diverging.
 1a. **Product lens first.** Before any technical question, think about the task as a product decision, not a ticket, and write a short take in chat. Cover the points that apply:
    - **Who and why.** Who uses this, in what moment, and what job does it do for them? If the task only says *what* to build, name the user problem it serves. If you can't, that's the first question.
    - **What the user sees.** Describe the user-visible outcome in their terms: what changes in their day, what they stop doing, what they get back.

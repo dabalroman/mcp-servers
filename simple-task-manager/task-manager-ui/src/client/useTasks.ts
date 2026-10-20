@@ -15,6 +15,7 @@ export type NewTaskInput = {
   summary?: string;
   plan?: string;
   scope?: string;
+  parentId?: number;
   refs?: TaskRef[];
   status?: TaskStatus;
 };
@@ -28,6 +29,7 @@ export type TaskPatch = Partial<{
   summary: string | null;
   plan: string | null;
   scope: string | null;
+  parentId: number | null;
   refs: TaskRef[] | null;
 }>;
 
@@ -35,6 +37,15 @@ async function fetchTasks(): Promise<TasksPayload> {
   const res = await fetch('/api/tasks');
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return res.json();
+}
+
+// 400s carry the store's "Validation failed: …" reason; keep it so the form can show it.
+async function httpError(res: Response): Promise<Error> {
+  if (res.status === 400) {
+    const body = await res.json().catch(() => null) as { error?: unknown } | null;
+    if (typeof body?.error === 'string') return new Error(body.error);
+  }
+  return new Error(`HTTP ${res.status}`);
 }
 
 export function useTasks() {
@@ -116,7 +127,7 @@ export function useTasks() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw await httpError(res);
     const json = await res.json() as { id: number };
     return json.id;
   }, []);
@@ -127,7 +138,7 @@ export function useTasks() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(patch),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw await httpError(res);
   }, []);
 
   const remove = useCallback(async (id: number) => {

@@ -37,8 +37,15 @@ For small edits to a task's description or plan, use replace({ id, field, anchor
 - For incremental additions prefer addNote({ taskId, body }) over rewriting the description with update(). Edit with updateNote, remove with deleteNote.
 - /refine folds existing notes into the description, then deletes the folded notes.
 
+## Epics
+- An epic (type 'epic') is an umbrella holding project context for a group of tasks: goals, order, rules. It is not implemented directly; getNext never returns one.
+- Link a task to its epic with parentId on add/update (null detaches). One epic per task, no nesting; the parent must be an epic, and an epic with children cannot be retyped.
+- getById on a child returns \`epic\` ({ id, title, status, summary, description, notes }). Treat it as authoritative context for the child: order, goals and rules. getById on an epic returns \`children\`. List tools carry only parentId + epicTitle.
+- Never change an epic's status unless the user asks. When setStatus(done) returns \`epicReminder\`, ask the user whether to close the epic.
+- When a child lands, addNote on its epic ("#NN done, commit <sha>" plus anything the next child needs).
+
 ## Prioritization order for getNext
-bug > tool > feature > idea > other. Within each type: highest priority first, newest id first (FILO).
+bug > tool > feature > idea > other > epic (epics are never returned by getNext). Within each type: highest priority first, newest id first (FILO).
 
 ## User prefixes
 - BUG      → type: bug,     high priority by default

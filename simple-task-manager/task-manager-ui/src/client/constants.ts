@@ -3,7 +3,7 @@ import type { TaskType, TaskPriority, TaskStatus } from '@/types/task';
 
 export const RELATIONS = CANONICAL_RELATIONS;
 
-export const TYPE_ORDER: TaskType[] = ['bug', 'tool', 'feature', 'idea', 'other'];
+export const TYPE_ORDER: TaskType[] = ['bug', 'tool', 'feature', 'idea', 'other', 'epic'];
 
 export const TYPE_LABELS: Record<TaskType, string> = {
   bug: 'BUG',
@@ -11,6 +11,7 @@ export const TYPE_LABELS: Record<TaskType, string> = {
   feature: 'FEAT',
   idea: 'IDEA',
   other: 'OTHER',
+  epic: 'EPIC',
 };
 
 export const PRIORITY_CLASSES: Record<TaskPriority, string> = {
@@ -44,7 +45,7 @@ export const STATUS_CLASSES: Record<TaskStatus, string> = {
   done:        'border-muted-foreground/30 text-muted-foreground/50',
 };
 
-export const TYPES: TaskType[] = ['bug', 'feature', 'idea', 'tool', 'other'];
+export const TYPES: TaskType[] = ['bug', 'feature', 'idea', 'tool', 'other', 'epic'];
 export const PRIORITIES: TaskPriority[] = ['critical', 'high', 'medium', 'low'];
 
 const PRIORITY_RANK: Record<TaskPriority, number> = { critical: 4, high: 3, medium: 2, low: 1 };
