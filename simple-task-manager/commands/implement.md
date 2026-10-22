@@ -4,7 +4,7 @@ description: Implement todo tasks via subagents — one at a time, confirm befor
 
 # Implement
 
-Work through `todo` tasks one at a time by delegating each to a focused subagent, keeping the main context lean. No `/clear` needed.
+Work through `todo` tasks one at a time, implementing simple ones inline and delegating complex ones to a focused subagent, keeping the main context lean. No `/clear` needed.
 
 ## Usage
 
@@ -18,13 +18,13 @@ Work through `todo` tasks one at a time by delegating each to a focused subagent
 
 ### Step 1 — Get next task
 
-- If `#NN` was passed: fetch that task. If its status is not `todo`, report the actual status and stop.
+- If `#NN` was passed: fetch that task. If it is an `epic`, invoke the `implement-as-coordinator` skill with `#NN` and stop here; that skill runs the epic's children. If its status is not `todo`, report the actual status and stop.
 - Otherwise call `mcp__task-manager__getNext`, narrowed by the resolved scope. If nothing is returned, report "Queue empty" and stop.
-- **If the next task is in `refinement`**: do NOT refine inline. Report "Task #NN is in refinement — run `/refine #NN` first" and stop. Strict separation between the two commands.
+- **If the next task is in `refinement` or `plan`** (`getNext` returns both): do NOT refine or plan inline. Report "Task #NN is in <status> — run `/refine #NN` first" (or "finish and approve its plan first") and stop. Strict separation between the two commands.
 
 ### Step 2 — Confirm with user
 
-**Stop here.** Show the user the next task (id, title, type, description summary) and ask: "Start this task? (yes / skip / stop)".
+**Stop here.** Show the user the next task (id, title, type, description summary) and ask: "Start this task? (yes / skip / stop)". If the plan or description splits the task into phases, also ask: "Commit after each phase? (yes / no)".
 
 - **yes** — proceed to step 3.
 - **skip** — do NOT set the task `in_progress`; go back to step 1 to fetch the next one.
@@ -50,6 +50,8 @@ Rules:
 
 Work through the task list created in step 4, marking each step in_progress → completed as you go.
 
+**Phases with per-phase commits** (user said yes in step 2): run steps 5 and 6 for one phase at a time. When a phase passes verify and its OCR review, commit it in the project's message style, naming the phase, and if the task has an epic, add a note on it (`"#NN phase K/N done, commit <sha>. …"`); then start the next phase. No lgtm per phase. **Breakpoints — defer, don't stop**: a phase the user must test by hand (UI, device, their environment) or that waits on something only they do (a merge, a deploy) is parked (verified, reviewed, staged, uncommitted) while you continue with every phase that doesn't depend on it; a phase that shares files with a parked one or builds on it waits too. Name the breakpoints when you ask in step 2. Only when no phase can proceed, run steps 7–8 once for everything pending: per parked phase, exactly what to test or do. Commit each parked phase after the user's lgtm, then resume the waiting phases. Feedback fixes on a committed phase become their own commit. The task stays `in_progress` until step 9.
+
 **Classify the task first:**
 
 A task is **simple** if ALL of the following are true:
@@ -61,10 +63,10 @@ A task is **simple** if ALL of the following are true:
 A task is **complex** if it touches many files, requires design decisions, spans multiple subsystems, or has a large estimated diff.
 
 **Simple task → implement inline:**
-Read the relevant files, make the changes, add/update tests, run `npm run verify`. Stay in the main conversation — no subagent needed.
+Read the relevant files, make the changes, add/update tests, run the project's verify command (from its CLAUDE.md, e.g. `npm run verify`; "verify" below means this command). Stay in the main conversation — no subagent needed.
 
 **Complex task → spawn a focused subagent:**
-Pick the most specific type from the project's `CLAUDE.md` agent table (e.g. `voltagent-lang:react-specialist`, `voltagent-lang:node-specialist`, `voltagent-core-dev:fullstack-developer`). Pass the agent: task id, title, full description, relevant file paths and line numbers, fix approach, the task list IDs for its steps, and these instructions: read files → implement → mark each TaskCreate step completed as you go → add/update tests → run `npm run verify` → report back with diff summary and verify result.
+Pick the most specific type from the project's `CLAUDE.md` agent table (e.g. `voltagent-lang:react-specialist`, `voltagent-lang:node-specialist`, `voltagent-core-dev:fullstack-developer`). Pass the agent: task id, title, full description, relevant file paths and line numbers, fix approach, the task list IDs for its steps, and these instructions: read files → implement → mark each TaskCreate step completed as you go → add/update tests → run verify → report back with diff summary and verify result.
 
 ### Debugging during implementation
 
@@ -84,7 +86,7 @@ When a verify run fails or behaviour is unexpected and the root cause isn't obvi
 4. **Review every in-scope file** — tracked: `git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"`; untracked (`added`): read the whole file. Read surrounding code as needed. Don't stop at the first finding. Each file ends `reviewed` or `skipped` with a concrete reason.
 5. **Classify** each finding as `path:line`, category (bug, security, performance, maintainability, test, style, documentation), severity (critical, high, medium, low). Discard likely false positives.
 6. **Address the issues:**
-   - **critical / high / medium** — fix them, then re-run `npm run verify`.
+   - **critical / high / medium** — fix them, then re-run verify.
    - **low** — fix if trivial, otherwise list them for the user.
    - A finding you deliberately don't fix (out of scope, contradicts the task/plan, false positive on reflection) stays in the report with the reason.
    - If fixes were non-trivial, re-run steps 1–5 on the changed files once.
@@ -97,14 +99,14 @@ Summarise what changed and the verify result. Include the OCR review summary: fi
 
 ### Step 8 — Wait for confirmation
 
-**Stop here.** Do not commit. Do not move to the next task. Wait for the user to confirm the change works (e.g. "lgtm", "looks good", "ship it"). If the user reports a problem, fix it inline (simple) or spawn a follow-up agent (complex).
+**Stop here.** Do not commit (per-phase commits of step 5 excepted). Do not move to the next task. Wait for the user to confirm the change works (e.g. "lgtm", "looks good", "ship it"). If the user reports a problem, fix it inline (simple) or spawn a follow-up agent (complex).
 
 ### Step 9 — Commit and close
 
 Once the user confirms:
 
-1. Stage the changed files and commit with a clear message. **No `Co-Authored-By` line.**
-2. Call `mcp__task-manager__setStatus(id, 'done')`. If the response carries `epicReminder`, ask the user whether to close the epic; never change an epic's status unless they ask.
+1. Stage the changed files and commit in the project's message style. **No `Co-Authored-By` line.** With per-phase commits, this commits only what is left (the last phase or feedback fixes).
+2. Call `mcp__task-manager__setStatus(id, 'done')`. If the response carries `epicStatus` (the last child closed its epic), tell the user.
 3. If the task has an `epic` (from `getById`), call `mcp__task-manager__addNote` on the epic: `"#NN done, commit <sha>. <anything the next child needs to know>"`.
 4. Go back to step 1 (which will show the next task and ask for confirmation before starting it).
 

@@ -1389,38 +1389,33 @@ describe('epics — MCP layer', () => {
     assert.equal(decode(await handleGetNext(store, { type: 'epic' })).task ?? null, null);
   });
 
-  describe('epicReminder', () => {
-    test('absent while siblings are open, present on the last child', () => {
+  describe('epic status sync', () => {
+    test('first started child moves the epic to in_progress, once', () => {
       const epic = epicId();
       const { id: a } = addTask({ parentId: epic });
       const { id: b } = addTask({ parentId: epic });
-      assert.equal(decode(handleSetStatus(store, { id: a, status: 'done' })).epicReminder, undefined);
-      const last = decode(handleSetStatus(store, { id: b, status: 'done' }));
-      assert.match(last.epicReminder as string, new RegExp(`epic #${epic} \\(Roadmap\\)`));
-      assert.match(last.epicReminder as string, /do not close it yourself/);
-      assert.equal(store.getById(epic)?.status, 'refinement', 'the epic must not be closed by the handler');
+      assert.match(decode(handleSetStatus(store, { id: a, status: 'in_progress' })).epicStatus as string, new RegExp(`Epic #${epic} \\(Roadmap\\) moved to in_progress`));
+      assert.equal(store.getById(epic)?.status, 'in_progress');
+      assert.equal(decode(handleSetStatus(store, { id: b, status: 'in_progress' })).epicStatus, undefined);
     });
 
-    test('absent when the epic is already done', () => {
+    test('epic closes with its last child, not before', () => {
       const epic = epicId();
-      const { id } = addTask({ parentId: epic });
-      store.setStatus(epic, 'done');
-      assert.equal(decode(handleSetStatus(store, { id, status: 'done' })).epicReminder, undefined);
+      const { id: a } = addTask({ parentId: epic });
+      const { id: b } = addTask({ parentId: epic });
+      assert.equal(decode(handleSetStatus(store, { id: a, status: 'done' })).epicStatus, undefined);
+      assert.notEqual(store.getById(epic)?.status, 'done');
+      assert.match(decode(handleSetStatus(store, { id: b, status: 'done' })).epicStatus as string, /moved to done/);
+      assert.equal(store.getById(epic)?.status, 'done');
     });
 
-    test('absent for a task without an epic and for non-done transitions', () => {
+    test('tasks without an epic and other transitions leave epics alone', () => {
       const epic = epicId();
       const { id: kid } = addTask({ parentId: epic });
       const { id: loose } = addTask();
-      assert.equal(decode(handleSetStatus(store, { id: loose, status: 'done' })).epicReminder, undefined);
-      assert.equal(decode(handleSetStatus(store, { id: kid, status: 'todo' })).epicReminder, undefined);
-    });
-
-    test('not repeated when an already-done last child is set to done again', () => {
-      const epic = epicId();
-      const { id } = addTask({ parentId: epic });
-      assert.ok(decode(handleSetStatus(store, { id, status: 'done' })).epicReminder);
-      assert.equal(decode(handleSetStatus(store, { id, status: 'done' })).epicReminder, undefined);
+      assert.equal(decode(handleSetStatus(store, { id: loose, status: 'in_progress' })).epicStatus, undefined);
+      assert.equal(decode(handleSetStatus(store, { id: kid, status: 'todo' })).epicStatus, undefined);
+      assert.equal(store.getById(epic)?.status, 'refinement');
     });
   });
 

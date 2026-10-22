@@ -87,18 +87,19 @@ Then try some prompts:
 ## Skills included 
 
 ### /refine
-Use this skill to refine any task. Claude acts as a PM. It first looks at the task as a product decision: who it serves, what the user gets, how you would know it worked, and which related ideas are worth filing separately. Then it asks the technical questions and rewrites the description in Goal / Facts / Changes / Steps form.
+Use this skill to refine any task. Claude acts as a PM. It first looks at the task as a product decision: who it serves, what the user gets, how you would know it worked, and which related ideas are worth filing separately. Then it asks the technical questions and rewrites the description in Goal / Facts / Changes / Steps form. If a task is split into several, it offers to put them under a new epic (or the original's existing epic), so the shared goal and order stay in one place.
 - `"/refine #143"`
 - `"Let's /refine mcp tasks"`
 
 ### /implement
 Use this skill to implement tasks. Claude will use all knowledge from simple-task-manager and it's ability to judge on the scope to run implementation inline, async or via available agents. 
 It will try to write and run tests to ensure code quality.
+A task split into phases can be committed phase by phase: Claude asks once; phases that need you (a manual test, a merge) are parked while the rest continues, and you get every such request at once. On an epic, it hands over to `/implement-as-coordinator`.
 - `"/implement #143"`
 - `"Go on, fix that data-fetching bug"`
 
 ### /implement-as-coordinator
-Use this skill to hand a whole queue to Claude as a supervisor you can walk away from. Claude orders the tasks by file overlap and dependency, runs one subagent per task through `/implement` (Sonnet for well-scoped work, Opus for new architecture or hazardous rewrites, picked per task; disjoint tasks in parallel), independently re-checks every hand-back, owns every build and deploy (build all targets), then code-reviews the whole change and fixes what it finds, all uncommitted. Questions are held until the final report, which asks for approval; only then does it commit, one commit per feature on the current branch.
+Use this skill to hand a whole queue to Claude as a supervisor you can walk away from. Claude orders the tasks by file overlap and dependency, runs one subagent per task through `/implement` (Sonnet for well-scoped work, Opus for new architecture or hazardous rewrites, picked per task; disjoint tasks in parallel), independently re-checks every hand-back, owns every build and deploy (build all targets), then code-reviews the whole change and fixes what it finds, all uncommitted. Questions are held until the final report, which asks for approval. Tasks that need you (a manual test, a merge) are parked while all other work continues, and you get every such request at once when nothing else can move; only then does it commit, one commit per feature on the current branch. Run it on an epic (`/implement #NN` on an epic hands over to it) and it works through the epic's children in the epic's order. It asks once whether to commit each child as it lands, and lists children that still need `/refine`.
 - `"/implement-as-coordinator #45 #50 #43"` — those tasks, in the order Claude decides
 - `"/implement-as-coordinator <scope>"` or no argument — every `todo` task in the scope / overall
 
@@ -305,7 +306,7 @@ An epic (`type: "epic"`) is an umbrella for a group of tasks. It holds what a fr
 - `getById` on a child also returns `epic`: the epic's full description and every note, so the agent sees the bigger picture without being told. `getById` on an epic returns `children` (id, title, status, type, priority), ordered by id.
 - List tools (`getAll`, `getByType`, `getNext`, …) carry only `parentId` and `epicTitle`, never the epic's text.
 - Skills add a note to the epic when a child is committed (`#NN done, commit <sha>`), so the epic accumulates progress for the next session.
-- Claude changes an epic's status only when you ask. When the last open child is marked `done`, `setStatus` returns an `epicReminder` and Claude asks whether to close the epic.
+- An epic's status follows its children: it moves to `in_progress` when any child does, and to `done` when its last child is marked `done`. This happens in `setStatus` itself, so the UI and every skill behave the same; the MCP response reports the change as `epicStatus`.
 - Deleting an epic detaches its children; they are kept.
 
 ### Refs — structured relations with automatic mirroring

@@ -41,7 +41,7 @@ For small edits to a task's description or plan, use replace({ id, field, anchor
 - An epic (type 'epic') is an umbrella holding project context for a group of tasks: goals, order, rules. It is not implemented directly; getNext never returns one.
 - Link a task to its epic with parentId on add/update (null detaches). One epic per task, no nesting; the parent must be an epic, and an epic with children cannot be retyped.
 - getById on a child returns \`epic\` ({ id, title, status, summary, description, notes }). Treat it as authoritative context for the child: order, goals and rules. getById on an epic returns \`children\`. List tools carry only parentId + epicTitle.
-- Never change an epic's status unless the user asks. When setStatus(done) returns \`epicReminder\`, ask the user whether to close the epic.
+- Epic status follows its children automatically: setStatus moves the epic to in_progress when a child goes in_progress, and to done when its last child is done; the response then carries \`epicStatus\`. Don't set an epic's status by hand unless the user asks.
 - When a child lands, addNote on its epic ("#NN done, commit <sha>" plus anything the next child needs).
 
 ## Prioritization order for getNext

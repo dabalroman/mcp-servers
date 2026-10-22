@@ -99,25 +99,20 @@ export function handleDeleteNote(store: Store, { noteId }: { noteId: number }): 
 }
 
 export function handleSetStatus(store: Store, { id, status }: { id: number; status: TaskStatus }): MCPContent {
-  if (status === 'todo') {
-    const task = store.getById(id);
-    if (task && task.status === 'refinement' && !task.summary) {
-      return errorText({ error: `Task #${id} must have a summary before being promoted to todo. Call update({ id: ${id}, summary: "2–3 line gist" }) first, then retry setStatus.` });
-    }
+  const before = store.getById(id);
+  if (status === 'todo' && before && before.status === 'refinement' && !before.summary) {
+    return errorText({ error: `Task #${id} must have a summary before being promoted to todo. Call update({ id: ${id}, summary: "2–3 line gist" }) first, then retry setStatus.` });
   }
-  const wasDone = status === 'done' && store.getById(id)?.status === 'done';
   const ok = store.setStatus(id, status);
   if (!ok) return notFoundError(id, store, { withAre: true });
-  const result: { success: true; knowledgeReminder?: string; epicReminder?: string } = { success: true };
+  const result: { success: true; knowledgeReminder?: string; epicStatus?: string } = { success: true };
   if (status === 'done') {
     result.knowledgeReminder = 'Task closed. Before moving on: (1) identify non-obvious decisions, gotchas, conventions, or architecture changes from this task; (2) update the closest relevant CLAUDE.md with anything genuinely new — keep entries terse and deduped; (3) prune or correct any entries now stale or contradicted. Skip if nothing worth capturing.';
-    const epic = wasDone ? undefined : store.getById(id)?.epic;
-    if (epic && epic.status !== 'done') {
-      const children = store.getById(epic.id)?.children ?? [];
-      if (children.every((c) => c.status === 'done')) {
-        result.epicReminder = `That was the last open child of epic #${epic.id} (${epic.title}). Ask the user whether to close the epic — do not close it yourself.`;
-      }
-    }
+  }
+  const epic = before?.epic;
+  const epicNow = epic ? store.getById(epic.id)?.status : undefined;
+  if (epic && epicNow && epicNow !== epic.status) {
+    result.epicStatus = `Epic #${epic.id} (${epic.title}) moved to ${epicNow}.`;
   }
   return text(result);
 }

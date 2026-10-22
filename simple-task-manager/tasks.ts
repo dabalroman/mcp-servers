@@ -625,11 +625,23 @@ export function createStore(dbPath: string): Store {
 
   function setStatus(id: number, status: TaskStatus): boolean {
     return db.transaction(() => {
-      const existing = stmtSelectTask.get(id);
+      const existing = stmtSelectTask.get(id) as TaskRow | undefined;
       if (!existing) return false;
       stmtSetTaskStatus.run(status, id);
+      if (existing.parent_id !== null) syncEpicStatus(existing.parent_id, status);
       return true;
     })();
+  }
+
+  function syncEpicStatus(epicId: number, childStatus: TaskStatus): void {
+    const epic = stmtSelectTask.get(epicId) as TaskRow | undefined;
+    if (!epic) return;
+    const children = stmtChildrenOf.all(epicId) as EpicChild[];
+    const next: TaskStatus | null =
+      childStatus === 'in_progress' ? 'in_progress'
+      : childStatus === 'done' && children.every((c) => c.status === 'done') ? 'done'
+      : null;
+    if (next && epic.status !== next) stmtSetTaskStatus.run(next, epicId);
   }
 
   function deleteTask(id: number): boolean {
