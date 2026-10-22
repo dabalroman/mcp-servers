@@ -7,6 +7,7 @@ import Database from 'better-sqlite3';
 import { text, toListTask, notFoundError, type MCPContent } from './shared.js';
 import { ALL_TYPES } from '../tasks.js';
 import { ENV_ORDER, LEGACY_ENV_KEYS } from '../mcpConfig.js';
+import { checkForUpdate } from '../updateCheck.js';
 import type { Store, Task, TaskType, StatusFilter } from '../tasks.js';
 
 export async function handleGetByType(store: Store, { type, status }: { type: TaskType; status?: StatusFilter }): Promise<MCPContent> {
@@ -302,11 +303,31 @@ export async function handleHealth(): Promise<MCPContent> {
 
   sections.push(renderSection('Runtime', runtimeChecks));
 
+  // ── Version section ──────────────────────────────────────────────────────────
+  sections.push(renderSection('Version', [await buildVersionCheck(uiMode, projectName)]));
+
   // ── Skills section ───────────────────────────────────────────────────────────
   const skillsChecks = await checkSkills();
   sections.push(renderSection('Skills', skillsChecks));
 
   return buildOutput(sections, uiMode);
+}
+
+async function buildVersionCheck(uiMode: 'standalone' | 'disabled' | 'bundled', projectName: string): Promise<CheckResult> {
+  const update = await checkForUpdate();
+  if (update.state === 'current') {
+    return check('✓', `Version v${update.local} is up to date`);
+  }
+  if (update.state === 'unknown') {
+    return check('⚠', `Update check unavailable (v${update.local})`);
+  }
+  const steps = [
+    'git pull in ~/.claude/mcp-servers',
+    'npx tsx ~/.claude/mcp-servers/simple-task-manager/install.ts in each project',
+    'restart Claude Code',
+  ];
+  if (uiMode === 'standalone') steps.push(`pm2 restart ${projectName || '<PROJECT_NAME>'}`);
+  return check('⚠', `Update available: v${update.remote} (local v${update.local}) — ${steps.join('; ')}`);
 }
 
 function checkSkills(): CheckResult[] {
@@ -337,6 +358,6 @@ function buildOutput(sections: string[], ui?: 'standalone' | 'disabled' | 'bundl
   return text({
     report,
     ui: ui ?? resolveUiModeFromProcess(),
-    displayInstruction: 'Present this health report to the user as a markdown table with three columns: Status (✓/⚠/✗), Category (Config / Runtime / Skills), and Message. Each indented check line is one table row.',
+    displayInstruction: 'Present this health report to the user as a markdown table with three columns: Status (✓/⚠/✗), Category (Config / Runtime / Version / Skills), and Message. Each indented check line is one table row.',
   });
 }

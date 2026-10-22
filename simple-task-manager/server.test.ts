@@ -8,7 +8,7 @@
  * those directly here, so the tests cover the real production code path.
  */
 
-import { test, describe, beforeEach, afterEach } from 'node:test';
+import { test, describe, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, posix, win32 } from 'node:path';
@@ -39,10 +39,19 @@ import {
 } from './mcp/mutationHandlers.js';
 import type { MCPContent } from './mcp/shared.js';
 import { isWithin } from './mcp/planPath.js';
+import { resetUpdateCheckCache } from './updateCheck.js';
 
 let dir: string;
 let dbPath: string;
 let store: Store;
+
+const realFetch = globalThis.fetch;
+before(() => {
+  globalThis.fetch = (async () => { throw new Error('network disabled in tests'); }) as unknown as typeof fetch;
+});
+after(() => {
+  globalThis.fetch = realFetch;
+});
 
 beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), 'mcp-server-test-'));
@@ -1061,6 +1070,68 @@ describe('health handler — config section env validation', () => {
     });
     const resp = await handleHealth();
     assert.equal((decode(resp) as { ui: string }).ui, 'standalone');
+  });
+});
+
+describe('health handler — version section', () => {
+  let savedCwd: string;
+  let originalFetch: typeof fetch;
+
+  beforeEach(() => {
+    savedCwd = process.cwd();
+    process.chdir(dir);
+    originalFetch = globalThis.fetch;
+    resetUpdateCheckCache();
+  });
+
+  afterEach(() => {
+    process.chdir(savedCwd);
+    globalThis.fetch = originalFetch;
+    resetUpdateCheckCache();
+  });
+
+  function writeMcpJson(env: Record<string, string>): void {
+    const config = {
+      mcpServers: {
+        'task-manager': {
+          command: 'node',
+          args: ['/abs/path/dist/server.js'],
+          env,
+        },
+      },
+    };
+    writeFileSync(join(dir, '.mcp.json'), JSON.stringify(config, null, 2));
+  }
+
+  test('reports an update-available line with upgrade steps when the remote version is newer', async () => {
+    writeMcpJson({
+      TASKS_DB: dbPath,
+      PROJECT_NAME: 'demo',
+      TASK_UI_PORT: '7374',
+      TASK_UI_MODE: 'bundled',
+      TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
+    });
+    globalThis.fetch = (async () => ({
+      ok: true,
+      text: async () => `export const VERSION = '9999-12-999';\n`,
+    })) as unknown as typeof fetch;
+
+    const report = (decode(await handleHealth()) as { report: string }).report;
+    assert.match(report, /⚠ Update available: v9999-12-999 \(local v.+\) — git pull in ~\/\.claude\/mcp-servers/);
+  });
+
+  test('reports an unknown-not-failed line when the remote check errors', async () => {
+    writeMcpJson({
+      TASKS_DB: dbPath,
+      PROJECT_NAME: 'demo',
+      TASK_UI_PORT: '7374',
+      TASK_UI_MODE: 'bundled',
+      TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
+    });
+    globalThis.fetch = (async () => { throw new Error('network down'); }) as unknown as typeof fetch;
+
+    const report = (decode(await handleHealth()) as { report: string }).report;
+    assert.match(report, /⚠ Update check unavailable \(v.+\)/);
   });
 });
 

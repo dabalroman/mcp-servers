@@ -177,6 +177,10 @@ When the MCP starts, it tries to spawn `./task-manager-ui/server.ts` (bundled su
 
 The UI dies with the MCP (SIGTERM on shutdown). One MCP per project = one UI per project.
 
+### Update checks
+
+Both the `health` MCP tool and the web UI check once an hour whether a newer version is published on the `main` branch of this repo (cached in-memory, never blocks startup). The `health` report gets a `Version` line; the UI header shows a badge with upgrade steps when one is available. A failed or unreachable check is reported as "unavailable", never as an error.
+
 ### Env vars
 
 All of these are written to `.mcp.json` by `install.ts` with the defaults below — no hidden behaviour. `install.ts` also prints each var's purpose to the console after writing the file (Claude Code's MCP loader is strict JSON, so we can't put doc comments inline). The table below is the canonical reference.
@@ -279,7 +283,7 @@ Examples: `getAll({ status: "done" })` to see archived work; `getByScope({ scope
 
 | Tool | What it does |
 |---|---|
-| `health` | Sanity-check the setup; also reports the UI URL. |
+| `health` | Sanity-check the setup; also reports the UI URL and whether a newer version is available. |
 | `ui-start` | Start the UI server (idempotent). |
 | `ui-stop` | Stop the UI server. |
 
