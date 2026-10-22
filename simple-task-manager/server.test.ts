@@ -1409,6 +1409,27 @@ describe('epics — MCP layer', () => {
       assert.equal(store.getById(epic)?.status, 'done');
     });
 
+    test('moving out or deleting the last open child closes the epic', () => {
+      const epic = epicId();
+      const { id: a } = addTask({ parentId: epic });
+      const { id: b } = addTask({ parentId: epic });
+      const { id: c } = addTask({ parentId: epic });
+      store.setStatus(a, 'done');
+      store.update(b, { parentId: null });
+      assert.notEqual(store.getById(epic)?.status, 'done');
+      store.delete(c);
+      assert.equal(store.getById(epic)?.status, 'done');
+    });
+
+    test('re-setting a done child does not re-close a reopened epic', () => {
+      const epic = epicId();
+      const { id } = addTask({ parentId: epic });
+      store.setStatus(id, 'done');
+      store.setStatus(epic, 'in_progress');
+      assert.equal(decode(handleSetStatus(store, { id, status: 'done' })).epicStatus, undefined);
+      assert.equal(store.getById(epic)?.status, 'in_progress');
+    });
+
     test('a child restarted on a done epic reopens it', () => {
       const epic = epicId();
       const { id } = addTask({ parentId: epic });

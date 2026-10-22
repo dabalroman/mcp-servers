@@ -306,7 +306,7 @@ An epic (`type: "epic"`) is an umbrella for a group of tasks. It holds what a fr
 - `getById` on a child also returns `epic`: the epic's full description and every note, so the agent sees the bigger picture without being told. `getById` on an epic returns `children` (id, title, status, type, priority), ordered by id.
 - List tools (`getAll`, `getByType`, `getNext`, …) carry only `parentId` and `epicTitle`, never the epic's text.
 - Skills add a note to the epic when a child is committed (`#NN done, commit <sha>`), so the epic accumulates progress for the next session.
-- An epic's status follows its children: it moves to `in_progress` when any child does, and to `done` when its last child is marked `done`. This happens in `setStatus` itself, so the UI and every skill behave the same; the MCP response reports the change as `epicStatus`.
+- An epic's status follows its children: it moves to `in_progress` when any child does (reopening a done epic), and to `done` once all its children are done, including when the last open child is moved out or deleted. Moving a child back to `todo`/`plan`/`refinement`, or adding a child that hasn't started, leaves the epic as it is. The store does this itself, so the UI and every skill behave the same; `setStatus` reports the change as `epicStatus`.
 - Deleting an epic detaches its children; they are kept.
 
 ### Refs — structured relations with automatic mirroring

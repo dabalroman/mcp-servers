@@ -99,22 +99,24 @@ export function handleDeleteNote(store: Store, { noteId }: { noteId: number }): 
 }
 
 export function handleSetStatus(store: Store, { id, status }: { id: number; status: TaskStatus }): MCPContent {
-  const before = store.getById(id);
-  if (status === 'todo' && before && before.status === 'refinement' && !before.summary) {
-    return errorText({ error: `Task #${id} must have a summary before being promoted to todo. Call update({ id: ${id}, summary: "2–3 line gist" }) first, then retry setStatus.` });
-  }
-  const ok = store.setStatus(id, status);
-  if (!ok) return notFoundError(id, store, { withAre: true });
-  const result: { success: true; knowledgeReminder?: string; epicStatus?: string } = { success: true };
-  if (status === 'done') {
-    result.knowledgeReminder = 'Task closed. Before moving on: (1) identify non-obvious decisions, gotchas, conventions, or architecture changes from this task; (2) update the closest relevant CLAUDE.md with anything genuinely new — keep entries terse and deduped; (3) prune or correct any entries now stale or contradicted. Skip if nothing worth capturing.';
-  }
-  const epic = before?.epic;
-  const epicNow = epic ? store.getById(epic.id)?.status : undefined;
-  if (epic && epicNow && epicNow !== epic.status) {
-    result.epicStatus = `Epic #${epic.id} (${epic.title}) moved to ${epicNow}.`;
-  }
-  return text(result);
+  return store.db.transaction((): MCPContent => {
+    const before = store.getById(id);
+    if (status === 'todo' && before && before.status === 'refinement' && !before.summary) {
+      return errorText({ error: `Task #${id} must have a summary before being promoted to todo. Call update({ id: ${id}, summary: "2–3 line gist" }) first, then retry setStatus.` });
+    }
+    const ok = store.setStatus(id, status);
+    if (!ok) return notFoundError(id, store, { withAre: true });
+    const result: { success: true; knowledgeReminder?: string; epicStatus?: string } = { success: true };
+    if (status === 'done') {
+      result.knowledgeReminder = 'Task closed. Before moving on: (1) identify non-obvious decisions, gotchas, conventions, or architecture changes from this task; (2) update the closest relevant CLAUDE.md with anything genuinely new — keep entries terse and deduped; (3) prune or correct any entries now stale or contradicted. Skip if nothing worth capturing.';
+    }
+    const epic = before?.epic;
+    const epicNow = epic ? store.getById(epic.id)?.status : undefined;
+    if (epic && epicNow && epicNow !== epic.status) {
+      result.epicStatus = `Epic #${epic.id} (${epic.title}) moved to ${epicNow}.`;
+    }
+    return text(result);
+  })();
 }
 
 export function handleDelete(store: Store, { id }: { id: number }): MCPContent {

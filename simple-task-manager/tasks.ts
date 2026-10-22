@@ -578,6 +578,7 @@ export function createStore(dbPath: string): Store {
         parentId ?? null
       );
       const newId = Number(info.lastInsertRowid);
+      if (parentId != null) syncEpicStatus(parentId, status);
 
       if (refs?.length) {
         applyRefsImpl(newId, [], refs);
@@ -611,6 +612,10 @@ export function createStore(dbPath: string): Store {
       // Only re-validate when the link can change, so plan/description edits never trip it.
       if (patch.type !== undefined || patch.parentId !== undefined) assertParent(next.type, next.parentId, id, existing.type);
       stmtUpdateTask.run(next.title, next.type, next.priority, next.scope, next.summary, next.description, next.plan, next.parentId, id);
+      if (next.parentId !== existing.parent_id) {
+        if (existing.parent_id !== null) syncEpicStatus(existing.parent_id, null);
+        if (next.parentId !== null) syncEpicStatus(next.parentId, existing.status);
+      }
 
       if (patch.refs !== undefined) {
         const oldRefs = readRefsFor(id);
@@ -628,27 +633,32 @@ export function createStore(dbPath: string): Store {
       const existing = stmtSelectTask.get(id) as TaskRow | undefined;
       if (!existing) return false;
       stmtSetTaskStatus.run(status, id);
-      if (existing.parent_id !== null) syncEpicStatus(existing.parent_id, status);
+      if (existing.parent_id !== null && existing.status !== status) syncEpicStatus(existing.parent_id, status);
       return true;
     })();
   }
 
-  function syncEpicStatus(epicId: number, childStatus: TaskStatus): void {
+  // childStatus null = a child left the epic (moved away or deleted).
+  function syncEpicStatus(epicId: number, childStatus: TaskStatus | null): void {
     const epic = stmtSelectTask.get(epicId) as TaskRow | undefined;
-    if (!epic) return;
+    if (!epic || epic.type !== 'epic') return;
     let next: TaskStatus | null = null;
     if (childStatus === 'in_progress') next = 'in_progress';
-    else if (childStatus === 'done' && (stmtChildrenOf.all(epicId) as EpicChild[]).every((c) => c.status === 'done')) next = 'done';
+    else if (childStatus === 'done' || childStatus === null) {
+      const children = stmtChildrenOf.all(epicId) as EpicChild[];
+      if (children.length > 0 && children.every((c) => c.status === 'done')) next = 'done';
+    }
     if (next && epic.status !== next) stmtSetTaskStatus.run(next, epicId);
   }
 
   function deleteTask(id: number): boolean {
     return db.transaction(() => {
-      const existing = stmtSelectTask.get(id);
+      const existing = stmtSelectTask.get(id) as TaskRow | undefined;
       if (!existing) return false;
       // FK ON DELETE CASCADE handles refs in both directions and notes;
       // ON DELETE SET NULL detaches an epic's children.
       stmtDeleteTask.run(id);
+      if (existing.parent_id !== null) syncEpicStatus(existing.parent_id, null);
       return true;
     })();
   }

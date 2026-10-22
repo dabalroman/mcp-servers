@@ -123,7 +123,7 @@ export function registerTools(server: McpServer, store: Store): void {
   };
   server.tool(
     'setStatus',
-    'Update a task\'s status. Lifecycle rules: always call setStatus(in_progress) before starting work on a task; always call setStatus(done) after the commit is made and the user confirms. Returns { success: true } or { success: false, error }.',
+    'Update a task\'s status. Lifecycle rules: always call setStatus(in_progress) before starting work on a task; always call setStatus(done) after the commit is made and the user confirms. Returns { success: true } — plus knowledgeReminder on done, and epicStatus when the task\'s epic moved (epic status follows its children automatically) — or { error }.',
     setStatusSchema,
     async (args: z.infer<z.ZodObject<typeof setStatusSchema>>): Promise<MCPContent> => handleSetStatus(store, args)
   );
