@@ -11,7 +11,7 @@ import { resolve, dirname, basename } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { execFileSync } from 'node:child_process';
-import { ENV_DOCS, ENV_ORDER, GLOBAL_IMPORT_FILE, isStaleEntry, parseMcpConfig, serializeMcpConfig, updateGlobalImport, type McpConfig, type McpEntry } from './mcpConfig.js';
+import { ENV_DOCS, ENV_ORDER, GLOBAL_IMPORT_FILE, isStaleEntry, parseMcpConfig, serializeMcpConfig, SKILLS, updateGlobalImport, type McpConfig, type McpEntry } from './mcpConfig.js';
 
 const serverDir = dirname(fileURLToPath(import.meta.url));
 const serverEntry = resolve(serverDir, 'dist/server.js');
@@ -22,7 +22,7 @@ const serverEntry = resolve(serverDir, 'dist/server.js');
 function installSkills(): void {
   const commandsDir = resolve(homedir(), '.claude', 'commands');
   mkdirSync(commandsDir, { recursive: true });
-  for (const skill of ['refine', 'implement', 'implement-as-coordinator', 'assess']) {
+  for (const skill of SKILLS) {
     const src = resolve(serverDir, 'commands', `${skill}.md`);
     const dest = resolve(commandsDir, `${skill}.md`);
     copyFileSync(src, dest);

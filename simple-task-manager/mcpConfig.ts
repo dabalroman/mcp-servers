@@ -76,6 +76,8 @@ export function isStaleEntry(e: McpEntry | undefined): boolean {
  *  docs (CLAUDE.md) load on demand when working in this repo and must not be broadcast globally. */
 export const GLOBAL_IMPORT_FILE = 'SETUP.md';
 
+export const SKILLS = ['refine', 'implement', 'implement-as-coordinator', 'assess'] as const;
+
 /** An `@…/simple-task-manager/{CLAUDE,SETUP}.md` line previously written by --global. CLAUDE.md is
  *  matched too so installs predating GLOBAL_IMPORT_FILE migrate off the dev docs rather than
  *  stacking a second import next to the stale one. */

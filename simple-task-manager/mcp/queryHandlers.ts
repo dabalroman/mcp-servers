@@ -6,7 +6,7 @@ import { networkInterfaces } from 'node:os';
 import Database from 'better-sqlite3';
 import { text, toListTask, notFoundError, type MCPContent } from './shared.js';
 import { ALL_TYPES } from '../tasks.js';
-import { ENV_ORDER, LEGACY_ENV_KEYS } from '../mcpConfig.js';
+import { ENV_ORDER, LEGACY_ENV_KEYS, SKILLS } from '../mcpConfig.js';
 import { checkForUpdate } from '../updateCheck.js';
 import type { Store, Task, TaskType, StatusFilter } from '../tasks.js';
 
@@ -332,10 +332,7 @@ async function buildVersionCheck(uiMode: 'standalone' | 'disabled' | 'bundled', 
 
 function checkSkills(): CheckResult[] {
   const homeDir = process.env['HOME'] ?? '';
-  const skills = [
-    { name: '/refine', path: join(homeDir, '.claude/commands/refine.md') },
-    { name: '/implement', path: join(homeDir, '.claude/commands/implement.md') },
-  ];
+  const skills = SKILLS.map(skill => ({ name: `/${skill}`, path: join(homeDir, `.claude/commands/${skill}.md`) }));
   return skills.map(skill => {
     if (existsSync(skill.path)) {
       return check('✓', `${skill.name} installed at ${skill.path}`);
