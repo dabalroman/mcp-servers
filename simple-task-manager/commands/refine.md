@@ -104,7 +104,7 @@ Epics first (their children read them as context), then the rest in `getNext` or
 
    If the skeptic/advocate step was skipped (user declined), omit the concerns list and just state "Task #NN is fully refined." followed by the promotion question with recommendation.
 
-   For an epic, ask instead whether to move it to `todo`; never change an epic's status without a yes. Otherwise default to **todo** when unsure — `plan` is opt-in and only useful when the task needs a written implementation plan before coding starts. Call `mcp__task-manager__setStatus(id, 'plan')` or `mcp__task-manager__setStatus(id, 'todo')` only on confirmation. Note: `setStatus` will return an error if the summary is missing — write it first via `update({ id, summary: "..." })`.
+   For an epic still in `refinement`, ask instead whether to move it to `todo`; never change an epic's status without a yes. Past that, its status follows its children automatically, so leave it alone. Otherwise default to **todo** when unsure — `plan` is opt-in and only useful when the task needs a written implementation plan before coding starts. Call `mcp__task-manager__setStatus(id, 'plan')` or `mcp__task-manager__setStatus(id, 'todo')` only on confirmation. Note: `setStatus` will return an error if the summary is missing — write it first via `update({ id, summary: "..." })`.
 
 ### Move on
 

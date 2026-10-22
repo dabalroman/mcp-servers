@@ -1409,6 +1409,13 @@ describe('epics — MCP layer', () => {
       assert.equal(store.getById(epic)?.status, 'done');
     });
 
+    test('a child restarted on a done epic reopens it', () => {
+      const epic = epicId();
+      const { id } = addTask({ parentId: epic });
+      handleSetStatus(store, { id, status: 'done' });
+      assert.match(decode(handleSetStatus(store, { id, status: 'in_progress' })).epicStatus as string, /moved to in_progress/);
+    });
+
     test('tasks without an epic and other transitions leave epics alone', () => {
       const epic = epicId();
       const { id: kid } = addTask({ parentId: epic });

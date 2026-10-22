@@ -636,11 +636,9 @@ export function createStore(dbPath: string): Store {
   function syncEpicStatus(epicId: number, childStatus: TaskStatus): void {
     const epic = stmtSelectTask.get(epicId) as TaskRow | undefined;
     if (!epic) return;
-    const children = stmtChildrenOf.all(epicId) as EpicChild[];
-    const next: TaskStatus | null =
-      childStatus === 'in_progress' ? 'in_progress'
-      : childStatus === 'done' && children.every((c) => c.status === 'done') ? 'done'
-      : null;
+    let next: TaskStatus | null = null;
+    if (childStatus === 'in_progress') next = 'in_progress';
+    else if (childStatus === 'done' && (stmtChildrenOf.all(epicId) as EpicChild[]).every((c) => c.status === 'done')) next = 'done';
     if (next && epic.status !== next) stmtSetTaskStatus.run(next, epicId);
   }
 
