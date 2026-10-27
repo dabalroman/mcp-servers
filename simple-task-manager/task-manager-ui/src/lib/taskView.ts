@@ -140,3 +140,17 @@ export function epicProgress(allTasks: Task[]): Map<number, EpicProgress> {
   }
   return progress;
 }
+
+// Project names are case-insensitive in the store (COLLATE NOCASE).
+export function filterByProject(tasks: Task[], project: string): Task[] {
+  const key = project.toLowerCase();
+  return tasks.filter((t) => t.project.toLowerCase() === key);
+}
+
+// The remembered selection if it still exists, otherwise the first project
+// alphabetically; null only when there are no projects at all.
+export function pickProject(names: string[], remembered: string | null): string | null {
+  const sorted = [...names].sort((a, b) => a.localeCompare(b));
+  const match = remembered === null ? undefined : sorted.find((n) => n.toLowerCase() === remembered.toLowerCase());
+  return match ?? sorted[0] ?? null;
+}

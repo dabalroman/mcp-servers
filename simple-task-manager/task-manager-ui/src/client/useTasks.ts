@@ -1,13 +1,15 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { WATCHDOG_INTERVAL_MS, isStreamStale, shouldRefetchOnReturn } from './streamHealth';
-import type { Task, TaskRef, TaskStatus, TaskType, TaskPriority } from '@/types/task';
+import type { Project, Task, TaskRef, TaskStatus, TaskType, TaskPriority } from '@/types/task';
 
 export type TasksPayload = {
   active: Task[];
   done: Task[];
+  projects: Project[];
 };
 
 export type NewTaskInput = {
+  project: string;
   title: string;
   type: TaskType;
   priority: TaskPriority;
@@ -22,6 +24,7 @@ export type NewTaskInput = {
 };
 
 export type TaskPatch = Partial<{
+  project: string;
   title: string;
   type: TaskType;
   priority: TaskPriority;
@@ -35,10 +38,13 @@ export type TaskPatch = Partial<{
   refs: TaskRef[] | null;
 }>;
 
+// One payload so tasks and project counts never render out of step.
 async function fetchTasks(): Promise<TasksPayload> {
-  const res = await fetch('/api/tasks');
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
-  return res.json();
+  const [tasksRes, projectsRes] = await Promise.all([fetch('/api/tasks'), fetch('/api/projects')]);
+  if (!tasksRes.ok) throw new Error(`HTTP ${tasksRes.status}`);
+  if (!projectsRes.ok) throw new Error(`HTTP ${projectsRes.status}`);
+  const { active, done } = await tasksRes.json() as Omit<TasksPayload, 'projects'>;
+  return { active, done, projects: await projectsRes.json() as Project[] };
 }
 
 // 400s carry the store's "Validation failed: …" reason; keep it so the form can show it.
@@ -51,7 +57,7 @@ async function httpError(res: Response): Promise<Error> {
 }
 
 export function useTasks() {
-  const [data, setData] = useState<TasksPayload>({ active: [], done: [] });
+  const [data, setData] = useState<TasksPayload>({ active: [], done: [], projects: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
 
@@ -143,10 +149,21 @@ export function useTasks() {
     if (!res.ok) throw await httpError(res);
   }, []);
 
+  const createProject = useCallback(async (name: string): Promise<string> => {
+    const res = await fetch('/api/projects', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name }),
+    });
+    if (!res.ok) throw await httpError(res);
+    const json = await res.json() as { name: string };
+    return json.name;
+  }, []);
+
   const remove = useCallback(async (id: number) => {
     const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }, []);
 
-  return { data, loading, error, refresh, add, update, remove };
+  return { data, loading, error, refresh, add, update, remove, createProject };
 }

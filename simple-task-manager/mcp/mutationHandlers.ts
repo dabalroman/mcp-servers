@@ -1,14 +1,16 @@
 import { readFileSync } from 'node:fs';
-import { text, errorText, notFoundError, probeTcp, type MCPContent } from './shared.js';
+import { text, errorText, notFoundError, probeTcp, resolveProject, type MCPContent, type SessionContext } from './shared.js';
 import type { AddInput, Store, TaskStatus, UpdatePatch } from '../tasks.js';
 import { checkPlanPath, defaultPlanRoots } from './planPath.js';
 import { uiPkgDir, uiServerEntry, getUiChild, setUiChild, spawnUi } from './uiChild.js';
 
 const UI_PORT = parseInt(process.env['TASK_UI_PORT'] ?? '7374', 10);
 
-export function handleAdd(store: Store, args: AddInput): MCPContent {
+export function handleAdd(store: Store, { project, ...args }: Omit<AddInput, 'project'> & { project?: string }, ctx: SessionContext): MCPContent {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
   try {
-    const { id } = store.add(args);
+    const { id } = store.add({ ...args, project: p });
     return text({ id });
   } catch (err) {
     return errorText({ error: err instanceof Error ? err.message : String(err) });
@@ -117,6 +119,14 @@ export function handleSetStatus(store: Store, { id, status }: { id: number; stat
     }
     return text(result);
   })();
+}
+
+export function handleCreateProject(store: Store, { name }: { name: string }): MCPContent {
+  try {
+    return text({ success: true, project: store.createProject(name) });
+  } catch (err) {
+    return errorText({ error: err instanceof Error ? err.message : String(err) });
+  }
 }
 
 export function handleDelete(store: Store, { id }: { id: number }): MCPContent {

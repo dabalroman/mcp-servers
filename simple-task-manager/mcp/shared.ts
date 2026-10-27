@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import * as net from 'node:net';
-import { RELATIONS, type Relation, type Task, type Store } from '../tasks.js';
+import { RELATIONS, unknownProjectMessage, type Relation, type Task, type Store } from '../tasks.js';
 
 export type MCPContent = {
   content: { type: 'text'; text: string }[];
@@ -23,6 +23,24 @@ export function toListTask<T extends Task>(task: T): Omit<T, ListOmit> | Omit<T,
   if (!withoutPlan.summary) return withoutPlan as Omit<T, ListOmit>;
   const { description: _desc, ...rest } = withoutPlan;
   return rest as Omit<T, ListOmit | 'description'>;
+}
+
+// Per-connection state. stdio has one per process; #361's HTTP transport will
+// build one per session.
+export type SessionContext = { project: string };
+
+// Explicit `project` arg wins over the session's bound project. Unknown names
+// are an error, never auto-created.
+export function resolveProject(store: Store, ctx: SessionContext, argProject?: string): string | MCPContent {
+  const explicit = argProject?.trim();
+  const name = explicit || ctx.project;
+  if (store.hasProject(name)) return name;
+  const hint = explicit ? '' : ' This is the session\'s bound project (PROJECT_NAME); pass `project` to use another one.';
+  return errorText({ error: `${capitalise(unknownProjectMessage(name))}${hint}` });
+}
+
+function capitalise(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
 export function allIdsSorted(store: Store): number[] {
@@ -52,6 +70,9 @@ export function probeTcp(port: number, timeoutMs: number): Promise<boolean> {
     socket.connect(port, '127.0.0.1');
   });
 }
+
+export const projectParam = z.string().min(1).optional()
+  .describe("Project to work in. Defaults to this session's project (PROJECT_NAME). Never invent one — ask the user or call getProjects.");
 
 export const refsSchema = z.array(z.object({
   id: z.number().int().positive(),

@@ -191,6 +191,7 @@ When the MCP starts, it tries to spawn `./task-manager-ui/server.ts` (bundled su
 - Serves a React SPA at <http://localhost:7374> showing the same tasks the MCP sees.
 - Pushes live updates (SSE) when the MCP writes — no manual refresh.
 - Lets you add, edit, re-prioritize, set status, link refs, and delete tasks from the browser. Edits flow back through the same SQLite file.
+- Shows one project at a time. With more than one project, a tab strip above the list switches between them (with open counts) and the browser remembers your pick. `+ Project` creates one; the task form's project select moves a task. Clicking a ref into another project switches to it.
 
 The UI dies with the MCP (SIGTERM on shutdown). One MCP per project = one UI per project.
 
@@ -205,7 +206,7 @@ All of these are written to `.mcp.json` by `install.ts` with the defaults below 
 | Variable | Default | Effect |
 |---|---|---|
 | `TASKS_DB` | `<project>/tasks.db` | Path to the SQLite database. Forwarded to the UI so both processes open the same file. |
-| `PROJECT_NAME` | project dir name | Human-readable project label. Renders as the big pill in the UI header and as the browser tab title (`<name> · tasks`). Also used as the pm2 process name in `standalone` mode. |
+| `PROJECT_NAME` | project dir name | The [project](#projects--one-database-many-repos) this repo's sessions work in; unset means `default`. Also the big pill in the UI header, the browser tab title (`<name> · tasks`), and the pm2 process name in `standalone` mode. |
 | `TASK_UI_PORT` | `7374` | HTTP port the UI binds to. |
 | `TASK_UI_MODE` | `bundled` | How the UI runs. One of `bundled`, `standalone`, `disabled` — see below. |
 | `TASK_UI_AUTO_OPEN_IN_BROWSER` | `0` | Set to `1` to open the UI in the system browser on startup. |
@@ -269,6 +270,7 @@ These are called by Claude — you don't type them yourself.
 | `deleteNote` | Remove one note. |
 | `setStatus` | Move a task through `refinement` → `plan` (opt-in) → `todo` → `in_progress` → `done`. |
 | `delete` | Permanently remove a task. |
+| `createProject` | Create a new, empty project. Only when you ask for one. |
 
 **Reading**
 
@@ -279,7 +281,8 @@ These are called by Claude — you don't type them yourself.
 | `getById` | One task by number, including its notes and the titles of linked tasks. A task in an epic also carries the epic's full text; an epic carries its children. |
 | `getByType` | Tasks of one type. Default: non-done. |
 | `getByScope` | Tasks tagged with a scope. Default: non-done. |
-| `getScopes` | All scope tags with counts. |
+| `getScopes` | All scope tags of the project, with counts. |
+| `getProjects` | All projects with total and open counts, plus the session's bound project. |
 | `getRelated` | Tasks linked to a given id. Default: non-done. |
 | `getOverview` | Per-type counts. Default: non-done. |
 
@@ -344,6 +347,17 @@ Pass `refs: [{ id, relation }]` to `add` or `update` to link tasks. When you add
 Default relation: `"relates to"`. Removing a ref also removes the inverse. Deleting a task cascades and strips all inbound refs.
 
 Use `getRelated(id)` to query connections.
+
+### Projects — one database, many repos
+
+Every task belongs to exactly one project, so several repos can share one `tasks.db` without seeing each other's work.
+
+- A session works in the project named by `PROJECT_NAME` in its `.mcp.json`. `getNext`, `getAll`, `getByType`, `getByScope`, `getScopes`, `getOverview` and `add` default to it.
+- Pass `project` to any of them to work in another one, e.g. to file a task for a different repo. `update({ id, project })` moves a task.
+- Task IDs are global and never renumbered: `getById`, `getRelated`, `setStatus`, notes and refs work across projects, and refs may point into another project.
+- Projects are created explicitly (`createProject`, or `+ Project` in the UI). An unknown name is an error that says how to create it; nothing is auto-created. Names are case-insensitive.
+- **Zero setup for a single repo:** a database created before projects existed puts every task in a project called `default`. While `default` is the only project, the first MCP start renames it to that repo's `PROJECT_NAME`.
+- `health` shows the bound project and whether it exists.
 
 ### Scope — tagging tasks to an area
 

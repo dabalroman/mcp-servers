@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sortTasks, groupTasks, getSectionValue, nestEpicChildren, epicProgress } from './taskView';
+import { sortTasks, groupTasks, getSectionValue, nestEpicChildren, epicProgress, filterByProject, pickProject } from './taskView';
 import type { SortDir } from './taskView';
 import type { Task } from '@/types/task';
 
@@ -8,6 +8,7 @@ function makeTask(partial: Partial<Task> & { id: number }): Task {
     type: 'feature',
     priority: 'medium',
     status: 'todo',
+    project: 'example-project',
     externalId: null,
     title: `Task ${partial.id}`,
     created_at: '2026-01-01T00:00:00',
@@ -221,5 +222,28 @@ describe('epicProgress', () => {
     expect(p.get(10)).toEqual({ done: 1, total: 2 });
     expect(p.get(20)).toEqual({ done: 1, total: 1 });
     expect(p.has(4)).toBe(false);
+  });
+});
+
+describe('filterByProject', () => {
+  it('keeps only tasks of the given project, ignoring case', () => {
+    const tasks = [makeTask({ id: 1, project: 'a-project' }), makeTask({ id: 2, project: 'b-project' }), makeTask({ id: 3, project: 'A-Project' })];
+    expect(filterByProject(tasks, 'a-project').map((t) => t.id)).toEqual([1, 3]);
+    expect(filterByProject(tasks, 'nope')).toEqual([]);
+  });
+});
+
+describe('pickProject', () => {
+  it('returns the remembered project when it still exists, in its stored spelling', () => {
+    expect(pickProject(['b-project', 'A-Project'], 'a-project')).toBe('A-Project');
+  });
+
+  it('falls back to the first project alphabetically', () => {
+    expect(pickProject(['b-project', 'a-project'], 'gone')).toBe('a-project');
+    expect(pickProject(['b-project', 'a-project'], null)).toBe('a-project');
+  });
+
+  it('returns null when there are no projects', () => {
+    expect(pickProject([], 'a-project')).toBeNull();
   });
 });

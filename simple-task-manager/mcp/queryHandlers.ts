@@ -4,30 +4,38 @@ import { fileURLToPath } from 'node:url';
 import * as http from 'node:http';
 import { networkInterfaces } from 'node:os';
 import Database from 'better-sqlite3';
-import { text, toListTask, notFoundError, type MCPContent } from './shared.js';
+import { text, toListTask, notFoundError, resolveProject, type MCPContent, type SessionContext } from './shared.js';
 import { ALL_TYPES } from '../tasks.js';
 import { ENV_ORDER, LEGACY_ENV_KEYS } from '../mcpConfig.js';
 import { PACKAGE_DIR } from '../packageDir.js';
 import { checkForUpdate } from '../updateCheck.js';
 import type { Store, Task, TaskType, StatusFilter } from '../tasks.js';
 
-export async function handleGetByType(store: Store, { type, status }: { type: TaskType; status?: StatusFilter }): Promise<MCPContent> {
-  return text({ tasks: store.getByType(type, status).map(toListTask) });
+export async function handleGetByType(store: Store, { type, status, project }: { type: TaskType; status?: StatusFilter; project?: string }, ctx: SessionContext): Promise<MCPContent> {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
+  return text({ tasks: store.getByType(p, type, status).map(toListTask) });
 }
 
-export async function handleGetOverview(store: Store, { status }: { status?: StatusFilter } = {}): Promise<MCPContent> {
-  return text({ overview: store.getOverview(status) });
+export async function handleGetOverview(store: Store, { status, project }: { status?: StatusFilter; project?: string }, ctx: SessionContext): Promise<MCPContent> {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
+  return text({ overview: store.getOverview(p, status) });
 }
 
-export async function handleGetNext(store: Store, { type }: { type?: TaskType } = {}): Promise<MCPContent> {
-  const task = store.getNext(type);
+export async function handleGetNext(store: Store, { type, project }: { type?: TaskType; project?: string }, ctx: SessionContext): Promise<MCPContent> {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
+  const task = store.getNext(p, type);
   return text({ task: task ? toListTask(task) : null });
 }
 
-export async function handleGetAll(store: Store, { status }: { status?: StatusFilter } = {}): Promise<MCPContent> {
+export async function handleGetAll(store: Store, { status, project }: { status?: StatusFilter; project?: string }, ctx: SessionContext): Promise<MCPContent> {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
   const grouped: Partial<Record<TaskType, (Task | Omit<Task, 'description'>)[]>> = {};
   for (const type of ALL_TYPES) {
-    const ofType = store.getByType(type, status).map(toListTask);
+    const ofType = store.getByType(p, type, status).map(toListTask);
     if (ofType.length > 0) grouped[type] = ofType;
   }
   return text({ tasks: grouped });
@@ -39,8 +47,10 @@ export async function handleGetById(store: Store, { id }: { id: number }): Promi
   return text({ task });
 }
 
-export async function handleGetByScope(store: Store, { scope, status }: { scope: string; status?: StatusFilter }): Promise<MCPContent> {
-  return text({ scope, tasks: store.getByScope(scope, status).map(toListTask) });
+export async function handleGetByScope(store: Store, { scope, status, project }: { scope: string; status?: StatusFilter; project?: string }, ctx: SessionContext): Promise<MCPContent> {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
+  return text({ scope, tasks: store.getByScope(p, scope, status).map(toListTask) });
 }
 
 export async function handleGetByExternalId(store: Store, { externalId }: { externalId: string }): Promise<MCPContent> {
@@ -58,8 +68,14 @@ export async function handleGetRelated(store: Store, { id, status }: { id: numbe
   });
 }
 
-export async function handleGetScopes(store: Store): Promise<MCPContent> {
-  return text({ scopes: store.getScopes() });
+export async function handleGetScopes(store: Store, { project }: { project?: string }, ctx: SessionContext): Promise<MCPContent> {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
+  return text({ project: p, scopes: store.getScopes(p) });
+}
+
+export async function handleGetProjects(store: Store, ctx: SessionContext): Promise<MCPContent> {
+  return text({ boundProject: ctx.project, projects: store.getProjects() });
 }
 
 // ── health ─────────────────────────────────────────────────────────────────────
@@ -77,7 +93,7 @@ function validateCanonicalEnv(key: string, raw: string): CheckResult {
     case 'PROJECT_NAME':
       return raw
         ? check('✓', `PROJECT_NAME = ${raw}`)
-        : check('✗', 'PROJECT_NAME missing or empty — UI header + tab title will be empty');
+        : check('✗', 'PROJECT_NAME missing or empty — sessions bind to the "default" project and the UI header + tab title will be empty');
     case 'TASK_UI_PORT': {
       const n = Number(raw);
       if (raw && Number.isInteger(n) && n >= 1 && n <= 65535) {
@@ -165,8 +181,15 @@ function probeHttp(url: string, timeoutMs: number): Promise<number> {
   });
 }
 
-export async function handleHealth(): Promise<MCPContent> {
+export async function handleHealth(binding?: { store: Store; ctx: SessionContext }): Promise<MCPContent> {
   const sections: string[] = [];
+
+  if (binding) {
+    const { project } = binding.ctx;
+    sections.push(renderSection('Project', [binding.store.hasProject(project)
+      ? check('✓', `Bound project = ${project} (exists)`)
+      : check('✗', `Bound project = ${project} — does not exist; create it with createProject or in the task-manager UI, or fix PROJECT_NAME`)]));
+  }
 
   // ── Config section ───────────────────────────────────────────────────────────
   const configChecks: CheckResult[] = [];
@@ -342,6 +365,6 @@ function buildOutput(sections: string[], ui?: 'standalone' | 'disabled' | 'bundl
   return text({
     report,
     ui: ui ?? resolveUiModeFromProcess(),
-    displayInstruction: 'Present this health report to the user as a markdown table with three columns: Status (✓/⚠/✗), Category (Config / Runtime / Version), and Message. Each indented check line is one table row.',
+    displayInstruction: 'Present this health report to the user as a markdown table with three columns: Status (✓/⚠/✗), Category (Project / Config / Runtime / Version), and Message. Each indented check line is one table row.',
   });
 }

@@ -46,6 +46,12 @@ Default relation: "relates to".
 ## Status filtering
 All read tools (getAll, getByType, getByScope, getRelated, getOverview) default to non-done tasks. Pass status: "done" to see completed work; status: "open" for refinement+todo+in_progress. When no status is supplied, done tasks are always excluded.
 
+## Projects — the layer above scope
+- Every task belongs to one project. This session is bound to the project in its `.mcp.json` (PROJECT_NAME); list tools (getNext, getAll, getByType, getByScope, getScopes, getOverview) and add default to it.
+- Pass `project` to read or file in another project, e.g. when the user names one ("file this under <project>"). Move a task with update({ id, project }).
+- Never invent a project. An unknown name is an error, never auto-created: call getProjects to list them, and call createProject only when the user asks for a new one.
+- Task IDs are global: getById, getRelated, setStatus, notes and refs work across projects, and refs may cross projects.
+
 ## Scope — tagging tasks to an area
 Set scope on tasks belonging to a specific tool or area (e.g. "auth", "dashboard"). Query with getByScope (exact, case-sensitive). Use getScopes to list all valid scope values.
 

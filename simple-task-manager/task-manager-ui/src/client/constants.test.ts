@@ -3,7 +3,7 @@ import { sortByPriority, TYPES, TYPE_ORDER, TYPE_LABELS, STATUS_LABELS, STATUS_C
 import type { Task } from '@/types/task';
 
 function task(id: number, priority: Task['priority']): Task {
-  return { id, priority, type: 'feature', status: 'todo', title: `task ${id}`, description: '', externalId: null, created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00' };
+  return { id, priority, type: 'feature', status: 'todo', project: 'example-project', title: `task ${id}`, description: '', externalId: null, created_at: '2026-01-01T00:00:00', updated_at: '2026-01-01T00:00:00' };
 }
 
 describe('STATUS constants — refinement', () => {

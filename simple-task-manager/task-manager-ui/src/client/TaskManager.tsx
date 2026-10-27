@@ -1,19 +1,35 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { toast } from 'sonner';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TaskListControls, loadViewState } from '@/components/TaskListControls';
 import { cn } from '@/lib/utils';
-import { sortTasks, groupTasks, nestEpicChildren, epicProgress } from '@/lib/taskView';
+import { sortTasks, groupTasks, nestEpicChildren, epicProgress, filterByProject, pickProject } from '@/lib/taskView';
 import type { ViewState } from '@/lib/taskView';
 import { useTasks } from './useTasks';
 import { TaskCard } from './TaskCard';
 import { TaskForm } from './TaskForm';
+import { ProjectDialog } from './ProjectDialog';
 import { isCollapsed } from './collapseState';
 import { useRefNavigation } from './useRefNavigation';
 import type { Task, TaskStatus, TaskType } from '@/types/task';
 
 const COLLAPSE_KEY = 'task-manager:collapse';
+const PROJECT_KEY = 'task-manager:project';
+
+function loadProject(): string | null {
+  try {
+    return localStorage.getItem(PROJECT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function saveProject(name: string): void {
+  try {
+    localStorage.setItem(PROJECT_KEY, name);
+  } catch { /* storage unavailable — selection just isn't remembered */ }
+}
 
 type Tab = 'active' | 'done';
 
@@ -22,16 +38,26 @@ type Tab = 'active' | 'done';
 const EPIC_RAIL = 'relative ml-2 pl-5 before:absolute before:left-0 before:-top-2 before:bottom-0 before:border-l before:border-primary/40 after:absolute after:left-0 after:top-6 after:w-4 after:border-t after:border-primary/40 last:before:bottom-auto last:before:h-8';
 
 export default function TaskManager() {
-  const { data, loading, error, add, update, remove } = useTasks();
+  const { data, loading, error, add, update, remove, createProject } = useTasks();
   const [tab, setTab] = useState<Tab>('active');
   const [formOpen, setFormOpen] = useState(false);
+  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [view, setView] = useState<ViewState>(loadViewState);
+  const [rememberedProject, setRememberedProject] = useState<string | null>(loadProject);
 
-  const { active, done } = data;
+  const { active: allActive, done: allDone, projects } = data;
+  const project = pickProject(projects.map((p) => p.name), rememberedProject);
+  const active = project === null ? [] : filterByProject(allActive, project);
+  const done = project === null ? [] : filterByProject(allDone, project);
+
+  const selectProject = useCallback((name: string) => {
+    setRememberedProject(name);
+    saveProject(name);
+  }, []);
 
   const { navigateToRef, highlightedId, collapseVersion, toggleCollapse } =
-    useRefNavigation(active, done, tab, setTab, view.groupBy);
+    useRefNavigation(allActive, allDone, tab, setTab, view.groupBy, project, selectProject);
 
   void collapseVersion;
 
@@ -68,12 +94,24 @@ export default function TaskManager() {
     setFormOpen(true);
   }
 
-  async function handleFormSubmit(form: { title: string; type: TaskType; priority: Task['priority']; description: string; summary: string; scope: string; externalId: string; parentId: number | null; refs: import('@/types/task').TaskRef[]; status?: 'refinement' | 'plan' | 'todo' }): Promise<boolean> {
+  async function handleCreateProject(name: string): Promise<boolean> {
+    try {
+      selectProject(await createProject(name));
+      return true;
+    } catch (err) {
+      const reason = err instanceof Error && err.message.startsWith('Validation failed') ? ` ${err.message}` : '';
+      toast.error(`Failed to create project.${reason}`);
+      return false;
+    }
+  }
+
+  async function handleFormSubmit(form: { project: string; title: string; type: TaskType; priority: Task['priority']; description: string; summary: string; scope: string; externalId: string; parentId: number | null; refs: import('@/types/task').TaskRef[]; status?: 'refinement' | 'plan' | 'todo' }): Promise<boolean> {
     const scope = form.scope || undefined;
     const refs = form.refs.length ? form.refs : undefined;
     try {
       if (editing) {
         await update(editing.id, {
+          project: form.project,
           title: form.title,
           type: form.type,
           priority: form.priority,
@@ -86,7 +124,7 @@ export default function TaskManager() {
           ...(form.status !== undefined && { status: form.status }),
         });
       } else {
-        const newId = await add({ title: form.title, type: form.type, priority: form.priority, description: form.description, summary: form.summary || undefined, scope, externalId: form.externalId || undefined, ...(form.parentId !== null && { parentId: form.parentId }), refs, status: form.status ?? 'refinement' });
+        const newId = await add({ project: form.project, title: form.title, type: form.type, priority: form.priority, description: form.description, summary: form.summary || undefined, scope, externalId: form.externalId || undefined, ...(form.parentId !== null && { parentId: form.parentId }), refs, status: form.status ?? 'refinement' });
         const toastId = `task-added-${newId}`;
         toast.success(
           <button
@@ -137,7 +175,7 @@ export default function TaskManager() {
   const tabs: Tab[] = ['active', 'done'];
   const counts: Record<Tab, number> = { active: active.length, done: done.length };
 
-  const progress = epicProgress([...active, ...done]);
+  const progress = epicProgress([...allActive, ...allDone]);
 
   function renderCards(list: Task[], showReopen: boolean) {
     const { roots, childrenByEpic } = nestEpicChildren(list);
@@ -233,6 +271,28 @@ export default function TaskManager() {
 
   return (
     <div className="flex flex-col gap-7">
+      {projects.length > 1 && (
+        <div className="flex flex-wrap border-b border-border">
+          {projects.map((p) => (
+            <button
+              key={p.name}
+              onClick={() => selectProject(p.name)}
+              className={cn(
+                'flex items-center gap-2 px-5 py-2 tracking-widest uppercase transition-colors border-b-2 -mb-px',
+                p.name === project
+                  ? 'border-primary text-primary'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              <span className="text-xs">{p.name}</span>
+              <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
+                {p.open}
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="flex items-center justify-between border-b border-border">
         <div className="flex">
           {tabs.map((t) => (
@@ -253,7 +313,10 @@ export default function TaskManager() {
             </button>
           ))}
         </div>
-        <Button size="sm" onClick={openAdd}>+ New</Button>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={() => setProjectDialogOpen(true)}>+ Project</Button>
+          <Button size="sm" onClick={openAdd} disabled={project === null}>+ New</Button>
+        </div>
       </div>
 
       <TaskListControls value={view} onChange={setView} />
@@ -266,9 +329,18 @@ export default function TaskManager() {
         open={formOpen}
         onOpenChange={setFormOpen}
         initial={editing}
-        allTasks={[...active, ...done]}
+        allTasks={[...allActive, ...allDone]}
+        projects={projects.map((p) => p.name)}
+        project={project ?? ''}
         onSubmit={handleFormSubmit}
         onDelete={handleDelete}
+      />
+
+      <ProjectDialog
+        key={String(projectDialogOpen)}
+        open={projectDialogOpen}
+        onOpenChange={setProjectDialogOpen}
+        onSubmit={handleCreateProject}
       />
     </div>
   );

@@ -22,18 +22,18 @@ afterEach(() => {
 
 describe('add', () => {
   it('returns id 1 for the first task', async () => {
-    const id = await store.add({ type: 'bug', priority: 'high', title: 'First', description: '' });
+    const id = await store.add({ project: 'default', type: 'bug', priority: 'high', title: 'First', description: '' });
     expect(id).toBe(1);
   });
 
   it('increments id correctly for sequential adds', async () => {
-    const id1 = await store.add({ type: 'bug', priority: 'high', title: 'A', description: '' });
-    const id2 = await store.add({ type: 'feature', priority: 'low', title: 'B', description: '' });
+    const id1 = await store.add({ project: 'default', type: 'bug', priority: 'high', title: 'A', description: '' });
+    const id2 = await store.add({ project: 'default', type: 'feature', priority: 'low', title: 'B', description: '' });
     expect(id2).toBe(id1 + 1);
   });
 
   it('persists task across reopen', async () => {
-    await store.add({ type: 'tool', priority: 'medium', title: 'Persist me', description: 'details' });
+    await store.add({ project: 'default', type: 'tool', priority: 'medium', title: 'Persist me', description: 'details' });
     store.close();
     store = createTaskStore({ dbPath });
     const { active } = store.load();
@@ -47,7 +47,7 @@ describe('setStatus', () => {
   });
 
   it('moves task into the done bucket on load when status set to done', async () => {
-    const id = await store.add({ type: 'bug', priority: 'high', title: 'Fix me', description: '' });
+    const id = await store.add({ project: 'default', type: 'bug', priority: 'high', title: 'Fix me', description: '' });
     expect(await store.setStatus(id, 'done')).toBe(true);
     const { active, done } = store.load();
     expect(active.find((t) => t.id === id)).toBeUndefined();
@@ -55,7 +55,7 @@ describe('setStatus', () => {
   });
 
   it('moves task back to active when un-done', async () => {
-    const id = await store.add({ type: 'bug', priority: 'high', title: 'Re-open me', description: '' });
+    const id = await store.add({ project: 'default', type: 'bug', priority: 'high', title: 'Re-open me', description: '' });
     await store.setStatus(id, 'done');
     expect(await store.setStatus(id, 'todo')).toBe(true);
     const { active } = store.load();
@@ -69,7 +69,7 @@ describe('updateTask', () => {
   });
 
   it('updates title', async () => {
-    const id = await store.add({ type: 'bug', priority: 'high', title: 'Old', description: '' });
+    const id = await store.add({ project: 'default', type: 'bug', priority: 'high', title: 'Old', description: '' });
     expect(await store.updateTask(id, { title: 'New' })).toBe(true);
     const { active } = store.load();
     expect(active.find((t) => t.id === id)?.title).toBe('New');
@@ -78,7 +78,7 @@ describe('updateTask', () => {
 
 describe('summary — browser API always returns full data', () => {
   it('load() returns both summary and description when both are set', async () => {
-    const id = await store.add({ type: 'bug', priority: 'high', title: 'T', description: 'Full desc.', summary: 'Short gist.' });
+    const id = await store.add({ project: 'default', type: 'bug', priority: 'high', title: 'T', description: 'Full desc.', summary: 'Short gist.' });
     const { active } = store.load();
     const t = active.find((x) => x.id === id);
     expect(t?.summary).toBe('Short gist.');
@@ -86,7 +86,7 @@ describe('summary — browser API always returns full data', () => {
   });
 
   it('editing a task with a summary does not wipe description (regression test)', async () => {
-    const id = await store.add({ type: 'bug', priority: 'high', title: 'T', description: 'Original desc.', summary: 'A gist.' });
+    const id = await store.add({ project: 'default', type: 'bug', priority: 'high', title: 'T', description: 'Original desc.', summary: 'A gist.' });
     const { active } = store.load();
     const loaded = active.find((t) => t.id === id);
     expect(loaded).toBeDefined();
@@ -103,7 +103,7 @@ describe('deleteTask', () => {
   });
 
   it('removes task', async () => {
-    const id = await store.add({ type: 'bug', priority: 'high', title: 'Delete me', description: '' });
+    const id = await store.add({ project: 'default', type: 'bug', priority: 'high', title: 'Delete me', description: '' });
     expect(await store.deleteTask(id)).toBe(true);
     const { active, done } = store.load();
     expect([...active, ...done].find((t) => t.id === id)).toBeUndefined();
@@ -114,7 +114,7 @@ describe('dataVersion', () => {
   it('changes when another connection writes (the SSE polling signal)', async () => {
     const before = store.dataVersion();
     const other = createTaskStore({ dbPath });
-    await other.add({ type: 'bug', priority: 'high', title: 'from elsewhere', description: '' });
+    await other.add({ project: 'default', type: 'bug', priority: 'high', title: 'from elsewhere', description: '' });
     other.close();
     const after = store.dataVersion();
     expect(after).not.toBe(before);
@@ -123,7 +123,7 @@ describe('dataVersion', () => {
 
 describe('loadWithNotes', () => {
   it('includes note bodies written by another connection while load() keeps noteCount only', async () => {
-    const id = await store.add({ type: 'bug', priority: 'high', title: 'Noted', description: '' });
+    const id = await store.add({ project: 'default', type: 'bug', priority: 'high', title: 'Noted', description: '' });
     const writer = createStore(dbPath);
     writer.addNote(id, 'first');
     writer.addNote(id, 'second');

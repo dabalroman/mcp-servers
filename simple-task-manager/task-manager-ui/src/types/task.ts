@@ -30,11 +30,14 @@ export type Note = {
   updated_at: string;
 };
 
+export type Project = { name: string; total: number; open: number };
+
 export type Task = {
   id: number;
   type: TaskType;
   priority: TaskPriority;
   status: TaskStatus;
+  project: string;
   title: string;
   description?: string;
   summary?: string;

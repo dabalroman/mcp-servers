@@ -25,6 +25,7 @@ const MIGRATION_NAMES = [
   '20261012120000_add-notes',
   '20261020120000_add-epic-type-and-parent',
   '20261027120000_add-external-id',
+  '20261027130000_add-projects',
 ];
 
 let dir: string;
@@ -44,6 +45,7 @@ afterEach(() => {
 
 function makeTask(overrides: Partial<AddInput> = {}): { id: number } {
   return store.add({
+    project: 'default',
     type: 'bug',
     priority: 'medium',
     title: 'Test',
@@ -135,8 +137,8 @@ describe('add', () => {
     // Simulate an external writer (backup restore, direct sqlite3, etc.) bumping max(id).
     const db = new Database(dbPath);
     db.prepare(`
-      INSERT INTO tasks (id, type, status, priority, title, description, created_at, updated_at)
-      VALUES (9999, 'other', 'refinement', 'medium', 'external', '', datetime('now'), datetime('now'))
+      INSERT INTO tasks (id, type, status, priority, project, title, description, created_at, updated_at)
+      VALUES (9999, 'other', 'refinement', 'medium', 'default', 'external', '', datetime('now'), datetime('now'))
     `).run();
     db.close();
 
@@ -161,17 +163,17 @@ describe('add', () => {
   });
 
   test('defaults status to refinement when not given', () => {
-    const { id } = store.add({ type: 'feature', priority: 'low', title: 'X', description: '' });
+    const { id } = store.add({ project: 'default', type: 'feature', priority: 'low', title: 'X', description: '' });
     assert.equal(store.getById(id)?.status, 'refinement');
   });
 
   test('rejects empty title', () => {
-    assert.throws(() => store.add({ type: 'bug', priority: 'high', title: '   ', description: '' }), /title must not be empty/);
+    assert.throws(() => store.add({ project: 'default', type: 'bug', priority: 'high', title: '   ', description: '' }), /title must not be empty/);
   });
 
   test('persists refs', () => {
     const { id: a } = makeTask();
-    const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
+    const { id: b } = store.add({ project: 'default', type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     assert.deepEqual(store.getById(b)?.refs, [{ id: a, relation: 'blocks', title: 'Test' }]);
   });
 });
@@ -179,11 +181,11 @@ describe('add', () => {
 describe('getById', () => {
   test('refs carry the referenced task title; list reads do not', () => {
     const { id: a } = makeTask({ title: 'Target' });
-    const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'Source', description: '', refs: [{ id: a, relation: 'blocks' }] });
+    const { id: b } = store.add({ project: 'default', type: 'bug', priority: 'high', title: 'Source', description: '', refs: [{ id: a, relation: 'blocks' }] });
     assert.equal(store.getById(b)?.refs?.[0]?.title, 'Target');
     store.update(a, { title: 'Renamed' });
     assert.equal(store.getById(b)?.refs?.[0]?.title, 'Renamed');
-    const listed = store.getAll().find((t) => t.id === b);
+    const listed = store.getAll('default').find((t) => t.id === b);
     assert.equal(listed?.refs?.[0]?.title, undefined);
   });
 
@@ -223,14 +225,14 @@ describe('update', () => {
   test('replaces refs entirely', () => {
     const { id: a } = makeTask();
     const { id: b } = makeTask();
-    const { id: c } = store.add({ type: 'bug', priority: 'high', title: 'C', description: '', refs: [{ id: a, relation: 'blocks' }] });
+    const { id: c } = store.add({ project: 'default', type: 'bug', priority: 'high', title: 'C', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.update(c, { refs: [{ id: b, relation: 'depends on' }] });
     assert.deepEqual(store.getById(c)?.refs, [{ id: b, relation: 'depends on', title: 'Test' }]);
   });
 
   test('clears refs with null', () => {
     const { id: a } = makeTask();
-    const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
+    const { id: b } = store.add({ project: 'default', type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.update(b, { refs: null });
     assert.equal(store.getById(b)?.refs, undefined);
   });
@@ -307,7 +309,7 @@ describe('delete', () => {
 
   test('cascades refs in both directions', () => {
     const { id: a } = makeTask();
-    const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
+    const { id: b } = store.add({ project: 'default', type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.delete(a);
     assert.equal(store.getById(b)?.refs, undefined);
   });
@@ -316,33 +318,33 @@ describe('delete', () => {
 describe('refs — store-level mirroring', () => {
   test('writes inverse on canonical ref', () => {
     const { id: a } = makeTask();
-    const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
+    const { id: b } = store.add({ project: 'default', type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     assert.deepEqual(store.getById(a)?.refs, [{ id: b, relation: 'is blocked by', title: 'B' }]);
   });
 
   test('removes inverse when ref is removed', () => {
     const { id: a } = makeTask();
-    const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
+    const { id: b } = store.add({ project: 'default', type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.update(b, { refs: [] });
     assert.equal(store.getById(a)?.refs, undefined);
   });
 
   test('updates inverse on relation change', () => {
     const { id: a } = makeTask();
-    const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
+    const { id: b } = store.add({ project: 'default', type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     store.update(b, { refs: [{ id: a, relation: 'causes' }] });
     assert.deepEqual(store.getById(a)?.refs, [{ id: b, relation: 'is caused by', title: 'B' }]);
   });
 
   test('"relates to" is symmetric on both sides', () => {
     const { id: a } = makeTask();
-    const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'relates to' }] });
+    const { id: b } = store.add({ project: 'default', type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'relates to' }] });
     assert.equal(store.getById(a)?.refs?.[0]?.relation, 'relates to');
     assert.equal(store.getById(b)?.refs?.[0]?.relation, 'relates to');
   });
 
   test('strips refs to nonexistent ids', () => {
-    const { id } = store.add({ type: 'bug', priority: 'high', title: 'X', description: '', refs: [{ id: 9999, relation: 'blocks' }] });
+    const { id } = store.add({ project: 'default', type: 'bug', priority: 'high', title: 'X', description: '', refs: [{ id: 9999, relation: 'blocks' }] });
     assert.equal(store.getById(id)?.refs, undefined);
   });
 
@@ -403,28 +405,28 @@ describe('getByStatus', () => {
     makeTask({ title: 'T1' });
     const { id } = makeTask({ title: 'T2' });
     store.setStatus(id, 'done');
-    assert.equal(store.getByStatus('todo').length, 0);
-    assert.equal(store.getByStatus('refinement').length, 1);
-    assert.equal(store.getByStatus('done').length, 1);
+    assert.equal(store.getByStatus('default', 'todo').length, 0);
+    assert.equal(store.getByStatus('default', 'refinement').length, 1);
+    assert.equal(store.getByStatus('default', 'done').length, 1);
   });
 
   test('scope filter narrows results', () => {
     makeTask({ scope: 'web' });
     makeTask({ scope: 'cli' });
-    const filtered = store.getByStatus('refinement', 'web');
+    const filtered = store.getByStatus('default', 'refinement', 'web');
     assert.equal(filtered.length, 1);
     assert.equal(filtered[0]?.scope, 'web');
   });
 
   test('scope filter is case-sensitive — "Web" does not match "web"', () => {
     makeTask({ scope: 'web' });
-    assert.equal(store.getByStatus('refinement', 'Web').length, 0);
-    assert.equal(store.getByStatus('refinement', 'WEB').length, 0);
-    assert.equal(store.getByStatus('refinement', 'web').length, 1);
+    assert.equal(store.getByStatus('default', 'refinement', 'Web').length, 0);
+    assert.equal(store.getByStatus('default', 'refinement', 'WEB').length, 0);
+    assert.equal(store.getByStatus('default', 'refinement', 'web').length, 1);
   });
 
   test('returns an array (not null/undefined) when nothing matches', () => {
-    const result = store.getByStatus('todo', 'ghost-scope');
+    const result = store.getByStatus('default', 'todo', 'ghost-scope');
     assert.ok(Array.isArray(result));
     assert.equal(result.length, 0);
   });
@@ -434,12 +436,12 @@ describe('getByScope', () => {
   test('returns tasks tagged with the scope', () => {
     makeTask({ scope: 'web' });
     makeTask({ scope: 'cli' });
-    assert.equal(store.getByScope('web').length, 1);
+    assert.equal(store.getByScope('default', 'web').length, 1);
   });
 
   test('returns empty for unknown scope', () => {
     makeTask({ scope: 'web' });
-    assert.deepEqual(store.getByScope('nope'), []);
+    assert.deepEqual(store.getByScope('default', 'nope'), []);
   });
 });
 
@@ -447,7 +449,7 @@ describe('getByType', () => {
   test('returns tasks of the given type', () => {
     makeTask({ type: 'bug' });
     makeTask({ type: 'feature' });
-    const r = store.getByType('bug');
+    const r = store.getByType('default', 'bug');
     assert.equal(r.length, 1);
     assert.equal(r[0]?.type, 'bug');
   });
@@ -455,7 +457,7 @@ describe('getByType', () => {
 
 describe('getNext', () => {
   test('returns null when nothing actionable', () => {
-    assert.equal(store.getNext(), null);
+    assert.equal(store.getNext('default'), null);
   });
 
   test('prefers in_progress over refinement and todo', () => {
@@ -464,7 +466,7 @@ describe('getNext', () => {
     const { id: t } = makeTask({ title: 'queued' });
     store.setStatus(ip, 'in_progress');
     store.setStatus(t, 'todo');
-    assert.equal(store.getNext()?.id, ip);
+    assert.equal(store.getNext('default')?.id, ip);
   });
 
   test('respects priority within same status', () => {
@@ -472,7 +474,7 @@ describe('getNext', () => {
     const { id: high } = makeTask({ priority: 'high' });
     store.setStatus(low, 'todo');
     store.setStatus(high, 'todo');
-    assert.equal(store.getNext()?.id, high);
+    assert.equal(store.getNext('default')?.id, high);
   });
 
   test('FILO within same priority — newer id wins', () => {
@@ -480,20 +482,20 @@ describe('getNext', () => {
     const { id: newer } = makeTask({ priority: 'medium' });
     store.setStatus(older, 'todo');
     store.setStatus(newer, 'todo');
-    assert.equal(store.getNext()?.id, newer);
+    assert.equal(store.getNext('default')?.id, newer);
   });
 
   test('type filter narrows', () => {
     const { id: b } = makeTask({ type: 'bug' });
     makeTask({ type: 'feature' });
     store.setStatus(b, 'todo');
-    assert.equal(store.getNext('bug')?.id, b);
+    assert.equal(store.getNext('default', 'bug')?.id, b);
   });
 
   test('skips done tasks', () => {
     const { id } = makeTask();
     store.setStatus(id, 'done');
-    assert.equal(store.getNext(), null);
+    assert.equal(store.getNext('default'), null);
   });
 });
 
@@ -505,7 +507,7 @@ describe('getOverview', () => {
     const { id: t3 } = makeTask({ type: 'bug' });
     store.setStatus(t3, 'done');
     // Default (non-done): done tasks are excluded; returns four-bucket shape
-    const ov = store.getOverview();
+    const ov = store.getOverview('default');
     const bug = ov.find((o) => o.type === 'bug') as { type: string; open: number; done: number; refinement: number; plan: number } | undefined;
     assert.equal(bug?.open, 1);
     assert.equal(bug?.done, 0);
@@ -518,7 +520,7 @@ describe('getOverview', () => {
     store.setStatus(t1, 'todo');
     const { id: t3 } = makeTask({ type: 'bug' });
     store.setStatus(t3, 'done');
-    const ov = store.getOverview('done');
+    const ov = store.getOverview('default', 'done');
     const bug = ov.find((o) => o.type === 'bug') as { type: string; count: number; status: string } | undefined;
     assert.equal(bug?.count, 1);
     assert.equal(bug?.status, 'done');
@@ -527,7 +529,7 @@ describe('getOverview', () => {
 
   test('omits types with zero tasks', () => {
     makeTask({ type: 'bug' });
-    const ov = store.getOverview();
+    const ov = store.getOverview('default');
     assert.equal(ov.length, 1);
   });
 
@@ -538,7 +540,7 @@ describe('getOverview', () => {
     store.setStatus(t2, 'done');
     makeTask({ type: 'bug' });
     // Default (non-done) always returns four-bucket shape
-    const ovNonDone = store.getOverview();
+    const ovNonDone = store.getOverview('default');
     const bugNonDone = ovNonDone.find((o) => o.type === 'bug') as
       { type: string; open: number; done: number; refinement: number; plan: number } | undefined;
     assert.ok(bugNonDone);
@@ -560,7 +562,7 @@ describe('getRelated', () => {
 
   test('separates outbound and inbound', () => {
     const { id: a } = makeTask({ title: 'A' });
-    const { id: b } = store.add({ type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
+    const { id: b } = store.add({ project: 'default', type: 'bug', priority: 'high', title: 'B', description: '', refs: [{ id: a, relation: 'blocks' }] });
     const r = store.getRelated(b);
     assert.equal(r?.outbound[0]?.id, a);
     assert.equal(r?.outbound[0]?.refRelation, 'blocks');
@@ -598,7 +600,7 @@ describe('getScopes', () => {
     makeTask();
     store.setStatus(cli1, 'done');
 
-    const scopes = store.getScopes();
+    const scopes = store.getScopes('default');
     const cli = scopes.find((s) => s.scope === 'cli');
     assert.equal(cli?.total, 2);
     assert.equal(cli?.open, 1);
@@ -610,7 +612,7 @@ describe('getScopes', () => {
   test('orders by open desc, then total desc, then alpha', () => {
     makeTask({ scope: 'b' });
     makeTask({ scope: 'a' });
-    const scopes = store.getScopes();
+    const scopes = store.getScopes('default');
     assert.deepEqual(scopes.map((s) => s.scope), ['a', 'b']);
   });
 });
@@ -665,21 +667,21 @@ describe('plan status', () => {
   test('getNext includes plan-status tasks', () => {
     const { id: a } = makeTask({ title: 'plan-task' });
     store.setStatus(a, 'plan');
-    const next = store.getNext();
+    const next = store.getNext('default');
     assert.equal(next?.id, a);
   });
 
   test('getAll open includes plan-status tasks', () => {
     const { id } = makeTask({ title: 'plan-task' });
     store.setStatus(id, 'plan');
-    const all = store.getAll('open');
+    const all = store.getAll('default', 'open');
     assert.ok(all.some((t) => t.id === id));
   });
 
   test('getOverview has a plan count in three-bucket shape', () => {
     const { id } = makeTask({ type: 'bug' });
     store.setStatus(id, 'plan');
-    const ov = store.getOverview();
+    const ov = store.getOverview('default');
     const bug = ov.find((o) => o.type === 'bug') as
       { type: string; refinement: number; plan: number; open: number; done: number } | undefined;
     assert.ok(bug, 'bug entry should exist');
@@ -730,13 +732,14 @@ describe('persistence', () => {
 describe('summary — store always returns complete data', () => {
   test('add with summary stores it; all read methods return both summary and description', () => {
     const { id } = store.add({
+      project: 'default',
       type: 'feature', priority: 'medium', title: 'S',
       description: 'Full description text.', summary: 'Short gist.',
     });
     const byId = store.getById(id);
     assert.equal(byId?.summary, 'Short gist.');
     assert.equal(byId?.description, 'Full description text.');
-    const byType = store.getByType('feature').find((t) => t.id === id);
+    const byType = store.getByType('default', 'feature').find((t) => t.id === id);
     assert.equal(byType?.summary, 'Short gist.');
     assert.equal(byType?.description, 'Full description text.');
     const { active } = store.load();
@@ -746,7 +749,7 @@ describe('summary — store always returns complete data', () => {
   });
 
   test('update sets summary; update with null clears it', () => {
-    const { id } = store.add({ type: 'bug', priority: 'low', title: 'X', description: 'D' });
+    const { id } = store.add({ project: 'default', type: 'bug', priority: 'low', title: 'X', description: 'D' });
     store.update(id, { summary: 'A gist.' });
     assert.equal(store.getById(id)?.summary, 'A gist.');
     store.update(id, { summary: null });
@@ -754,17 +757,19 @@ describe('summary — store always returns complete data', () => {
   });
 
   test('update with empty string clears summary', () => {
-    const { id } = store.add({ type: 'bug', priority: 'low', title: 'X', description: 'D', summary: 'gist' });
+    const { id } = store.add({ project: 'default', type: 'bug', priority: 'low', title: 'X', description: 'D', summary: 'gist' });
     store.update(id, { summary: '' });
     assert.equal(store.getById(id)?.summary, undefined);
   });
 
   test('getRelated returns both summary and description for all entries', () => {
     const { id: a } = store.add({
+      project: 'default',
       type: 'bug', priority: 'medium', title: 'A',
       description: 'A description.', summary: 'A gist.',
     });
     const { id: b } = store.add({
+      project: 'default',
       type: 'bug', priority: 'medium', title: 'B',
       description: 'B description.', summary: 'B gist.',
       refs: [{ id: a, relation: 'blocks' }],
@@ -781,7 +786,7 @@ describe('summary — store always returns complete data', () => {
   });
 
   test('setStatus does NOT enforce summary — enforcement is in server layer', () => {
-    const { id } = store.add({ type: 'bug', priority: 'medium', title: 'T', description: '' });
+    const { id } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'T', description: '' });
     const ok = store.setStatus(id, 'todo');
     assert.equal(ok, true);
     assert.equal(store.getById(id)?.status, 'todo');
@@ -892,7 +897,7 @@ describe('notes', () => {
     const { id } = makeTask({ scope: 's' });
     store.addNote(id, 'x');
     store.addNote(id, 'y');
-    for (const t of [store.getAll()[0], store.getByScope('s')[0], store.getNext(), store.load().active[0]]) {
+    for (const t of [store.getAll('default')[0], store.getByScope('default', 's')[0], store.getNext('default'), store.load().active[0]]) {
       assert.equal(t?.noteCount, 2);
       assert.equal(t?.notes, undefined);
     }
@@ -902,7 +907,7 @@ describe('notes', () => {
     const { id } = makeTask();
     assert.equal(store.getById(id)?.notes, undefined);
     assert.equal(store.getById(id)?.noteCount, undefined);
-    assert.equal(store.getAll()[0]?.noteCount, undefined);
+    assert.equal(store.getAll('default')[0]?.noteCount, undefined);
   });
 });
 
@@ -1023,12 +1028,12 @@ describe('epics', () => {
     store.update(id, { refs: [{ id: epic, relation: 'relates to' }] });
     const rel = store.getRelated(epic);
     const reads = [
-      find(store.getAll()),
-      find(store.getByType('bug')),
-      find(store.getByScope('s')),
+      find(store.getAll('default')),
+      find(store.getByType('default', 'bug')),
+      find(store.getByScope('default', 's')),
       find(store.load().active),
       find(rel!.inbound),
-      store.getNext('bug')!,
+      store.getNext('default', 'bug')!,
     ];
     for (const t of reads) {
       assert.equal(t.id, id);
@@ -1037,7 +1042,7 @@ describe('epics', () => {
       assert.equal(t.epic, undefined);
       assert.equal(t.children, undefined);
     }
-    const epicRead = store.getByType('epic')[0];
+    const epicRead = store.getByType('default', 'epic')[0];
     assert.equal(epicRead?.children, undefined);
     assert.equal(epicRead?.epic, undefined);
   });
@@ -1045,18 +1050,18 @@ describe('epics', () => {
   test('getAll and getByType list epics; epic sorts after other', () => {
     const epic = makeEpic();
     makeTask({ type: 'other' });
-    assert.deepEqual(store.getByType('epic').map((t) => t.id), [epic]);
-    const types = store.getAll().map((t) => t.type);
+    assert.deepEqual(store.getByType('default', 'epic').map((t) => t.id), [epic]);
+    const types = store.getAll('default').map((t) => t.type);
     assert.ok(types.lastIndexOf('other') < types.indexOf('epic'));
   });
 
   test('getNext skips epics, with and without a type filter', () => {
     makeEpic({ priority: 'critical' });
-    assert.equal(store.getNext(), null);
-    assert.equal(store.getNext('epic'), null);
+    assert.equal(store.getNext('default'), null);
+    assert.equal(store.getNext('default', 'epic'), null);
     const { id } = makeTask({ type: 'other', priority: 'low' });
-    assert.equal(store.getNext()?.id, id);
-    assert.equal(store.getNext('epic'), null);
+    assert.equal(store.getNext('default')?.id, id);
+    assert.equal(store.getNext('default', 'epic'), null);
   });
 
   test('deleting an epic detaches its children instead of deleting them', () => {
@@ -1079,7 +1084,7 @@ describe('externalId', () => {
   test('is present as null when unset, on getById and list reads', () => {
     const { id } = makeTask();
     assert.equal(store.getById(id)?.externalId, null);
-    const listed = store.getAll().find((t) => t.id === id);
+    const listed = store.getAll('default').find((t) => t.id === id);
     assert.ok(listed && 'externalId' in listed);
     assert.equal(listed.externalId, null);
   });
@@ -1113,5 +1118,96 @@ describe('externalId', () => {
     makeTask({ externalId: 'X-1' });
     assert.deepEqual(store.getByExternalId('X-2'), []);
     assert.deepEqual(store.getByExternalId('  '), []);
+  });
+});
+
+describe('projects', () => {
+  test('a fresh DB has only the default project', () => {
+    assert.deepEqual(store.getProjects(), [{ name: 'default', total: 0, open: 0 }]);
+  });
+
+  test('list methods only return the given project', () => {
+    store.createProject('example-project');
+    const mine = makeTask({ title: 'mine', scope: 'example-scope', status: 'todo' }).id;
+    const theirs = makeTask({ project: 'example-project', title: 'theirs', scope: 'example-scope', status: 'todo' }).id;
+    const ids = (tasks: Task[]) => tasks.map((t) => t.id);
+    assert.deepEqual(ids(store.getAll('default')), [mine]);
+    assert.deepEqual(ids(store.getByType('default', 'bug')), [mine]);
+    assert.deepEqual(ids(store.getByStatus('default', 'todo')), [mine]);
+    assert.deepEqual(ids(store.getByScope('default', 'example-scope')), [mine]);
+    assert.equal(store.getNext('default')?.id, mine);
+    assert.equal(store.getNext('example-project')?.id, theirs);
+    assert.deepEqual(store.getScopes('example-project'), [{ scope: 'example-scope', total: 1, open: 1 }]);
+    const ov = store.getOverview('example-project');
+    assert.equal(ov.length, 1);
+    assert.equal(store.getById(theirs)?.project, 'example-project');
+  });
+
+  test('project filters ignore case', () => {
+    store.createProject('Example-Project');
+    const { id } = makeTask({ project: 'example-project', status: 'todo' });
+    assert.equal(store.getById(id)?.project, 'Example-Project', 'stored in the canonical spelling');
+    assert.equal(store.getNext('EXAMPLE-PROJECT')?.id, id);
+  });
+
+  test('getById, getRelated and refs work across projects', () => {
+    store.createProject('example-project');
+    const a = makeTask({ title: 'A' }).id;
+    const b = makeTask({ project: 'example-project', title: 'B', refs: [{ id: a, relation: 'depends on' }] }).id;
+    assert.equal(store.getById(b)?.refs?.[0]?.id, a);
+    assert.deepEqual(store.getRelated(a)?.inbound.map((t) => t.id), [b]);
+  });
+
+  test('add and update reject an unknown project', () => {
+    assert.throws(() => makeTask({ project: 'nope' }), /project "nope" does not exist/);
+    const { id } = makeTask();
+    assert.throws(() => store.update(id, { project: 'nope' }), /project "nope" does not exist/);
+    assert.equal(store.getById(id)?.project, 'default');
+  });
+
+  test('update moves a task between projects', () => {
+    store.createProject('example-project');
+    const { id } = makeTask({ status: 'todo' });
+    store.update(id, { project: 'example-project' });
+    assert.equal(store.getNext('default'), null);
+    assert.equal(store.getNext('example-project')?.id, id);
+  });
+
+  test('createProject trims, rejects case-insensitive duplicates and bad lengths', () => {
+    assert.deepEqual(store.createProject('  example-project '), { name: 'example-project' });
+    assert.throws(() => store.createProject('EXAMPLE-project'), /already exists/);
+    assert.throws(() => store.createProject('   '), /1–64 characters/);
+    assert.throws(() => store.createProject('x'.repeat(65)), /1–64 characters/);
+    assert.ok(store.hasProject('Example-Project'));
+  });
+
+  test('getProjects counts total and open tasks per project, sorted by name', () => {
+    store.createProject('b-project');
+    store.createProject('a-project');
+    makeTask({ project: 'a-project' });
+    const done = makeTask({ project: 'a-project' }).id;
+    store.setStatus(done, 'done');
+    assert.deepEqual(store.getProjects(), [
+      { name: 'a-project', total: 2, open: 1 },
+      { name: 'b-project', total: 0, open: 0 },
+      { name: 'default', total: 0, open: 0 },
+    ]);
+  });
+
+  test('adoptDefaultProject renames default, tasks included, when it is the only project', () => {
+    const { id } = makeTask();
+    assert.equal(store.adoptDefaultProject('example-project'), true);
+    assert.deepEqual(store.getProjects().map((p) => p.name), ['example-project']);
+    assert.equal(store.getById(id)?.project, 'example-project');
+    assert.equal(store.adoptDefaultProject('another'), false, 'default is gone, nothing to adopt');
+  });
+
+  test('adoptDefaultProject is a no-op once another project exists, for default itself and for an existing name', () => {
+    assert.equal(store.adoptDefaultProject('default'), false);
+    assert.equal(store.adoptDefaultProject('  '), false);
+    store.createProject('example-project');
+    assert.equal(store.adoptDefaultProject('example-project'), false);
+    assert.equal(store.adoptDefaultProject('another'), false);
+    assert.deepEqual(store.getProjects().map((p) => p.name), ['default', 'example-project']);
   });
 });

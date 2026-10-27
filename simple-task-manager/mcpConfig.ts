@@ -25,9 +25,11 @@ export const ENV_DOCS: Record<string, string[]> = {
     'Absolute path to the SQLite database that holds this project\'s tasks.',
   ],
   PROJECT_NAME: [
-    'Human-readable label for the project. Shown in the UI header (big pill)',
-    'and the browser tab title. Also used as the pm2 process name in',
-    'standalone mode, so it must be unique across your pm2 process list.',
+    'The project this repo\'s MCP sessions are bound to: list tools and add',
+    'default to it. Unset means "default". A DB that only holds the "default"',
+    'project adopts this name on the first MCP start. Also the UI header label,',
+    'browser tab title and, in standalone mode, the pm2 process name, so it',
+    'must be unique across your pm2 process list.',
   ],
   TASK_UI_PORT: [
     'HTTP port the UI binds to. Default 7374.',

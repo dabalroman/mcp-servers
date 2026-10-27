@@ -70,6 +70,16 @@ export function createTaskApi({ dbPath }: TaskApiOptions) {
       return { ok };
     },
 
+    projects() {
+      return store.getProjects();
+    },
+
+    async createProject(body: { name?: unknown }) {
+      const project = await store.createProject(String(body?.name ?? ''));
+      broadcast();
+      return project;
+    },
+
     async remove(id: number) {
       const ok = await store.deleteTask(id);
       broadcast();

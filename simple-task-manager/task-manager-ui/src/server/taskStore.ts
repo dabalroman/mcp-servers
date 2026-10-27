@@ -2,10 +2,10 @@
 // run on first open inside createStore() — no vendor mirror, no EXPECTED_MIGRATIONS
 // validation. When the MCP and the UI both open the same DB, whichever opens
 // first applies pending migrations; the other sees the migrated schema.
-import { createStore, type AddInput, type UpdatePatch, type LoadResult, type Store } from '../../../tasks.js';
+import { createStore, type AddInput, type UpdatePatch, type LoadResult, type ProjectEntry, type Store } from '../../../tasks.js';
 import type { TaskStatus } from '@/types/task';
 
-export type { AddInput, UpdatePatch, LoadResult };
+export type { AddInput, UpdatePatch, LoadResult, ProjectEntry };
 
 export type TaskStoreOptions = { dbPath: string };
 
@@ -36,6 +36,14 @@ export function createTaskStore({ dbPath }: TaskStoreOptions) {
     return store.delete(id);
   }
 
+  function getProjects(): ProjectEntry[] {
+    return store.getProjects();
+  }
+
+  async function createProject(name: string): Promise<{ name: string }> {
+    return store.createProject(name);
+  }
+
   function dataVersion(): number {
     return store.dataVersion();
   }
@@ -44,7 +52,7 @@ export function createTaskStore({ dbPath }: TaskStoreOptions) {
     store.close();
   }
 
-  return { load, loadWithNotes, add, setStatus, updateTask, deleteTask, dataVersion, close };
+  return { load, loadWithNotes, add, setStatus, updateTask, deleteTask, getProjects, createProject, dataVersion, close };
 }
 
 export type TaskStore = ReturnType<typeof createTaskStore>;

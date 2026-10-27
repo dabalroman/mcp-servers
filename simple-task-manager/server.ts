@@ -38,7 +38,13 @@ const server = new McpServer(
   { instructions: INSTRUCTIONS, capabilities: { logging: {} } }
 );
 
-registerTools(server, store);
+// PROJECT_NAME binds this connection to a project; list tools default to it.
+const project = process.env.PROJECT_NAME?.trim() || 'default';
+if (store.adoptDefaultProject(project)) {
+  logToClient('info', `[simple-task-manager] Adopted the "default" project as "${project}"`);
+}
+
+registerTools(server, store, { project });
 
 // ── task-manager-ui spawn ────────────────────────────────────────────────────
 // UI child state and spawn logic live in mcp/uiChild.ts to break the circular

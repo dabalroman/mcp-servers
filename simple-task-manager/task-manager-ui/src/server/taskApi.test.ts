@@ -45,13 +45,13 @@ describe('self-write broadcast', () => {
     const res = makeRes();
     api.stream(req, res);
 
-    await api.add({ type: 'bug', priority: 'medium', title: 'Test task', description: '' });
+    await api.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Test task', description: '' });
 
     expect(res.chunks.some((c) => c.includes('tasks-changed'))).toBe(true);
   });
 
   it('broadcasts tasks-changed to watchers after patch()', async () => {
-    const id = (await api.add({ type: 'bug', priority: 'medium', title: 'Patch me', description: '' })).id;
+    const id = (await api.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Patch me', description: '' })).id;
     const req = makeReq();
     const res = makeRes();
     api.stream(req, res);
@@ -62,7 +62,7 @@ describe('self-write broadcast', () => {
   });
 
   it('broadcasts tasks-changed to watchers after remove()', async () => {
-    const id = (await api.add({ type: 'bug', priority: 'medium', title: 'Remove me', description: '' })).id;
+    const id = (await api.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Remove me', description: '' })).id;
     const req = makeReq();
     const res = makeRes();
     api.stream(req, res);
@@ -100,7 +100,7 @@ describe('dispose()', () => {
 
 describe('list', () => {
   it('includes note bodies', async () => {
-    const { id } = await api.add({ type: 'bug', priority: 'medium', title: 'Noted', description: '' });
+    const { id } = await api.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Noted', description: '' });
     const writer = createStore(dbPath);
     writer.addNote(id, 'a note');
     writer.close();
@@ -112,7 +112,7 @@ describe('list', () => {
 
 describe('externalId passthrough', () => {
   it('round-trips externalId through add and patch', async () => {
-    const { id } = await api.add({ type: 'bug', priority: 'medium', title: 'T', description: '', externalId: 'OPXPIQ-6532' });
+    const { id } = await api.add({ project: 'default', type: 'bug', priority: 'medium', title: 'T', description: '', externalId: 'OPXPIQ-6532' });
     const store = createStore(dbPath);
     try {
       expect(store.getById(id)?.externalId).toBe('OPXPIQ-6532');

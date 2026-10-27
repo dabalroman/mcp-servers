@@ -6,11 +6,13 @@ import {
 } from '@/components/ui/dialog';
 import { TYPES, PRIORITIES, RELATIONS, STATUS_CLASSES, STATUS_LABELS } from './constants';
 import { cn } from '@/lib/utils';
+import { filterByProject } from '@/lib/taskView';
 import type { Task, TaskRef, TaskType, TaskPriority, TaskStatus } from '@/types/task';
 
 type InitialStatus = 'refinement' | 'plan' | 'todo';
 
 type FormState = {
+  project: string;
   title: string;
   type: TaskType;
   priority: TaskPriority;
@@ -23,7 +25,7 @@ type FormState = {
   status: InitialStatus | undefined;
 };
 
-const EMPTY: FormState = { title: '', type: 'feature', priority: 'medium', description: '', summary: '', scope: '', externalId: '', parentId: null, refs: [], status: 'refinement' };
+const EMPTY: Omit<FormState, 'project'> = { title: '', type: 'feature', priority: 'medium', description: '', summary: '', scope: '', externalId: '', parentId: null, refs: [], status: 'refinement' };
 
 const INITIAL_STATUSES: InitialStatus[] = ['refinement', 'plan', 'todo'];
 
@@ -32,6 +34,9 @@ export type TaskFormProps = {
   onOpenChange: (open: boolean) => void;
   initial: Task | null;
   allTasks: Task[];
+  projects: string[];
+  // Selected project; new tasks default to it.
+  project: string;
   onSubmit: (form: FormState & { status: InitialStatus | undefined }) => Promise<boolean>;
   onDelete?: (id: number) => Promise<boolean>;
 };
@@ -41,9 +46,10 @@ function deriveStatus(status: TaskStatus | undefined): InitialStatus | undefined
   return undefined;
 }
 
-function deriveForm(initial: Task | null): FormState {
-  if (!initial) return EMPTY;
+function deriveForm(initial: Task | null, project: string): FormState {
+  if (!initial) return { ...EMPTY, project };
   return {
+    project: initial.project,
     title: initial.title,
     type: initial.type,
     priority: initial.priority,
@@ -58,7 +64,8 @@ function deriveForm(initial: Task | null): FormState {
 }
 
 function formsEqual(a: FormState, b: FormState): boolean {
-  return a.title === b.title &&
+  return a.project === b.project &&
+    a.title === b.title &&
     a.type === b.type &&
     a.priority === b.priority &&
     a.description === b.description &&
@@ -71,9 +78,9 @@ function formsEqual(a: FormState, b: FormState): boolean {
     a.refs.every((r, i) => r.id === b.refs[i]?.id && r.relation === b.refs[i]?.relation);
 }
 
-export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDelete }: TaskFormProps) {
-  const [form, setForm] = useState<FormState>(() => deriveForm(initial));
-  const [initialForm] = useState<FormState>(() => deriveForm(initial));
+export function TaskForm({ open, onOpenChange, initial, allTasks, projects, project, onSubmit, onDelete }: TaskFormProps) {
+  const [form, setForm] = useState<FormState>(() => deriveForm(initial, project));
+  const [initialForm] = useState<FormState>(() => deriveForm(initial, project));
   const [refSearch, setRefSearch] = useState('');
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [refHighlight, setRefHighlight] = useState(-1);
@@ -111,11 +118,11 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
 
   const isDirty = !formsEqual(form, initialForm);
 
-  // Scope suggestions are drawn from existing tasks only — no tool registry
-  // in this standalone package.
+  // Scope suggestions are drawn from existing tasks of the form's project only —
+  // no tool registry in this standalone package.
   const scopeSuggestions = (() => {
     const set = new Set<string>();
-    for (const t of allTasks) if (t.scope) set.add(t.scope);
+    for (const t of filterByProject(allTasks, form.project)) if (t.scope) set.add(t.scope);
     return [...set].sort();
   })();
 
@@ -342,7 +349,20 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
             />
           </div>
 
-          <div className="grid grid-cols-3 gap-3">
+          <div className={cn('grid gap-3', projects.length > 1 ? 'grid-cols-2 sm:grid-cols-4' : 'grid-cols-3')}>
+            {projects.length > 1 && (
+              <label className="flex flex-col gap-1">
+                <span className="text-xs tracking-widest text-muted-foreground uppercase">Project</span>
+                <select
+                  value={form.project}
+                  onChange={set('project')}
+                  className="bg-background border border-border px-2 h-9 text-base text-foreground focus:outline-none focus:border-primary min-w-0"
+                >
+                  {projects.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </label>
+            )}
+
             <label className="flex flex-col gap-1">
               <span className="text-xs tracking-widest text-muted-foreground uppercase">Type</span>
               <select

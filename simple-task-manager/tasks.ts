@@ -28,6 +28,7 @@ export type Task = {
   type: TaskType;
   status: TaskStatus;
   priority: TaskPriority;
+  project: string;
   scope?: string;
   summary?: string;
   description: string;
@@ -214,6 +215,7 @@ type TaskRow = {
   type: TaskType;
   status: TaskStatus;
   priority: TaskPriority;
+  project: string;
   scope: string | null;
   summary: string | null;
   description: string | null;
@@ -233,6 +235,7 @@ function rowToTask(row: TaskRow, refs: Ref[]): Task {
     type: row.type,
     status: row.status,
     priority: row.priority,
+    project: row.project,
     description: row.description ?? '',
     externalId: row.external_id,
     created_at: row.created_at,
@@ -271,6 +274,7 @@ export function sortForNext<T extends { status: TaskStatus; priority: TaskPriori
 }
 
 export type AddInput = {
+  project: string;
   type: TaskType;
   priority: TaskPriority;
   title: string;
@@ -285,6 +289,8 @@ export type AddInput = {
 };
 
 export type UpdatePatch = {
+  // Moves the task to another project.
+  project?: string;
   title?: string;
   type?: TaskType;
   priority?: TaskPriority;
@@ -312,6 +318,7 @@ export type OverviewEntry =
   | { type: TaskType; refinement: number; plan: number; open: number; done: number }
   | { type: TaskType; count: number; status: TaskStatus };
 export type ScopeEntry = { scope: string; total: number; open: number };
+export type ProjectEntry = { name: string; total: number; open: number };
 
 export type StatusFilter = TaskStatus | 'open';
 
@@ -333,21 +340,43 @@ export type Store = {
   update(id: number, patch: UpdatePatch): { task: Task } | null;
   setStatus(id: number, status: TaskStatus): boolean;
   delete(id: number): boolean;
-  getByStatus(status: TaskStatus, scope?: string): Task[];
-  getByScope(scope: string, status?: StatusFilter): Task[];
+  getByStatus(project: string, status: TaskStatus, scope?: string): Task[];
+  getByScope(project: string, scope: string, status?: StatusFilter): Task[];
   getByExternalId(externalId: string): Task[];
-  getByType(type: TaskType, status?: StatusFilter): Task[];
-  getNext(type?: TaskType): Task | null;
-  getOverview(status?: StatusFilter): OverviewEntry[];
+  getByType(project: string, type: TaskType, status?: StatusFilter): Task[];
+  getNext(project: string, type?: TaskType): Task | null;
+  getOverview(project: string, status?: StatusFilter): OverviewEntry[];
   getRelated(id: number, status?: StatusFilter): RelatedResult | null;
-  getScopes(): ScopeEntry[];
+  getScopes(project: string): ScopeEntry[];
   getById(id: number): Task | null;
-  getAll(status?: StatusFilter): Task[];
+  getAll(project: string, status?: StatusFilter): Task[];
+  getProjects(): ProjectEntry[];
+  createProject(name: string): { name: string };
+  hasProject(name: string): boolean;
+  adoptDefaultProject(name: string): boolean;
   addNote(taskId: number, body: string): Note | null;
   updateNote(noteId: number, body: string): Note | null;
   deleteNote(noteId: number): boolean;
   close(): void;
 };
+
+export const PROJECT_NAME_MAX = 64;
+
+function isValidProjectName(trimmed: string): boolean {
+  return trimmed.length >= 1 && trimmed.length <= PROJECT_NAME_MAX;
+}
+
+function validProjectName(name: string): string {
+  const trimmed = String(name ?? '').trim();
+  if (!isValidProjectName(trimmed)) {
+    throw new Error(`Validation failed: project name must be 1–${PROJECT_NAME_MAX} characters.`);
+  }
+  return trimmed;
+}
+
+export function unknownProjectMessage(name: string): string {
+  return `project "${name}" does not exist — create it with createProject or in the task-manager UI, or call getProjects to list existing ones.`;
+}
 
 // ── Store factory ─────────────────────────────────────────────────────────────
 export function createStore(dbPath: string): Store {
@@ -381,7 +410,7 @@ export function createStore(dbPath: string): Store {
 
   // Prepared statements
   const stmtInsertTask      = db.prepare(
-    'INSERT INTO tasks (title, type, status, priority, scope, summary, description, plan, parent_id, external_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO tasks (title, type, status, priority, project, scope, summary, description, plan, parent_id, external_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   );
   const stmtSelectTask      = db.prepare('SELECT * FROM tasks WHERE id = ?');
   const stmtSelectAllTasks  = db.prepare('SELECT * FROM tasks');
@@ -402,7 +431,7 @@ export function createStore(dbPath: string): Store {
   const stmtDeleteMirror    = db.prepare('DELETE FROM refs WHERE from_id = ? AND to_id = ? AND relation = ?');
   const stmtUpdateTask      = db.prepare(`
     UPDATE tasks
-    SET title = ?, type = ?, priority = ?, scope = ?, summary = ?, description = ?, plan = ?, parent_id = ?, external_id = ?, updated_at = datetime('now')
+    SET title = ?, type = ?, priority = ?, project = ?, scope = ?, summary = ?, description = ?, plan = ?, parent_id = ?, external_id = ?, updated_at = datetime('now')
     WHERE id = ?
   `);
   const stmtSetTaskStatus   = db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`);
@@ -414,6 +443,7 @@ export function createStore(dbPath: string): Store {
   const stmtDeleteNote      = db.prepare('DELETE FROM notes WHERE id = ?');
   const stmtChildrenOf      = db.prepare('SELECT id, title, status, type, priority FROM tasks WHERE parent_id = ? ORDER BY id');
   const stmtHasChildren     = db.prepare('SELECT 1 FROM tasks WHERE parent_id = ? LIMIT 1');
+  const stmtSelectProject   = db.prepare('SELECT name FROM projects WHERE name = ?');
 
   function readRefsFor(id: number): Ref[] {
     return (stmtRefsFrom.all(id) as RefRow[]).map(refRowToObj);
@@ -445,6 +475,16 @@ export function createStore(dbPath: string): Store {
     const parent = stmtSelectTask.get(parentId) as TaskRow | undefined;
     if (!parent) throw new Error(`Validation failed: parent #${parentId} does not exist.`);
     if (parent.type !== 'epic') throw new Error(`Validation failed: parent #${parentId} is not an epic.`);
+  }
+
+  // Returns the stored spelling: tasks.project would otherwise keep whatever
+  // case the caller typed, since the NOCASE FK accepts it.
+  function canonicalProject(name: string): string {
+    const trimmed = String(name ?? '').trim();
+    if (!trimmed) throw new Error('Validation failed: project is required.');
+    const row = stmtSelectProject.get(trimmed) as { name: string } | undefined;
+    if (!row) throw new Error(`Validation failed: ${unknownProjectMessage(trimmed)}`);
+    return row.name;
   }
 
   function readAllTasks(withNotes = false): Task[] {
@@ -567,7 +607,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function add(input: AddInput): { id: number } {
-    const { type, priority, title, description = '', scope, summary, plan, refs, status = 'refinement', parentId, externalId } = input;
+    const { project, type, priority, title, description = '', scope, summary, plan, refs, status = 'refinement', parentId, externalId } = input;
     const trimmedTitle = String(title ?? '').trim();
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
 
@@ -578,6 +618,7 @@ export function createStore(dbPath: string): Store {
         type,
         status,
         priority,
+        canonicalProject(project),
         scope?.trim() || null,
         summary?.trim() || null,
         description.trim(),
@@ -604,6 +645,7 @@ export function createStore(dbPath: string): Store {
         title: patch.title !== undefined ? patch.title.trim() : existing.title,
         type: patch.type ?? existing.type,
         priority: patch.priority ?? existing.priority,
+        project: patch.project !== undefined ? canonicalProject(patch.project) : existing.project,
         scope: patch.scope === null
           ? null
           : patch.scope !== undefined ? (patch.scope.trim() || null) : existing.scope,
@@ -622,7 +664,7 @@ export function createStore(dbPath: string): Store {
 
       // Only re-validate when the link can change, so plan/description edits never trip it.
       if (patch.type !== undefined || patch.parentId !== undefined) assertParent(next.type, next.parentId, id, existing.type);
-      stmtUpdateTask.run(next.title, next.type, next.priority, next.scope, next.summary, next.description, next.plan, next.parentId, next.externalId, id);
+      stmtUpdateTask.run(next.title, next.type, next.priority, next.project, next.scope, next.summary, next.description, next.plan, next.parentId, next.externalId, id);
       if (next.parentId !== existing.parent_id) {
         if (existing.parent_id !== null) syncEpicStatus(existing.parent_id, null);
         if (next.parentId !== null) syncEpicStatus(next.parentId, existing.status);
@@ -674,25 +716,25 @@ export function createStore(dbPath: string): Store {
     })();
   }
 
-  function getByStatus(status: TaskStatus, scope?: string): Task[] {
+  function getByStatus(project: string, status: TaskStatus, scope?: string): Task[] {
     let rows: TaskRow[];
     if (scope !== undefined) {
-      rows = db.prepare('SELECT * FROM tasks WHERE status = ? AND scope = ?').all(status, scope) as TaskRow[];
+      rows = db.prepare('SELECT * FROM tasks WHERE project = ? AND status = ? AND scope = ?').all(project, status, scope) as TaskRow[];
     } else {
-      rows = db.prepare('SELECT * FROM tasks WHERE status = ?').all(status) as TaskRow[];
+      rows = db.prepare('SELECT * FROM tasks WHERE project = ? AND status = ?').all(project, status) as TaskRow[];
     }
     const tasks = attachRefs(rows);
     return sortByPriority(tasks);
   }
 
-  function getByScope(scope: string, status?: StatusFilter): Task[] {
+  function getByScope(project: string, scope: string, status?: StatusFilter): Task[] {
     const resolved = resolveStatusFilter(status);
     let rows: TaskRow[];
     if (Array.isArray(resolved)) {
       const placeholders = resolved.map(() => '?').join(', ');
-      rows = db.prepare(`SELECT * FROM tasks WHERE scope = ? AND status IN (${placeholders})`).all(scope, ...resolved) as TaskRow[];
+      rows = db.prepare(`SELECT * FROM tasks WHERE project = ? AND scope = ? AND status IN (${placeholders})`).all(project, scope, ...resolved) as TaskRow[];
     } else {
-      rows = db.prepare('SELECT * FROM tasks WHERE scope = ? AND status = ?').all(scope, resolved) as TaskRow[];
+      rows = db.prepare('SELECT * FROM tasks WHERE project = ? AND scope = ? AND status = ?').all(project, scope, resolved) as TaskRow[];
     }
     const tasks = attachRefs(rows);
     return sortByPriority(tasks);
@@ -706,40 +748,40 @@ export function createStore(dbPath: string): Store {
     return attachRefs(rows);
   }
 
-  function getByType(type: TaskType, status?: StatusFilter): Task[] {
+  function getByType(project: string, type: TaskType, status?: StatusFilter): Task[] {
     const resolved = resolveStatusFilter(status);
     let rows: TaskRow[];
     if (Array.isArray(resolved)) {
       const placeholders = resolved.map(() => '?').join(', ');
-      rows = db.prepare(`SELECT * FROM tasks WHERE type = ? AND status IN (${placeholders})`).all(type, ...resolved) as TaskRow[];
+      rows = db.prepare(`SELECT * FROM tasks WHERE project = ? AND type = ? AND status IN (${placeholders})`).all(project, type, ...resolved) as TaskRow[];
     } else {
-      rows = db.prepare('SELECT * FROM tasks WHERE type = ? AND status = ?').all(type, resolved) as TaskRow[];
+      rows = db.prepare('SELECT * FROM tasks WHERE project = ? AND type = ? AND status = ?').all(project, type, resolved) as TaskRow[];
     }
     const tasks = attachRefs(rows);
     return sortByPriority(tasks);
   }
 
-  function getNext(type?: TaskType): Task | null {
+  function getNext(project: string, type?: TaskType): Task | null {
     let rows: TaskRow[];
     if (type) {
       rows = db.prepare(`
         SELECT * FROM tasks
-        WHERE status IN ('todo', 'in_progress', 'refinement', 'plan')
+        WHERE project = ? AND status IN ('todo', 'in_progress', 'refinement', 'plan')
         AND type = ? AND type != 'epic'
-      `).all(type) as TaskRow[];
+      `).all(project, type) as TaskRow[];
     } else {
       rows = db.prepare(`
         SELECT * FROM tasks
-        WHERE status IN ('todo', 'in_progress', 'refinement', 'plan')
+        WHERE project = ? AND status IN ('todo', 'in_progress', 'refinement', 'plan')
         AND type != 'epic'
-      `).all() as TaskRow[];
+      `).all(project) as TaskRow[];
     }
     const tasks = attachRefs(rows);
     const sorted = sortForNext(tasks);
     return sorted[0] ?? null;
   }
 
-  function getOverview(status?: StatusFilter): OverviewEntry[] {
+  function getOverview(project: string, status?: StatusFilter): OverviewEntry[] {
     const resolved = resolveStatusFilter(status);
 
     if (!Array.isArray(resolved)) {
@@ -747,9 +789,9 @@ export function createStore(dbPath: string): Store {
       const rows = db.prepare(`
         SELECT type, COUNT(*) AS count
         FROM tasks
-        WHERE status = ?
+        WHERE project = ? AND status = ?
         GROUP BY type
-      `).all(resolved) as { type: TaskType; count: number }[];
+      `).all(project, resolved) as { type: TaskType; count: number }[];
       return ALL_TYPES
         .map((type): OverviewEntry | null => {
           const r = rows.find((x) => x.type === type);
@@ -767,9 +809,9 @@ export function createStore(dbPath: string): Store {
              SUM(CASE WHEN status IN ('todo', 'in_progress') THEN 1 ELSE 0 END) AS open,
              SUM(CASE WHEN status = 'done' THEN 1 ELSE 0 END) AS done
       FROM tasks
-      WHERE status IN (${placeholders})
+      WHERE project = ? AND status IN (${placeholders})
       GROUP BY type
-    `).all(...resolved) as { type: TaskType; refinement: number; plan: number; open: number; done: number }[];
+    `).all(project, ...resolved) as { type: TaskType; refinement: number; plan: number; open: number; done: number }[];
     return ALL_TYPES
       .map((type): OverviewEntry | null => {
         const r = rows.find((x) => x.type === type);
@@ -797,14 +839,14 @@ export function createStore(dbPath: string): Store {
     return task;
   }
 
-  function getAll(status?: StatusFilter): Task[] {
+  function getAll(project: string, status?: StatusFilter): Task[] {
     const resolved = resolveStatusFilter(status);
     let rows: TaskRow[];
     if (Array.isArray(resolved)) {
       const placeholders = resolved.map(() => '?').join(', ');
-      rows = db.prepare(`SELECT * FROM tasks WHERE status IN (${placeholders})`).all(...resolved) as TaskRow[];
+      rows = db.prepare(`SELECT * FROM tasks WHERE project = ? AND status IN (${placeholders})`).all(project, ...resolved) as TaskRow[];
     } else {
-      rows = db.prepare('SELECT * FROM tasks WHERE status = ?').all(resolved) as TaskRow[];
+      rows = db.prepare('SELECT * FROM tasks WHERE project = ? AND status = ?').all(project, resolved) as TaskRow[];
     }
     const tasks = attachRefs(rows);
     return sortByPriority(tasks);
@@ -853,15 +895,15 @@ export function createStore(dbPath: string): Store {
     return { task, outbound, inbound };
   }
 
-  function getScopes(): ScopeEntry[] {
+  function getScopes(project: string): ScopeEntry[] {
     const rows = db.prepare(`
       SELECT scope,
              COUNT(*) AS total,
              SUM(CASE WHEN status != 'done' THEN 1 ELSE 0 END) AS open
       FROM tasks
-      WHERE scope IS NOT NULL
+      WHERE project = ? AND scope IS NOT NULL
       GROUP BY scope
-    `).all() as { scope: string; total: number; open: number }[];
+    `).all(project) as { scope: string; total: number; open: number }[];
     return rows
       .map((r) => ({ scope: r.scope, total: r.total, open: r.open }))
       .sort((a, b) => {
@@ -869,6 +911,45 @@ export function createStore(dbPath: string): Store {
         if (b.total !== a.total) return b.total - a.total;
         return a.scope.localeCompare(b.scope);
       });
+  }
+
+  function getProjects(): ProjectEntry[] {
+    return db.prepare(`
+      SELECT p.name,
+             COUNT(t.id) AS total,
+             COALESCE(SUM(CASE WHEN t.status != 'done' THEN 1 ELSE 0 END), 0) AS open
+      FROM projects p
+      LEFT JOIN tasks t ON t.project = p.name
+      GROUP BY p.name
+      ORDER BY p.name COLLATE NOCASE
+    `).all() as ProjectEntry[];
+  }
+
+  function hasProject(name: string): boolean {
+    return stmtSelectProject.get(name.trim()) !== undefined;
+  }
+
+  function createProject(name: string): { name: string } {
+    const trimmed = validProjectName(name);
+    const existing = stmtSelectProject.get(trimmed) as { name: string } | undefined;
+    if (existing) throw new Error(`Validation failed: project "${existing.name}" already exists.`);
+    db.prepare('INSERT INTO projects (name) VALUES (?)').run(trimmed);
+    return { name: trimmed };
+  }
+
+  // A DB that only knows the migration's 'default' project takes the
+  // connection's PROJECT_NAME instead, so single-project installs need no
+  // setup. ON UPDATE CASCADE carries the tasks along.
+  function adoptDefaultProject(name: string): boolean {
+    const trimmed = name.trim();
+    if (!isValidProjectName(trimmed) || trimmed.toLowerCase() === 'default') return false;
+    return db.transaction(() => {
+      if (stmtSelectProject.get(trimmed)) return false;
+      const names = (db.prepare('SELECT name FROM projects').all() as { name: string }[]).map((r) => r.name);
+      if (names.length !== 1 || names[0] !== 'default') return false;
+      db.prepare(`UPDATE projects SET name = ? WHERE name = 'default'`).run(trimmed);
+      return true;
+    }).immediate();
   }
 
   function validNoteBody(body: string): string {
@@ -931,6 +1012,10 @@ export function createStore(dbPath: string): Store {
     getScopes,
     getById,
     getAll,
+    getProjects,
+    createProject,
+    hasProject,
+    adoptDefaultProject,
     addNote,
     updateNote,
     deleteNote,

@@ -16,33 +16,74 @@ export function mountTaskApi(middlewareStack: MiddlewareStack, opts: MountOption
   const dbPath = opts.dbPath ?? resolveDefaultDbPath();
   const api = createTaskApi({ dbPath });
 
-  const handle: Handler = (req, res, next) => {
+  middlewareStack.use('/api/tasks', withBody(api, dispatch, { stream: true }));
+  middlewareStack.use('/api/projects', withBody(api, dispatchProjects, { stream: false }));
+  return { dispose: () => api.dispose() };
+}
+
+type Dispatch = typeof dispatch;
+
+function withBody(api: TaskApi, route: Dispatch, { stream }: { stream: boolean }): Handler {
+  return (req, res, next) => {
     const url = new URL(req.url ?? '/', 'http://x');
     const pathname = url.pathname;
     const method = req.method ?? 'GET';
 
     // SSE stream — must come before the JSON body check
-    if (method === 'GET' && pathname === '/stream') {
+    if (stream && method === 'GET' && pathname === '/stream') {
       return api.stream(req, res);
     }
 
     if (method === 'POST' || method === 'PATCH' || method === 'DELETE') {
-      if (req.body !== undefined) return dispatch(req, res, next, pathname, method, api);
+      if (req.body !== undefined) return void route(req, res, next, pathname, method, api);
 
       let raw = '';
       req.on('data', (c: Buffer | string) => { raw += c; });
       req.on('end', () => {
         try { req.body = raw ? JSON.parse(raw) : {}; } catch { req.body = {}; }
-        void dispatch(req, res, next, pathname, method, api);
+        void route(req, res, next, pathname, method, api);
       });
       return;
     }
 
-    void dispatch(req, res, next, pathname, method, api);
+    void route(req, res, next, pathname, method, api);
   };
+}
 
-  middlewareStack.use('/api/tasks', handle);
-  return { dispose: () => api.dispose() };
+async function dispatchProjects(
+  req: IncomingMessage & { body?: unknown },
+  res: ServerResponse,
+  next: Next | undefined,
+  pathname: string,
+  method: string,
+  api: TaskApi,
+): Promise<void> {
+  let result: unknown;
+  try {
+    if (method === 'GET' && pathname === '/') {
+      result = api.projects();
+    } else if (method === 'POST' && pathname === '/') {
+      result = await api.createProject(req.body as { name?: unknown });
+    } else {
+      if (next) return next();
+      res.statusCode = 404;
+      res.end('Not found');
+      return;
+    }
+  } catch (err: unknown) {
+    return sendError(res, err);
+  }
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(JSON.stringify(result));
+}
+
+function sendError(res: ServerResponse, err: unknown): void {
+  const e = err as Error;
+  console.error('[task-api]', e);
+  res.statusCode = isValidationError(err) ? 400 : 500;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({ error: e.message }));
 }
 
 async function dispatch(
@@ -79,11 +120,7 @@ async function dispatch(
     res.setHeader('Cache-Control', 'no-store');
     res.end(body);
   } catch (err: unknown) {
-    const e = err as Error;
-    console.error('[task-api]', e);
-    res.statusCode = isValidationError(err) ? 400 : 500;
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ error: e.message }));
+    sendError(res, err);
   }
 }
 

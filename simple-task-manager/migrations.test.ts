@@ -12,6 +12,7 @@ import { createStore, loadMigrations } from './tasks.js';
 
 const EPIC_MIGRATION = '20261020120000_add-epic-type-and-parent';
 const EXTERNAL_ID_MIGRATION = '20261027120000_add-external-id';
+const PROJECTS_MIGRATION = '20261027130000_add-projects';
 
 let dir: string;
 let dbPath: string;
@@ -283,7 +284,7 @@ describe('add-epic-type-and-parent migration', () => {
     assert.deepEqual(db.prepare('SELECT body FROM notes WHERE task_id = 1').all(), [{ body: 'a note' }]);
 
     const fks = db.pragma('foreign_key_list(tasks)') as { table: string; from: string; on_delete: string }[];
-    assert.deepEqual(fks.map((f) => [f.from, f.table, f.on_delete]), [['parent_id', 'tasks', 'SET NULL']]);
+    assert.deepEqual(fks.filter((f) => f.from === 'parent_id').map((f) => [f.from, f.table, f.on_delete]), [['parent_id', 'tasks', 'SET NULL']]);
     const idx = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_tasks_parent_id'").get();
     assert.ok(idx, 'idx_tasks_parent_id must exist');
     assert.deepEqual(db.pragma('foreign_key_check'), []);
@@ -295,7 +296,7 @@ describe('add-epic-type-and-parent migration', () => {
   test('the rebuilt table accepts type epic and keeps ON DELETE CASCADE on refs and notes', () => {
     seedPreEpicDb();
     const store = createStore(dbPath);
-    const { id } = store.add({ type: 'epic', priority: 'low', title: 'E' });
+    const { id } = store.add({ project: 'default', type: 'epic', priority: 'low', title: 'E' });
     store.delete(1);
     assert.equal(store.getById(id)?.type, 'epic');
     const n = (store.db.prepare('SELECT COUNT(*) AS n FROM notes WHERE task_id = 1').get() as { n: number }).n;
@@ -331,5 +332,67 @@ describe('add-external-id migration', () => {
     const idx = db2.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_tasks_external_id'").get();
     assert.ok(idx, 'idx_tasks_external_id must exist');
     db2.close();
+  });
+});
+
+describe('add-projects migration', () => {
+  function seedPreProjectsDb(): void {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    const earlier = loadMigrations().filter((m) => m.name < PROJECTS_MIGRATION);
+    earlier.forEach((m, i) => {
+      m.up(db);
+      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(i + 1, m.name);
+    });
+    db.pragma(`user_version = ${earlier.length}`);
+    const ins = db.prepare('INSERT INTO tasks (title, type, status, priority, scope, description, parent_id, external_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    ins.run('Epic', 'epic', 'todo', 'medium', 'example-scope', 'e', null, 'EX-1');
+    ins.run('Child', 'bug', 'todo', 'high', 'example-scope', 'c', 1, null);
+    ins.run('Deleted', 'idea', 'todo', 'low', null, 'd', null, null);
+    db.prepare('DELETE FROM tasks WHERE id = 3').run();
+    db.prepare('INSERT INTO refs (from_id, to_id, relation) VALUES (2, 1, ?)').run('depends on');
+    db.prepare('INSERT INTO refs (from_id, to_id, relation) VALUES (1, 2, ?)').run('is depended on by');
+    db.prepare('INSERT INTO notes (task_id, body) VALUES (2, ?)').run('a note');
+    db.close();
+  }
+
+  test('files every task under the literal default project and keeps parent, refs, notes and external id', () => {
+    seedPreProjectsDb();
+    createStore(dbPath).close();
+
+    const db = new Database(dbPath);
+    assert.deepEqual(db.prepare('SELECT name FROM projects').all(), [{ name: 'default' }]);
+    assert.deepEqual(db.prepare('SELECT id, project, parent_id, external_id FROM tasks ORDER BY id').all(), [
+      { id: 1, project: 'default', parent_id: null, external_id: 'EX-1' },
+      { id: 2, project: 'default', parent_id: 1, external_id: null },
+    ]);
+    assert.equal((db.prepare('SELECT COUNT(*) AS n FROM refs').get() as { n: number }).n, 2);
+    assert.deepEqual(db.prepare('SELECT body FROM notes WHERE task_id = 2').all(), [{ body: 'a note' }]);
+    assert.deepEqual(db.pragma('foreign_key_check'), []);
+    for (const name of ['idx_tasks_project', 'idx_tasks_external_id', 'idx_tasks_parent_id']) {
+      assert.ok(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?").get(name), `${name} must exist`);
+    }
+    const fks = db.pragma('foreign_key_list(tasks)') as { table: string; from: string; on_update: string }[];
+    assert.deepEqual(fks.filter((f) => f.from === 'project').map((f) => [f.table, f.on_update]), [['projects', 'CASCADE']]);
+    db.close();
+  });
+
+  test('keeps the AUTOINCREMENT high-water mark, so a deleted top id is not reused', () => {
+    seedPreProjectsDb();
+    const store = createStore(dbPath);
+    const { id } = store.add({ project: 'default', type: 'bug', priority: 'low', title: 'New' });
+    store.close();
+    assert.equal(id, 4);
+  });
+
+  test('rejects a task whose project does not exist', () => {
+    seedPreProjectsDb();
+    const store = createStore(dbPath);
+    assert.throws(
+      () => store.db.prepare("INSERT INTO tasks (title, type, status, priority, project) VALUES ('X', 'bug', 'todo', 'low', 'nope')").run(),
+      /FOREIGN KEY constraint failed/,
+    );
+    store.close();
   });
 });
