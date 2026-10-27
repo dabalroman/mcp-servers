@@ -1,4 +1,5 @@
 ---
+name: implement-as-coordinator
 description: Supervise a queue of todo tasks as coordinator — subagents (Sonnet or Opus, picked per task) implement via /implement, you verify, build, deploy, code-review and fix, then commit only once the user approves (or per child in Epic mode). Args: task ids ("#45 #50 43"), an epic id, a fuzzy scope, or empty for all todo.
 ---
 

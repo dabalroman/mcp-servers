@@ -1,4 +1,5 @@
 ---
+name: assess
 description: Product assessment of a scope — preserve and review real-usage evidence, record a go/no-go verdict, run a two-round advocate/skeptic debate at product level, synthesise ranked suggestions, file only what the user picks. Args: "#NN" (an evaluation task) | fuzzy scope (e.g. "vault ai") | empty to ask.
 model: opus
 ---
