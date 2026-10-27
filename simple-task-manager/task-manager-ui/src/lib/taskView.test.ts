@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sortTasks, groupTasks, getSectionValue, nestEpicChildren, epicProgress, filterByProject, pickProject } from './taskView';
+import { sortTasks, groupTasks, getSectionValue, nestEpicChildren, epicProgress, filterByProject, pickProject, projectFromPath, projectPath } from './taskView';
 import type { SortDir } from './taskView';
 import type { Task } from '@/types/task';
 
@@ -245,5 +245,25 @@ describe('pickProject', () => {
 
   it('returns null when there are no projects', () => {
     expect(pickProject([], 'a-project')).toBeNull();
+  });
+});
+
+describe('projectFromPath / projectPath', () => {
+  it('reads the first path segment', () => {
+    expect(projectFromPath('/')).toBeNull();
+    expect(projectFromPath('')).toBeNull();
+    expect(projectFromPath('/a-project')).toBe('a-project');
+    expect(projectFromPath('/a-project/')).toBe('a-project');
+    expect(projectFromPath('/a-project/extra')).toBe('a-project');
+  });
+
+  it('round-trips names that need encoding', () => {
+    for (const name of ['my project', 'zażółć', 'a/b', 'x?y#z']) {
+      expect(projectFromPath(projectPath(name))).toBe(name);
+    }
+  });
+
+  it('returns null for malformed percent-encoding', () => {
+    expect(projectFromPath('/%E2')).toBeNull();
   });
 });

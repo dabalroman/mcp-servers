@@ -191,7 +191,7 @@ When the MCP starts, it tries to spawn `./task-manager-ui/server.ts` (bundled su
 - Serves a React SPA at <http://localhost:7374> showing the same tasks the MCP sees.
 - Pushes live updates (SSE) when the MCP writes — no manual refresh.
 - Lets you add, edit, re-prioritize, set status, link refs, and delete tasks from the browser. Edits flow back through the same SQLite file.
-- Shows one project at a time. With more than one project, a tab strip above the list switches between them (with open counts) and the browser remembers your pick. `+ Project` creates one; the task form's project select moves a task. Clicking a ref into another project switches to it.
+- Shows one project at a time. With more than one project, a tab strip above the list switches between them (with open counts) and the browser remembers your pick. `+ Project` creates one; the task form's project select moves a task. Clicking a ref into another project switches to it. The URL carries the project (`http://<host>:7374/<project>`), so a link or bookmark opens that project and Back/Forward switch between projects.
 
 The UI dies with the MCP (SIGTERM on shutdown). One MCP per project = one UI per project.
 

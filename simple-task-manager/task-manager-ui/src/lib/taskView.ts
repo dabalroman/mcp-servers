@@ -154,3 +154,18 @@ export function pickProject(names: string[], remembered: string | null): string 
   const match = remembered === null ? undefined : sorted.find((n) => n.toLowerCase() === remembered.toLowerCase());
   return match ?? sorted[0] ?? null;
 }
+
+// The selected project lives in the URL's first path segment (/<project>).
+export function projectFromPath(pathname: string): string | null {
+  const segment = pathname.split('/').find((s) => s !== '');
+  if (segment === undefined) return null;
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return null;
+  }
+}
+
+export function projectPath(name: string): string {
+  return `/${encodeURIComponent(name)}`;
+}

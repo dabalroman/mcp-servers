@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TaskListControls, loadViewState } from '@/components/TaskListControls';
 import { cn } from '@/lib/utils';
-import { sortTasks, groupTasks, nestEpicChildren, epicProgress, filterByProject, pickProject } from '@/lib/taskView';
+import { sortTasks, groupTasks, nestEpicChildren, epicProgress, filterByProject, pickProject, projectFromPath, projectPath } from '@/lib/taskView';
 import type { ViewState } from '@/lib/taskView';
 import { useTasks } from './useTasks';
 import { TaskCard } from './TaskCard';
@@ -44,7 +44,7 @@ export default function TaskManager() {
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [view, setView] = useState<ViewState>(loadViewState);
-  const [rememberedProject, setRememberedProject] = useState<string | null>(loadProject);
+  const [rememberedProject, setRememberedProject] = useState<string | null>(() => projectFromPath(window.location.pathname) ?? loadProject());
 
   const { active: allActive, done: allDone, projects } = data;
   const project = pickProject(projects.map((p) => p.name), rememberedProject);
@@ -54,6 +54,21 @@ export default function TaskManager() {
   const selectProject = useCallback((name: string) => {
     setRememberedProject(name);
     saveProject(name);
+    if (window.location.pathname !== projectPath(name)) window.history.pushState(null, '', projectPath(name));
+  }, []);
+
+  // Rewrite /, a miscased or an unknown name to the shown project's path,
+  // without adding a history entry.
+  useEffect(() => {
+    if (project === null) return;
+    saveProject(project);
+    if (window.location.pathname !== projectPath(project)) window.history.replaceState(null, '', projectPath(project));
+  }, [project]);
+
+  useEffect(() => {
+    const onPop = () => setRememberedProject(projectFromPath(window.location.pathname) ?? loadProject());
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
   }, []);
 
   const { navigateToRef, highlightedId, collapseVersion, toggleCollapse } =
