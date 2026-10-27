@@ -23,6 +23,7 @@ import {
   handleGetAll,
   handleGetById,
   handleGetByScope,
+  handleGetByExternalId,
   handleGetRelated,
   handleGetOverview,
   handleHealth,
@@ -1461,6 +1462,37 @@ describe('epics — MCP layer', () => {
 });
 
 // ── Instructions split + plugin rules hook ───────────────────────────────────
+
+describe('externalId — MCP layer', () => {
+  test('add with externalId is returned by getById', async () => {
+    const { id } = decode(handleAdd(store, { type: 'feature', priority: 'low', title: 'T', description: '', externalId: 'OPXPIQ-6532' })) as { id: number };
+    const { task } = decode(await handleGetById(store, { id })) as { task: { externalId: string | null } };
+    assert.equal(task.externalId, 'OPXPIQ-6532');
+  });
+
+  test('getAll items carry externalId: null when unset', async () => {
+    addTask({ type: 'bug' });
+    const { tasks } = decode(await handleGetAll(store, {})) as { tasks: Record<string, Record<string, unknown>[]> };
+    const t = tasks.bug?.[0];
+    assert.ok(t && 'externalId' in t);
+    assert.equal(t.externalId, null);
+  });
+
+  test('update clears externalId with null', () => {
+    const { id } = addTask({ externalId: 'A-1' });
+    assert.ok(!handleUpdate(store, { id, externalId: null }).isError);
+    assert.equal(store.getById(id)?.externalId, null);
+  });
+
+  test('getByExternalId matches case-insensitively and returns [] on no match', async () => {
+    const { id } = addTask({ externalId: 'OPXPIQ-6532' });
+    const hit = decode(await handleGetByExternalId(store, { externalId: 'opxpiq-6532' })) as { externalId: string; tasks: { id: number }[] };
+    assert.equal(hit.externalId, 'opxpiq-6532');
+    assert.deepEqual(hit.tasks.map((t) => t.id), [id]);
+    const miss = decode(await handleGetByExternalId(store, { externalId: 'NOPE-1' })) as { tasks: unknown[] };
+    assert.deepEqual(miss.tasks, []);
+  });
+});
 
 const PLUGIN_DIR = join(PACKAGE_DIR, 'plugin');
 const RULES = readFileSync(join(PLUGIN_DIR, 'RULES.md'), 'utf8');

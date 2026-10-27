@@ -7,6 +7,7 @@ function makeTask(overrides: Partial<Task> & { id: number; title: string }): Tas
     type: 'bug',
     priority: 'medium',
     status: 'todo',
+    externalId: null,
     created_at: '2026-01-01T00:00:00',
     updated_at: '2026-01-01T00:00:00',
     ...overrides,

@@ -33,6 +33,8 @@ export type Task = {
   description: string;
   plan?: string;
   parentId?: number;
+  // Always present (null when unset), unlike the other optionals, so agents can rely on the key.
+  externalId: string | null;
   epicTitle?: string;
   epic?: EpicContext;
   children?: EpicChild[];
@@ -217,6 +219,7 @@ type TaskRow = {
   description: string | null;
   plan: string | null;
   parent_id: number | null;
+  external_id: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -231,6 +234,7 @@ function rowToTask(row: TaskRow, refs: Ref[]): Task {
     status: row.status,
     priority: row.priority,
     description: row.description ?? '',
+    externalId: row.external_id,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -277,6 +281,7 @@ export type AddInput = {
   refs?: Ref[];
   status?: TaskStatus;
   parentId?: number;
+  externalId?: string;
 };
 
 export type UpdatePatch = {
@@ -289,6 +294,7 @@ export type UpdatePatch = {
   plan?: string | null;
   refs?: Ref[] | null;
   parentId?: number | null;
+  externalId?: string | null;
 };
 
 export type LoadResult = {
@@ -329,6 +335,7 @@ export type Store = {
   delete(id: number): boolean;
   getByStatus(status: TaskStatus, scope?: string): Task[];
   getByScope(scope: string, status?: StatusFilter): Task[];
+  getByExternalId(externalId: string): Task[];
   getByType(type: TaskType, status?: StatusFilter): Task[];
   getNext(type?: TaskType): Task | null;
   getOverview(status?: StatusFilter): OverviewEntry[];
@@ -374,7 +381,7 @@ export function createStore(dbPath: string): Store {
 
   // Prepared statements
   const stmtInsertTask      = db.prepare(
-    'INSERT INTO tasks (title, type, status, priority, scope, summary, description, plan, parent_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO tasks (title, type, status, priority, scope, summary, description, plan, parent_id, external_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   );
   const stmtSelectTask      = db.prepare('SELECT * FROM tasks WHERE id = ?');
   const stmtSelectAllTasks  = db.prepare('SELECT * FROM tasks');
@@ -395,7 +402,7 @@ export function createStore(dbPath: string): Store {
   const stmtDeleteMirror    = db.prepare('DELETE FROM refs WHERE from_id = ? AND to_id = ? AND relation = ?');
   const stmtUpdateTask      = db.prepare(`
     UPDATE tasks
-    SET title = ?, type = ?, priority = ?, scope = ?, summary = ?, description = ?, plan = ?, parent_id = ?, updated_at = datetime('now')
+    SET title = ?, type = ?, priority = ?, scope = ?, summary = ?, description = ?, plan = ?, parent_id = ?, external_id = ?, updated_at = datetime('now')
     WHERE id = ?
   `);
   const stmtSetTaskStatus   = db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`);
@@ -560,7 +567,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function add(input: AddInput): { id: number } {
-    const { type, priority, title, description = '', scope, summary, plan, refs, status = 'refinement', parentId } = input;
+    const { type, priority, title, description = '', scope, summary, plan, refs, status = 'refinement', parentId, externalId } = input;
     const trimmedTitle = String(title ?? '').trim();
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
 
@@ -575,7 +582,8 @@ export function createStore(dbPath: string): Store {
         summary?.trim() || null,
         description.trim(),
         plan?.trim() || null,
-        parentId ?? null
+        parentId ?? null,
+        externalId?.trim() || null
       );
       const newId = Number(info.lastInsertRowid);
       if (parentId != null) syncEpicStatus(parentId, status);
@@ -607,11 +615,14 @@ export function createStore(dbPath: string): Store {
           ? null
           : patch.plan !== undefined ? (patch.plan.trim() || null) : existing.plan,
         parentId: patch.parentId !== undefined ? patch.parentId : existing.parent_id,
+        externalId: patch.externalId === null
+          ? null
+          : patch.externalId !== undefined ? (patch.externalId.trim() || null) : existing.external_id,
       };
 
       // Only re-validate when the link can change, so plan/description edits never trip it.
       if (patch.type !== undefined || patch.parentId !== undefined) assertParent(next.type, next.parentId, id, existing.type);
-      stmtUpdateTask.run(next.title, next.type, next.priority, next.scope, next.summary, next.description, next.plan, next.parentId, id);
+      stmtUpdateTask.run(next.title, next.type, next.priority, next.scope, next.summary, next.description, next.plan, next.parentId, next.externalId, id);
       if (next.parentId !== existing.parent_id) {
         if (existing.parent_id !== null) syncEpicStatus(existing.parent_id, null);
         if (next.parentId !== null) syncEpicStatus(next.parentId, existing.status);
@@ -685,6 +696,14 @@ export function createStore(dbPath: string): Store {
     }
     const tasks = attachRefs(rows);
     return sortByPriority(tasks);
+  }
+
+  // All statuses on purpose: a ticket lookup must also find closed work.
+  function getByExternalId(externalId: string): Task[] {
+    const value = externalId.trim();
+    if (!value) return [];
+    const rows = db.prepare('SELECT * FROM tasks WHERE lower(external_id) = lower(?) ORDER BY id').all(value) as TaskRow[];
+    return attachRefs(rows);
   }
 
   function getByType(type: TaskType, status?: StatusFilter): Task[] {
@@ -904,6 +923,7 @@ export function createStore(dbPath: string): Store {
     delete: deleteTask,
     getByStatus,
     getByScope,
+    getByExternalId,
     getByType,
     getNext,
     getOverview,

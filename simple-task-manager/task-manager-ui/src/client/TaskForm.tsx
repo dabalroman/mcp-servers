@@ -17,12 +17,13 @@ type FormState = {
   description: string;
   summary: string;
   scope: string;
+  externalId: string;
   parentId: number | null;
   refs: TaskRef[];
   status: InitialStatus | undefined;
 };
 
-const EMPTY: FormState = { title: '', type: 'feature', priority: 'medium', description: '', summary: '', scope: '', parentId: null, refs: [], status: 'refinement' };
+const EMPTY: FormState = { title: '', type: 'feature', priority: 'medium', description: '', summary: '', scope: '', externalId: '', parentId: null, refs: [], status: 'refinement' };
 
 const INITIAL_STATUSES: InitialStatus[] = ['refinement', 'plan', 'todo'];
 
@@ -49,6 +50,7 @@ function deriveForm(initial: Task | null): FormState {
     description: initial.description ?? '',
     summary: initial.summary ?? '',
     scope: initial.scope ?? '',
+    externalId: initial.externalId ?? '',
     parentId: initial.parentId ?? null,
     refs: initial.refs ?? [],
     status: deriveStatus(initial.status),
@@ -62,6 +64,7 @@ function formsEqual(a: FormState, b: FormState): boolean {
     a.description === b.description &&
     a.summary === b.summary &&
     a.scope === b.scope &&
+    a.externalId === b.externalId &&
     a.parentId === b.parentId &&
     a.status === b.status &&
     a.refs.length === b.refs.length &&
@@ -320,14 +323,24 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, onSubmit, onDe
         </DialogHeader>
 
         <form onSubmit={submit} className="flex flex-col gap-4 min-w-0">
-          <input
-            ref={titleRef}
-            required
-            placeholder="Title"
-            value={form.title}
-            onChange={set('title')}
-            className="bg-background border border-border px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-full"
-          />
+          {/* 5:1, but the ID column never drops below 9rem so "OPXPIQ-6532" isn't clipped. */}
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[5fr_minmax(9rem,1fr)]">
+            <input
+              ref={titleRef}
+              required
+              placeholder="Title"
+              value={form.title}
+              onChange={set('title')}
+              className="bg-background border border-border px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-full"
+            />
+            <input
+              placeholder="External ID"
+              aria-label="External ID"
+              value={form.externalId}
+              onChange={set('externalId')}
+              className="bg-background border border-border px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-full min-w-0"
+            />
+          </div>
 
           <div className="grid grid-cols-3 gap-3">
             <label className="flex flex-col gap-1">

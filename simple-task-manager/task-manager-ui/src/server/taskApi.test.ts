@@ -109,3 +109,17 @@ describe('list', () => {
     expect(active.find((t) => t.id === id)?.notes?.map((n) => n.body)).toEqual(['a note']);
   });
 });
+
+describe('externalId passthrough', () => {
+  it('round-trips externalId through add and patch', async () => {
+    const { id } = await api.add({ type: 'bug', priority: 'medium', title: 'T', description: '', externalId: 'OPXPIQ-6532' });
+    const store = createStore(dbPath);
+    try {
+      expect(store.getById(id)?.externalId).toBe('OPXPIQ-6532');
+      await api.patch(id, { externalId: null });
+      expect(store.getById(id)?.externalId).toBeNull();
+    } finally {
+      store.close();
+    }
+  });
+});

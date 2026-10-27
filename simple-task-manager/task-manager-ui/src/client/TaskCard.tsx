@@ -58,6 +58,7 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
 
   const idButtonClass =
     'text-xs tracking-widest border border-border px-2 py-1 shrink-0 text-muted-foreground cursor-pointer hover:border-primary/60 hover:text-foreground transition-colors';
+  const externalIdClass = 'text-xs tracking-widest border border-border px-2 py-1 truncate text-muted-foreground';
 
   const copyIdCommand = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
@@ -108,6 +109,11 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
         >
           #{task.id}
         </button>
+        {task.externalId && (
+          <span title={task.externalId} className={cn(externalIdClass, 'hidden md:inline-block self-start max-w-48')}>
+            {task.externalId}
+          </span>
+        )}
 
         <div className="flex items-start gap-2 md:flex-1 md:min-w-0">
           {onToggleCollapse && (
@@ -128,13 +134,18 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
         </div>
 
         <div className="flex items-center justify-between gap-2 w-full md:w-auto md:justify-start">
-          <button
-            type="button"
-            onClick={copyIdCommand}
-            className={cn(idButtonClass, 'md:hidden')}
-          >
-            #{task.id}
-          </button>
+          <div className="flex items-center gap-2 min-w-0 md:hidden">
+            <button
+              type="button"
+              onClick={copyIdCommand}
+              className={idButtonClass}
+            >
+              #{task.id}
+            </button>
+            {task.externalId && (
+              <span title={task.externalId} className={cn(externalIdClass, 'min-w-0')}>{task.externalId}</span>
+            )}
+          </div>
 
           {task.plan && (
             <button

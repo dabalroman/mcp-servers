@@ -41,6 +41,7 @@ export type Task = {
   plan?: string;
   scope?: string;
   parentId?: number;
+  externalId: string | null;
   epicTitle?: string;
   refs?: TaskRef[];
   notes?: Note[];

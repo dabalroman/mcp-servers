@@ -68,7 +68,7 @@ export default function TaskManager() {
     setFormOpen(true);
   }
 
-  async function handleFormSubmit(form: { title: string; type: TaskType; priority: Task['priority']; description: string; summary: string; scope: string; parentId: number | null; refs: import('@/types/task').TaskRef[]; status?: 'refinement' | 'plan' | 'todo' }): Promise<boolean> {
+  async function handleFormSubmit(form: { title: string; type: TaskType; priority: Task['priority']; description: string; summary: string; scope: string; externalId: string; parentId: number | null; refs: import('@/types/task').TaskRef[]; status?: 'refinement' | 'plan' | 'todo' }): Promise<boolean> {
     const scope = form.scope || undefined;
     const refs = form.refs.length ? form.refs : undefined;
     try {
@@ -80,12 +80,13 @@ export default function TaskManager() {
           description: form.description,
           summary: form.summary || null,
           scope: scope ?? null,
+          externalId: form.externalId || null,
           parentId: form.parentId,
           refs: form.refs.length ? form.refs : null,
           ...(form.status !== undefined && { status: form.status }),
         });
       } else {
-        const newId = await add({ title: form.title, type: form.type, priority: form.priority, description: form.description, summary: form.summary || undefined, scope, ...(form.parentId !== null && { parentId: form.parentId }), refs, status: form.status ?? 'refinement' });
+        const newId = await add({ title: form.title, type: form.type, priority: form.priority, description: form.description, summary: form.summary || undefined, scope, externalId: form.externalId || undefined, ...(form.parentId !== null && { parentId: form.parentId }), refs, status: form.status ?? 'refinement' });
         const toastId = `task-added-${newId}`;
         toast.success(
           <button

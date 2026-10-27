@@ -24,6 +24,7 @@ const MIGRATION_NAMES = [
   '20260519010000_add-plan-status',
   '20261012120000_add-notes',
   '20261020120000_add-epic-type-and-parent',
+  '20261027120000_add-external-id',
 ];
 
 let dir: string;
@@ -1066,5 +1067,51 @@ describe('epics', () => {
     assert.ok(t);
     assert.equal(t.parentId, undefined);
     assert.equal(t.epic, undefined);
+  });
+});
+
+describe('externalId', () => {
+  test('round-trips on add, trimmed', () => {
+    const { id } = makeTask({ externalId: '  OPXPIQ-6532  ' });
+    assert.equal(store.getById(id)?.externalId, 'OPXPIQ-6532');
+  });
+
+  test('is present as null when unset, on getById and list reads', () => {
+    const { id } = makeTask();
+    assert.equal(store.getById(id)?.externalId, null);
+    const listed = store.getAll().find((t) => t.id === id);
+    assert.ok(listed && 'externalId' in listed);
+    assert.equal(listed.externalId, null);
+  });
+
+  test('whitespace-only stores null', () => {
+    const { id } = makeTask({ externalId: '   ' });
+    assert.equal(store.getById(id)?.externalId, null);
+  });
+
+  test('update sets, keeps on undefined, clears on null and on empty string', () => {
+    const { id } = makeTask();
+    assert.equal(store.update(id, { externalId: 'ABC-1' })?.task.externalId, 'ABC-1');
+    assert.equal(store.update(id, { title: 'Renamed' })?.task.externalId, 'ABC-1');
+    assert.equal(store.update(id, { externalId: null })?.task.externalId, null);
+    store.update(id, { externalId: 'ABC-1' });
+    assert.equal(store.update(id, { externalId: '' })?.task.externalId, null);
+  });
+
+  test('getByExternalId is case-insensitive exact, returns duplicates in id order, includes done', () => {
+    const a = makeTask({ externalId: 'OPXPIQ-6532' });
+    const b = makeTask({ externalId: 'opxpiq-6532' });
+    makeTask({ externalId: 'OPXPIQ-65321' });
+    makeTask();
+    store.setStatus(a.id, 'done');
+    const found = store.getByExternalId(' Opxpiq-6532 ');
+    assert.deepEqual(found.map((t) => t.id), [a.id, b.id]);
+    assert.equal(found[0]?.status, 'done');
+  });
+
+  test('getByExternalId returns [] for no match and for empty input', () => {
+    makeTask({ externalId: 'X-1' });
+    assert.deepEqual(store.getByExternalId('X-2'), []);
+    assert.deepEqual(store.getByExternalId('  '), []);
   });
 });

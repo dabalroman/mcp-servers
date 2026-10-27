@@ -8,6 +8,7 @@ function makeTask(partial: Partial<Task> & { id: number }): Task {
     type: 'feature',
     priority: 'medium',
     status: 'todo',
+    externalId: null,
     title: `Task ${partial.id}`,
     created_at: '2026-01-01T00:00:00',
     updated_at: '2026-01-01T00:00:00',

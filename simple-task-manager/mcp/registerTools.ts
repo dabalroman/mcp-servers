@@ -9,6 +9,7 @@ import {
   handleGetAll,
   handleGetById,
   handleGetByScope,
+  handleGetByExternalId,
   handleGetRelated,
   handleGetScopes,
   handleHealth,
@@ -57,6 +58,8 @@ export function registerTools(server: McpServer, store: Store): void {
       .describe('Initial status. ALWAYS leave as default "refinement" unless one of these holds: (a) the user explicitly told you to skip refinement / mark as todo, or (b) you just refined this exact task with the user in the current conversation. Otherwise pass "refinement" (or omit the field). Choosing "todo" without one of those conditions is a rule violation — when in doubt, pick "refinement".'),
     parentId: z.number().int().positive().optional()
       .describe(PARENT_ID_RULE),
+    externalId: z.string().optional()
+      .describe('External tracker ticket ID (JIRA/Asana/…, e.g. "OPXPIQ-6532"). Set it whenever the user names a ticket ID for this task. Find tasks by it later with getByExternalId.'),
   };
   server.tool(
     'add',
@@ -136,6 +139,7 @@ export function registerTools(server: McpServer, store: Store): void {
     priority: z.enum(['low', 'medium', 'high', 'critical']).optional().describe('New priority: critical = blocking; high = important soon; medium = normal; low = nice-to-have'),
     type: z.enum(['bug', 'feature', 'idea', 'tool', 'other', 'epic']).optional().describe('New type — use to reclassify a task (e.g. idea → feature after refinement). An epic with children cannot be retyped.'),
     scope: z.string().nullable().optional().describe('New scope tag (e.g. "eink-frame"), or null to clear the scope entirely'),
+    externalId: z.string().nullable().optional().describe('New external tracker ticket ID (JIRA/Asana/…, e.g. "OPXPIQ-6532"), or null / empty string to clear it'),
     summary: z.string().nullable().optional()
       .describe('Short 2–3 line summary of the task. Pass null or empty string to clear it. Should capture: what the task does, the most important decision, and the user-visible outcome.'),
     plan: z.string().nullable().optional()
@@ -223,6 +227,17 @@ export function registerTools(server: McpServer, store: Store): void {
     'Get tasks tagged with a specific scope — use when the user asks "what tasks are there for svg-path-joiner?" or "show me everything related to eink-frame". Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Sorted by priority desc then id desc. Scope values are set via add or update. Empty results may indicate a wrong/typo\'d scope; use getScopes to discover valid values. When a task has a summary, description is omitted; tasks with notes show noteCount instead of the bodies — call getById for the full task.',
     getByScopeSchema,
     async (args: z.infer<z.ZodObject<typeof getByScopeSchema>>): Promise<MCPContent> => handleGetByScope(store, args)
+  );
+
+  // ── getByExternalId ───────────────────────────────────────────────────────────
+  const getByExternalIdSchema = {
+    externalId: z.string().min(1).describe('External tracker ticket ID to look up (e.g. "OPXPIQ-6532")'),
+  };
+  server.tool(
+    'getByExternalId',
+    'Find tasks by external tracker ticket ID — call this first whenever the user asks about a JIRA/Asana/other ticket ID (e.g. "what is the status of OPXPIQ-6532?"). Case-insensitive exact match across all statuses, including done. Returns { externalId, tasks } — an array, since several tasks (e.g. an epic and its children) may share one ID; sorted by id; empty when none match. When a task has a summary, description is omitted — call getById for the full task.',
+    getByExternalIdSchema,
+    async (args: z.infer<z.ZodObject<typeof getByExternalIdSchema>>): Promise<MCPContent> => handleGetByExternalId(store, args)
   );
 
   // ── getRelated ────────────────────────────────────────────────────────────────

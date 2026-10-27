@@ -11,6 +11,7 @@ import Database from 'better-sqlite3';
 import { createStore, loadMigrations } from './tasks.js';
 
 const EPIC_MIGRATION = '20261020120000_add-epic-type-and-parent';
+const EXTERNAL_ID_MIGRATION = '20261027120000_add-external-id';
 
 let dir: string;
 let dbPath: string;
@@ -252,7 +253,7 @@ describe('add-epic-type-and-parent migration', () => {
     db.pragma('foreign_keys = OFF');
     db.exec(`CREATE TABLE schema_migrations (
       version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
-    const earlier = loadMigrations().filter((m) => m.name !== EPIC_MIGRATION);
+    const earlier = loadMigrations().filter((m) => m.name < EPIC_MIGRATION);
     earlier.forEach((m, i) => {
       m.up(db);
       db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(i + 1, m.name);
@@ -286,8 +287,8 @@ describe('add-epic-type-and-parent migration', () => {
     const idx = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_tasks_parent_id'").get();
     assert.ok(idx, 'idx_tasks_parent_id must exist');
     assert.deepEqual(db.pragma('foreign_key_check'), []);
-    const last = (db.prepare('SELECT name FROM schema_migrations ORDER BY version DESC LIMIT 1').get() as { name: string }).name;
-    assert.equal(last, EPIC_MIGRATION);
+    const applied = db.prepare('SELECT 1 FROM schema_migrations WHERE name = ?').get(EPIC_MIGRATION);
+    assert.ok(applied, 'epic migration must be recorded');
     db.close();
   });
 
@@ -302,5 +303,33 @@ describe('add-epic-type-and-parent migration', () => {
     store.close();
     assert.equal(n, 0);
     assert.equal(r, 0);
+  });
+});
+
+describe('add-external-id migration', () => {
+  test('adds a nullable external_id column and the lower() index; existing rows read NULL', () => {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    const earlier = loadMigrations().filter((m) => m.name < EXTERNAL_ID_MIGRATION);
+    earlier.forEach((m, i) => {
+      m.up(db);
+      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(i + 1, m.name);
+    });
+    db.pragma(`user_version = ${earlier.length}`);
+    db.prepare('INSERT INTO tasks (title, type, status, priority, description) VALUES (?, ?, ?, ?, ?)').run('Old', 'bug', 'todo', 'high', '');
+    db.close();
+
+    createStore(dbPath).close();
+
+    const db2 = new Database(dbPath);
+    const cols = db2.pragma('table_info(tasks)') as { name: string; notnull: number }[];
+    const col = cols.find((c) => c.name === 'external_id');
+    assert.ok(col, 'external_id column must exist');
+    assert.equal(col.notnull, 0);
+    assert.deepEqual(db2.prepare('SELECT external_id FROM tasks').all(), [{ external_id: null }]);
+    const idx = db2.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_tasks_external_id'").get();
+    assert.ok(idx, 'idx_tasks_external_id must exist');
+    db2.close();
   });
 });

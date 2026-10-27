@@ -43,6 +43,10 @@ export async function handleGetByScope(store: Store, { scope, status }: { scope:
   return text({ scope, tasks: store.getByScope(scope, status).map(toListTask) });
 }
 
+export async function handleGetByExternalId(store: Store, { externalId }: { externalId: string }): Promise<MCPContent> {
+  return text({ externalId, tasks: store.getByExternalId(externalId).map(toListTask) });
+}
+
 export async function handleGetRelated(store: Store, { id, status }: { id: number; status?: StatusFilter }): Promise<MCPContent> {
   const result = store.getRelated(id, status);
   if (!result) return notFoundError(id, store);

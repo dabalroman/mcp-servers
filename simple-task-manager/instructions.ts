@@ -6,6 +6,7 @@ Tasks live in a single SQLite database (env var \`TASKS_DB\`).
 - When the user says "schedule X", "TODO X", "add to the list", "FEATURE X", "BUG X", "IDEA X" — call add() and STOP. Do NOT also implement it.
 - If the user mentions a bug or feature that is outside the current task's scope, ask whether to schedule it before continuing.
 - Suggest next work via getNext (or getAll for the full picture) whenever a task finishes or a session ends.
+- When the user names an external ticket ID (JIRA/Asana/…, e.g. OPXPIQ-6532) for a task, pass it as externalId on add/update; when they ask about a ticket ID, call getByExternalId first.
 
 ## Default status for NEW tasks — ALWAYS 'refinement'
 This is a hard rule; do not bypass it for "obvious" or "small" tasks. add() defaults status to 'refinement' for a reason.
