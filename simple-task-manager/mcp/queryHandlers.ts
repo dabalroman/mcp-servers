@@ -1,12 +1,13 @@
 import { readdirSync, existsSync, accessSync, constants as fsConstants, readFileSync } from 'node:fs';
-import { join, dirname } from 'node:path';
+import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as http from 'node:http';
 import { networkInterfaces } from 'node:os';
 import Database from 'better-sqlite3';
 import { text, toListTask, notFoundError, type MCPContent } from './shared.js';
 import { ALL_TYPES } from '../tasks.js';
-import { ENV_ORDER, LEGACY_ENV_KEYS, SKILLS } from '../mcpConfig.js';
+import { ENV_ORDER, LEGACY_ENV_KEYS } from '../mcpConfig.js';
+import { PACKAGE_DIR } from '../packageDir.js';
 import { checkForUpdate } from '../updateCheck.js';
 import type { Store, Task, TaskType, StatusFilter } from '../tasks.js';
 
@@ -168,7 +169,7 @@ export async function handleHealth(): Promise<MCPContent> {
 
   const mcpJsonPath = findMcpJson(process.cwd());
   if (!mcpJsonPath) {
-    configChecks.push(check('✗', '.mcp.json not found — run: npx tsx ~/.claude/mcp-servers/simple-task-manager/install.ts'));
+    configChecks.push(check('✗', `.mcp.json not found — run: npx tsx ${resolve(PACKAGE_DIR, 'install.ts')}`));
     sections.push(renderSection('Config (.mcp.json)', configChecks));
 
     // Runtime section — skip most checks without config
@@ -176,9 +177,6 @@ export async function handleHealth(): Promise<MCPContent> {
       check('✗', 'Skipped — no .mcp.json found'),
     ];
     sections.push(renderSection('Runtime', runtimeChecks));
-
-    const skillsChecks = await checkSkills();
-    sections.push(renderSection('Skills', skillsChecks));
 
     return buildOutput(sections);
   }
@@ -306,10 +304,6 @@ export async function handleHealth(): Promise<MCPContent> {
   // ── Version section ──────────────────────────────────────────────────────────
   sections.push(renderSection('Version', [await buildVersionCheck(uiMode, projectName)]));
 
-  // ── Skills section ───────────────────────────────────────────────────────────
-  const skillsChecks = await checkSkills();
-  sections.push(renderSection('Skills', skillsChecks));
-
   return buildOutput(sections, uiMode);
 }
 
@@ -322,23 +316,12 @@ async function buildVersionCheck(uiMode: 'standalone' | 'disabled' | 'bundled', 
     return check('⚠', `Update check unavailable (v${update.local})`);
   }
   const steps = [
-    'git pull in ~/.claude/mcp-servers',
-    'npx tsx ~/.claude/mcp-servers/simple-task-manager/install.ts in each project',
+    `git -C ${PACKAGE_DIR} pull`,
+    `npx tsx ${resolve(PACKAGE_DIR, 'install.ts')} in each project`,
     'restart Claude Code',
   ];
   if (uiMode === 'standalone') steps.push(`pm2 restart ${projectName || '<PROJECT_NAME>'}`);
   return check('⚠', `Update available: v${update.remote} (local v${update.local}) — ${steps.join('; ')}`);
-}
-
-function checkSkills(): CheckResult[] {
-  const homeDir = process.env['HOME'] ?? '';
-  const skills = SKILLS.map(skill => ({ name: `/${skill}`, path: join(homeDir, `.claude/commands/${skill}.md`) }));
-  return skills.map(skill => {
-    if (existsSync(skill.path)) {
-      return check('✓', `${skill.name} installed at ${skill.path}`);
-    }
-    return check('✗', `${skill.name} not found at ${skill.path} — Fix: Run: npx tsx ~/.claude/mcp-servers/simple-task-manager/install.ts`);
-  });
 }
 
 function resolveUiModeFromProcess(): 'standalone' | 'disabled' | 'bundled' {
@@ -355,6 +338,6 @@ function buildOutput(sections: string[], ui?: 'standalone' | 'disabled' | 'bundl
   return text({
     report,
     ui: ui ?? resolveUiModeFromProcess(),
-    displayInstruction: 'Present this health report to the user as a markdown table with three columns: Status (✓/⚠/✗), Category (Config / Runtime / Version / Skills), and Message. Each indented check line is one table row.',
+    displayInstruction: 'Present this health report to the user as a markdown table with three columns: Status (✓/⚠/✗), Category (Config / Runtime / Version), and Message. Each indented check line is one table row.',
   });
 }

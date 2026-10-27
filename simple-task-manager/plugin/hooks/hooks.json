@@ -1,0 +1,16 @@
+{
+  "description": "Inject the task-manager extended rules in repos bound to the task-manager MCP",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": ["${CLAUDE_PLUGIN_ROOT}/hooks/session-rules.mjs"]
+          }
+        ]
+      }
+    ]
+  }
+}

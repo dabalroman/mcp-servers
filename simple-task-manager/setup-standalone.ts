@@ -4,8 +4,8 @@
  *
  * Run from the project root (the directory containing `.mcp.json`):
  *
- *   npx tsx ~/.claude/mcp-servers/simple-task-manager/setup-standalone.ts on
- *   npx tsx ~/.claude/mcp-servers/simple-task-manager/setup-standalone.ts off
+ *   npx tsx <dir>/simple-task-manager/setup-standalone.ts on
+ *   npx tsx <dir>/simple-task-manager/setup-standalone.ts off
  *
  * `on`  — sets TASK_UI_MODE=standalone in .mcp.json, ensures PROJECT_NAME / TASK_UI_PORT,
  *         writes <project>/ecosystem.task-ui.config.cjs, runs `pm2 start && pm2 save`.

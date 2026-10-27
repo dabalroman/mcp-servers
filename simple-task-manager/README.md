@@ -2,9 +2,9 @@
 
 A persistent task manager for [Claude Code](https://claude.ai/code), exposed as an [MCP](https://modelcontextprotocol.io) server. Tasks live in a single SQLite database (`tasks.db`) at your's project root. Claude uses it to track work across sessions, survive context compaction, and suggest what to do next. It uses refine - plan - implement workflow to ensure best possible results. 
 
-**Batteries included** - behavioral rules are embedded in the server and loaded automatically when Claude connects.
+**Batteries included** - core behavioral rules are embedded in the server and loaded automatically when Claude connects; the full rule set ships with the `task-manager` Claude Code plugin.
 
-**Skills included** - Use `/refine`, `/implement`, `/implement-as-coordinator` and `/assess` skills to make it flow!
+**Skills included** - The plugin adds `/refine`, `/implement`, `/implement-as-coordinator` and `/assess` to make it flow! If another command already uses one of these names, the namespaced form always works (e.g. `/task-manager:implement`).
 
 **Web UI included** - When Claude starts the MCP, it also spawns a bundled web app at <http://localhost:7374>.
 
@@ -28,29 +28,45 @@ A persistent task manager for [Claude Code](https://claude.ai/code), exposed as 
 
 ## Quick Start
 
-### Step 1 — Clone and install
+### Step 1 — Install the plugin (once per machine)
+
+```
+/plugin marketplace add dabalroman/mcp-servers
+/plugin install task-manager@dabalroman
+```
+
+This gives you the skills and the full usage rules, which a SessionStart hook injects only in repos
+whose `.mcp.json` has a `task-manager` entry. No clone or build is needed for it.
+
+Auto-update is off by default for third-party marketplaces. Turn it on under `/plugin` →
+Marketplaces → Enable auto-update, or update by hand with
+`claude plugin marketplace update dabalroman` followed by `/reload-plugins`.
+
+The plugin follows GitHub `main`. If the server runs on a separate host, pull there after every
+push, or the skills may call tools the host doesn't have yet. On the host itself you can add the
+marketplace from the local clone instead (`/plugin marketplace add <dir>`); it loads in place.
+
+Upgrading from the old `install.ts --global` setup: after installing the plugin, delete the
+`refine`, `implement`, `implement-as-coordinator` and `assess` copies from `~/.claude/commands/`
+and remove the `@…/simple-task-manager/SETUP.md` line from `~/.claude/CLAUDE.md`.
+
+### Step 2 — Bind a repo
+
+Each repo gets its own `task-manager` entry in `.mcp.json`, which also carries its project binding.
+
+**stdio** (the repo lives on the machine that runs the server): clone the package once, anywhere,
+then run the installer from each repo.
 
 ```sh
-git clone https://github.com/dabalroman/mcp-servers ~/.claude/mcp-servers
-cd ~/.claude/mcp-servers/simple-task-manager && npm install
+git clone https://github.com/dabalroman/mcp-servers <dir>   # any location works
+cd <dir>/simple-task-manager && npm install
+cd <your repo> && npx tsx <dir>/simple-task-manager/install.ts
 ```
 
-`npm install` runs the `prepare` script, which builds `dist/`, copies the slash-command skills into
-`~/.claude/commands`, and runs `install.ts --global` — adding a single `@…/SETUP.md` import to your
-`~/.claude/CLAUDE.md` so Claude knows how to set this MCP up in any project. `SETUP.md` is kept
-small on purpose: it loads in every session of every project. Re-run `npm install` after pulling to
-pick up skill and setup changes.
+The installer builds `dist/` and writes `.mcp.json` with the correct paths.
 
-
-### Step 2 — Register in a project
-
-Open Claude Code in any project and say:
-
-```
-Set up the task manager for me.
-```
-
-Claude will run the installer, write `.mcp.json` with the correct paths, and tell you to restart.
+**network** (a central server on another host): add an HTTP entry with
+`claude mcp add --transport http … --scope project` in the repo.
 
 
 ### Step 3 — Approve and go
@@ -210,7 +226,7 @@ By default the UI is a child of the MCP — it dies whenever Claude restarts the
 
 ```sh
 # from the project directory (where .mcp.json lives)
-npx tsx ~/.claude/mcp-servers/simple-task-manager/setup-standalone.ts on
+npx tsx <dir>/simple-task-manager/setup-standalone.ts on
 ```
 
 The script will:
@@ -224,7 +240,7 @@ Restart Claude Code afterwards. The MCP sees `TASK_UI_MODE=standalone` and skips
 To turn it off:
 
 ```sh
-npx tsx ~/.claude/mcp-servers/simple-task-manager/setup-standalone.ts off
+npx tsx <dir>/simple-task-manager/setup-standalone.ts off
 ```
 
 That deletes the pm2 process, removes the ecosystem file, sets `TASK_UI_MODE=bundled`, and (after a Claude restart) the MCP resumes spawning the UI.
@@ -360,7 +376,7 @@ Check that the `TASKS_DB` path in `.mcp.json` is absolute and points to a real l
 **The web UI doesn't open at <http://localhost:7374>**  
 Reconnect the MCP (`/mcp` in Claude Code) and watch the MCP's stderr for one of:
 
-- `task-manager-ui not found at … — UI will not be available` — the sub-package is missing or wasn't built. Run `cd ~/.claude/mcp-servers/simple-task-manager && npm install` to rebuild, then reconnect the MCP.
+- `task-manager-ui not found at … — UI will not be available` — the sub-package is missing or wasn't built. Run `npm install` in the package directory to rebuild, then reconnect the MCP.
 - `task-manager-ui spawn disabled via TASK_UI_DISABLE=1` — unset the env var.
 - `failed to spawn task-manager-ui: …` — usually means `node_modules/tsx` is missing in `task-manager-ui/`. Run `npm install` there.
 - Port already in use (the listening line never prints) — set `TASK_UI_PORT` to a free port in the MCP's `.mcp.json` env block.
@@ -382,3 +398,6 @@ npm test         # node --import tsx --test on *.test.ts (no precompile)
 npm run verify   # typecheck + test + build
 npm start        # node dist/server.js — Claude Code does this automatically via .mcp.json
 ```
+
+To try plugin changes (skills, `plugin/RULES.md`, the hook) without installing, load the plugin for
+one session with `claude --plugin-dir <dir>/simple-task-manager/plugin`.

@@ -19,7 +19,8 @@ type ModeBlock = {
   commands: { text: string; copyable: boolean }[];
 };
 
-const MODES: ModeBlock[] = [
+// packageDir is unknown until /api/config answers; show a placeholder meanwhile.
+const modes = (packageDir: string | null): ModeBlock[] => [
   {
     mode: 'bundled',
     label: 'Bundled',
@@ -27,7 +28,7 @@ const MODES: ModeBlock[] = [
     switchLabel: 'Switch to this mode:',
     commands: [
       {
-        text: 'npx tsx ~/.claude/mcp-servers/simple-task-manager/setup-standalone.ts off',
+        text: `npx tsx ${packageDir ?? '<package dir>'}/setup-standalone.ts off`,
         copyable: true,
       },
     ],
@@ -39,7 +40,7 @@ const MODES: ModeBlock[] = [
     switchLabel: 'Switch to this mode:',
     commands: [
       {
-        text: 'npx tsx ~/.claude/mcp-servers/simple-task-manager/setup-standalone.ts on',
+        text: `npx tsx ${packageDir ?? '<package dir>'}/setup-standalone.ts on`,
         copyable: true,
       },
     ],
@@ -106,7 +107,7 @@ function CodeBlock({ text, copyable }: { text: string; copyable: boolean }) {
   );
 }
 
-export default function ModeExplainer({ currentMode }: { currentMode: RunMode }) {
+export default function ModeExplainer({ currentMode, packageDir }: { currentMode: RunMode; packageDir: string | null }) {
   const [open, setOpen] = useState(false);
 
   return (
@@ -130,7 +131,7 @@ export default function ModeExplainer({ currentMode }: { currentMode: RunMode })
           </DialogHeader>
 
           <div className="flex flex-col gap-3 mt-2">
-            {MODES.map((block) => {
+            {modes(packageDir).map((block) => {
               const isActive = block.mode === currentMode;
               return (
                 <div

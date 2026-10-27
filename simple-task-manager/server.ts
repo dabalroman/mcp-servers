@@ -7,6 +7,7 @@ import { INSTRUCTIONS } from './instructions.js';
 import { registerTools } from './mcp/registerTools.js';
 import { uiPkgDir, initUiChild, spawnUi, getUiChild, setUiChild } from './mcp/uiChild.js';
 import { checkForUpdate } from './updateCheck.js';
+import { PACKAGE_DIR } from './packageDir.js';
 
 // Buffered log queue — anything emitted before the JSON-RPC transport is
 // connected is held here and flushed once `server.connect()` resolves. All
@@ -108,5 +109,5 @@ for (const entry of logQueue.splice(0)) {
 
 void checkForUpdate().then((result) => {
   if (result.state !== 'available') return;
-  logToClient('info', `[simple-task-manager] Update available: v${result.remote} (local v${result.local}) — run: git pull in ~/.claude/mcp-servers, then npx tsx ~/.claude/mcp-servers/simple-task-manager/install.ts in this project, then restart Claude Code.`);
+  logToClient('info', `[simple-task-manager] Update available: v${result.remote} (local v${result.local}) — run: git -C ${PACKAGE_DIR} pull, then npx tsx ${resolve(PACKAGE_DIR, 'install.ts')} in this project, then restart Claude Code.`);
 });

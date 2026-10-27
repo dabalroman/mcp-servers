@@ -10,10 +10,13 @@
 
 import { test, describe, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { join, posix, win32 } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createStore, type AddInput, type Store } from './tasks.js';
+import { INSTRUCTIONS } from './instructions.js';
+import { PACKAGE_DIR } from './packageDir.js';
 import {
   handleGetByType,
   handleGetNext,
@@ -1117,7 +1120,7 @@ describe('health handler — version section', () => {
     })) as unknown as typeof fetch;
 
     const report = (decode(await handleHealth()) as { report: string }).report;
-    assert.match(report, /⚠ Update available: v9999-12-999 \(local v.+\) — git pull in ~\/\.claude\/mcp-servers/);
+    assert.match(report, /⚠ Update available: v9999-12-999 \(local v.+\) — git -C .+ pull/);
   });
 
   test('reports an unknown-not-failed line when the remote check errors', async () => {
@@ -1454,5 +1457,76 @@ describe('epics — MCP layer', () => {
     const t = decode(await handleGetById(store, { id })).task as { parentId?: number; epic?: unknown };
     assert.equal(t.parentId, undefined);
     assert.equal(t.epic, undefined);
+  });
+});
+
+// ── Instructions split + plugin rules hook ───────────────────────────────────
+
+const PLUGIN_DIR = join(PACKAGE_DIR, 'plugin');
+const RULES = readFileSync(join(PLUGIN_DIR, 'RULES.md'), 'utf8');
+
+describe('instructions size limits', () => {
+  test('INSTRUCTIONS fits the 4,096-char MCP server-instructions cap', () => {
+    assert.ok(INSTRUCTIONS.length <= 4096, `INSTRUCTIONS is ${INSTRUCTIONS.length} chars`);
+  });
+
+  test('plugin RULES.md fits the 10,000-char SessionStart hook cap', () => {
+    assert.ok(RULES.length <= 10000, `RULES.md is ${RULES.length} chars`);
+  });
+});
+
+describe('plugin SessionStart hook (session-rules.mjs)', () => {
+  let projectDir: string;
+
+  beforeEach(() => { projectDir = mkdtempSync(join(tmpdir(), 'stm-hook-')); });
+  afterEach(() => { rmSync(projectDir, { recursive: true, force: true }); });
+
+  function runHook(env: NodeJS.ProcessEnv = { CLAUDE_PROJECT_DIR: projectDir, CLAUDE_PLUGIN_ROOT: PLUGIN_DIR }) {
+    const { CLAUDE_PROJECT_DIR: _, CLAUDE_PLUGIN_ROOT: __, ...base } = process.env;
+    return spawnSync(process.execPath, [join(PLUGIN_DIR, 'hooks', 'session-rules.mjs')], {
+      env: { ...base, ...env },
+      encoding: 'utf8',
+    });
+  }
+
+  // Windows editors (Notepad, PowerShell 5 Set-Content -Encoding UTF8) write a BOM.
+  test('prints RULES.md when .mcp.json starts with a UTF-8 BOM', () => {
+    writeFileSync(join(projectDir, '.mcp.json'), '﻿' + JSON.stringify({ mcpServers: { 'task-manager': { command: 'node', args: [] } } }));
+    const r = runHook();
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, RULES);
+  });
+
+  test('prints nothing when CLAUDE_PROJECT_DIR is unset', () => {
+    const r = runHook({ CLAUDE_PLUGIN_ROOT: PLUGIN_DIR });
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, '');
+  });
+
+  test('prints RULES.md when .mcp.json has a task-manager entry', () => {
+    writeFileSync(join(projectDir, '.mcp.json'), JSON.stringify({ mcpServers: { 'task-manager': { command: 'node', args: [] } } }));
+    const r = runHook();
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, RULES);
+  });
+
+  test('prints nothing when .mcp.json has no task-manager entry', () => {
+    writeFileSync(join(projectDir, '.mcp.json'), JSON.stringify({ mcpServers: { other: { command: 'node', args: [] } } }));
+    const r = runHook();
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, '');
+  });
+
+  test('prints nothing when .mcp.json is invalid JSON', () => {
+    writeFileSync(join(projectDir, '.mcp.json'), '{ not json');
+    const r = runHook();
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, '');
+  });
+
+  test('prints nothing when there is no .mcp.json', () => {
+    const r = runHook();
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, '');
   });
 });

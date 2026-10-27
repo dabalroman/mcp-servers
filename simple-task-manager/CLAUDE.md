@@ -17,18 +17,26 @@ in this repo. Content reaches an agent through three channels, and mixing them i
 
 | Channel | Loads | Holds |
 |---|---|---|
-| `SETUP.md` | every session of every project (`@`-imported into `~/.claude/CLAUDE.md` by `install.ts --global`) | how to set the MCP up somewhere new — nothing else |
-| `instructions.ts` | on MCP connect | usage rules: task lifecycle, refinement-by-default |
+| `instructions.ts` | on MCP connect | core usage rules only (lifecycle, refinement-by-default, notes) — hard cap 4,096 chars |
+| `plugin/RULES.md` | SessionStart hook of the `task-manager` plugin, only in repos whose `.mcp.json` has a `task-manager` entry | extended rules: epics, getNext order, prefixes, pipeline, refs, status filtering, scope, knowledge capture, repo binding — cap 10,000 chars |
 | `CLAUDE.md` (this file) | on demand, when working in this repo | everything about developing the package |
 
-`--global` used to import this file, so ~8k tokens of migration/pm2/tsconfig lore sat in every
-session of every unrelated project, competing with that project's own rules. Keep `SETUP.md` small:
-anything you are tempted to add there is almost certainly dev docs (belongs here) or a usage rule
-(belongs in `instructions.ts`).
+Claude Code cuts MCP server instructions at 4,096 chars and SessionStart hook output at 10,000 (beyond it only a 2,000-char preview shows). Both caps are asserted in `server.test.ts`. A rule lives in exactly one of the two files; anything new goes to `RULES.md` unless every session without the plugin must have it.
+
+### Plugin (`plugin/`)
+- Layout: `.claude-plugin/plugin.json`, `skills/<name>/SKILL.md` (the 4 skills, single source), `hooks/hooks.json`, `hooks/session-rules.mjs`, `RULES.md`. The marketplace is `.claude-plugin/marketplace.json` at the repo root (name `dabalroman`); `marketplace add owner/repo` reads only that path.
+- `plugin/` must be self-contained: a git-marketplace install copies only that folder into the plugin cache. No `../` references, no symlinks out, no `CLAUDE.md` inside it (not loaded; validate warns).
+- No `version` in plugin.json on purpose: with one, users stay pinned until it changes; without, git installs update per commit and a local-path marketplace loads in place. `claude plugin validate` warns about it — expected.
+- The hook is exec-form `node` + `args`, not a shell one-liner: shell-form hooks run in PowerShell on Windows when Git Bash is missing. The script is `.mjs` (not TS) because it runs unbuilt from the cache; it locates `RULES.md` via `$CLAUDE_PLUGIN_ROOT`, which changes on every plugin update — never cache it. It strips a UTF-8 BOM before parsing `.mcp.json` (Windows editors write one).
+- The plugin carries no MCP entry: project binding is per repo (`.mcp.json`) and plugin config (`pluginConfigs`) is user/managed-scope only; a plugin MCP would also connect in unbound repos.
+- Skill names: write the bare form (`/implement`) in docs, rules and the UI — plugin skills resolve bare unless another command owns the name (verified 2.1.311), and `/task-manager:implement` always works. Only Skill-tool invocations inside skills use the listed `task-manager:<skill>` name.
+- Auto-update is off by default for third-party marketplaces; the README tells users how to enable it.
+- Dev loop: `claude --plugin-dir <repo>/simple-task-manager/plugin`.
+- User-facing hints are built from `PACKAGE_DIR` (`packageDir.ts`, works from source and `dist/`) — never hard-code the clone location.
 
 The package is **TypeScript** (strict mode, `noUncheckedIndexedAccess`). Source `.ts` files live at the package root; production runs from `dist/` (built by `tsc`).
 
-After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.ts`, `install.ts`, `SETUP.md`, or `CLAUDE.md` — review `simple-task-manager/README.md` and update it to reflect the change. The README is the user-facing source of truth; keep it in sync.
+After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.ts`, `install.ts`, `plugin/` (skills, RULES.md, hook), or `CLAUDE.md` — review `simple-task-manager/README.md` and update it to reflect the change. The README is the user-facing source of truth; keep it in sync.
 
 ## File layout
 
@@ -101,7 +109,7 @@ The `summary` column exists in the schema (version 1). The token-saving behaviou
 - `mcp/shared.ts` exports a `toListTask(task)` helper that **always drops `plan` and `notes`** (both can be long; only `getById` needs them — lists carry `noteCount`), and additionally drops `description` when `summary` is present. Applied to every list-method result in `mcp/queryHandlers.ts` (getAll, getByStatus, getByScope, getByType, getNext, getRelated anchor + outbound/inbound). `getRelated` applies it to the anchor task too (with `noteCount` from its notes); only `getById` returns all fields.
 - Adding a new list tool: always apply `.map(toListTask)` to its results inside the handler.
 - `handleSetStatus` blocks `refinement → todo` if the task has no summary. `handleUpdate` on a refinement task without summary returns a `summaryReminder` field.
-- The refine skill (`~/.claude/commands/refine.md`) generates the summary as step 3b before promoting.
+- The refine skill (`plugin/skills/refine/SKILL.md`) generates the summary as step 3b before promoting.
 
 ## Env-var schema for `.mcp.json`
 
@@ -166,7 +174,7 @@ The `Config` section of the report surfaces `TASK_UI_MODE`, `PROJECT_NAME`, and 
 
 The browser-side `App.tsx` needs to render the `bundled mode` / `standalone mode` label under the project name. The UI server reads `process.env.TASK_UI_MODE` and exposes it via `GET /api/config`, which also carries `PROJECT_NAME` for the header pill. Client fetches `/api/config` on mount, sets `document.title`, and renders both.
 
-`/api/config` is auth-less and reachable by any LAN client. Keep its payload minimal — `{name, mode, version}`. Don't add filesystem paths (e.g. `TASKS_DB`), credentials, or anything host-identifying; they'd leak the host's username + directory layout to anything that can reach :7374.
+`/api/config` is auth-less and reachable by any LAN client. Keep its payload minimal — `{name, mode, version, packageDir, update}`. `packageDir` is the one deliberate path (#365: copyable commands in the mode/update dialogs; the same UI already serves task text containing host paths). Don't add other filesystem paths (e.g. `TASKS_DB`), credentials, or anything host-identifying; they'd leak the host's username + directory layout to anything that can reach :7374.
 
 For this to work in standalone mode, the generated `ecosystem.task-ui.config.cjs` must include `TASK_UI_MODE: 'standalone'` in its `env` block — pm2 doesn't inherit the MCP's `.mcp.json` env (the MCP isn't even running yet when pm2 starts the UI on boot). `setup-standalone.ts` bakes this into the generated file.
 

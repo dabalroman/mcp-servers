@@ -6,6 +6,8 @@
  * the install console + README instead of inline comments. `ENV_DOCS` and
  * `ENV_ORDER` are exported so install.ts can print and order consistently.
  */
+import { resolve } from 'node:path';
+import { PACKAGE_DIR } from './packageDir.js';
 
 export type McpEntry = {
   command: string;
@@ -35,7 +37,7 @@ export const ENV_DOCS: Record<string, string[]> = {
     '  "bundled"    — MCP spawns the UI as a child process (default).',
     '                 UI dies with the Claude session.',
     '  "standalone" — UI runs as a long-lived pm2 process, set up via',
-    '                 `npx tsx ~/.claude/mcp-servers/simple-task-manager/setup-standalone.ts on`.',
+    `                 \`npx tsx ${resolve(PACKAGE_DIR, 'setup-standalone.ts')} on\`.`,
     '                 Survives MCP restarts and Claude session closes.',
     '  "disabled"   — MCP does not start the UI at all (headless / tests).',
   ],
@@ -69,41 +71,6 @@ export function isStaleEntry(e: McpEntry | undefined): boolean {
   if (!e) return false;
   const arg0 = e.args?.[0] ?? '';
   return arg0.endsWith('/server.ts') || (arg0.endsWith('/server.js') && !arg0.endsWith('/dist/server.js'));
-}
-
-/** The file `install.ts --global` @-imports into `~/.claude/CLAUDE.md`. That import lands in every
- *  session of every project, so it points at the setup instructions only — the package's own dev
- *  docs (CLAUDE.md) load on demand when working in this repo and must not be broadcast globally. */
-export const GLOBAL_IMPORT_FILE = 'SETUP.md';
-
-export const SKILLS = ['refine', 'implement', 'implement-as-coordinator', 'assess'] as const;
-
-/** An `@…/simple-task-manager/{CLAUDE,SETUP}.md` line previously written by --global. CLAUDE.md is
- *  matched too so installs predating GLOBAL_IMPORT_FILE migrate off the dev docs rather than
- *  stacking a second import next to the stale one. */
-const GLOBAL_IMPORT_LINE = /^@.*[/\\]simple-task-manager[/\\](?:CLAUDE|SETUP)\.md$/;
-
-export type GlobalImportAction = 'unchanged' | 'added' | 'migrated';
-
-/** Idempotently point the global CLAUDE.md's import at `importPath`, rewriting a stale line in
- *  place. Pure — install.ts owns the file I/O, this owns the decision. */
-export function updateGlobalImport(
-  existing: string,
-  importPath: string
-): { content: string; action: GlobalImportAction } {
-  const line = `@${importPath}`;
-  const lines = existing.split('\n');
-  const idx = lines.findIndex((l) => GLOBAL_IMPORT_LINE.test(l.trim()));
-
-  if (idx === -1) {
-    const separator = existing.length && !existing.endsWith('\n') ? '\n' : '';
-    return { content: existing + separator + line + '\n', action: 'added' };
-  }
-
-  if (lines[idx]!.trim() === line) return { content: existing, action: 'unchanged' };
-
-  lines[idx] = line;
-  return { content: lines.join('\n'), action: 'migrated' };
 }
 
 export function parseMcpConfig(raw: string): McpConfig {

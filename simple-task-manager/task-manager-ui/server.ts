@@ -4,6 +4,7 @@ import path from 'node:path';
 import { mountTaskApi } from './src/server/taskRouter.js';
 import { VERSION } from '../version.js';
 import { checkForUpdate } from '../updateCheck.js';
+import { PACKAGE_DIR } from '../packageDir.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(__dirname, 'dist');
@@ -33,11 +34,13 @@ process.once('SIGINT',  () => { try { dispose(); } catch { /* ignore */ } proces
 // Deliberately does not expose TASKS_DB — the absolute path leaks the host
 // username + directory layout to any client that can reach the endpoint,
 // which is auth-less. The client doesn't need it for rendering.
+// packageDir is the exception: the mode/update dialogs need it for copyable
+// commands, and a clone can live anywhere.
 void checkForUpdate();
 
 app.get('/api/config', async (_req, res) => {
   const { state, remote } = await checkForUpdate();
-  res.json({ name: PROJECT_NAME, mode: TASK_UI_MODE, version: VERSION, update: { state, remote } });
+  res.json({ name: PROJECT_NAME, mode: TASK_UI_MODE, version: VERSION, packageDir: PACKAGE_DIR, update: { state, remote } });
 });
 
 app.use(express.static(dist, { index: 'index.html', maxAge: '1h' }));

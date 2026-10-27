@@ -49,7 +49,7 @@ The MCP spawns this server with `stdio: ['ignore', 'pipe', 'pipe']` and pipes bo
 
 `tasks.ts` is imported live from `../tasks.ts` (parent package, via the `.js` specifier; tsx maps it back to the `.ts` source at runtime). When the MCP's schema changes:
 
-1. Add the migration in `~/.claude/mcp-servers/simple-task-manager/migrations/`.
+1. Add the migration in `../migrations/` (the parent package).
 2. Run `npm run verify` in both `simple-task-manager` and this sub-package.
 3. No `EXPECTED_MIGRATIONS` array to update — that lived in the (now-removed) random-tools vendor mirror.
 

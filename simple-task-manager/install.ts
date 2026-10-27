@@ -1,71 +1,28 @@
 #!/usr/bin/env node
 /**
- * Two modes:
- *   tsx install.ts --global   One-time setup: teaches Claude how to set up this MCP in any project.
- *   tsx install.ts [dir]      Per-project setup: writes .mcp.json in the project root (default: cwd).
- *                             If a stale task-manager entry pointing at server.ts/server.js exists,
- *                             it is rewritten to point at dist/server.js.
+ * tsx install.ts [dir]   Per-project setup: writes .mcp.json in the project root (default: cwd).
+ *                        If a stale task-manager entry pointing at server.ts/server.js exists,
+ *                        it is rewritten to point at dist/server.js.
+ * Skills and the extended rules ship separately, as the `task-manager` Claude Code plugin.
  */
-import { readFileSync, writeFileSync, copyFileSync, existsSync, mkdirSync } from 'fs';
-import { resolve, dirname, basename } from 'path';
-import { homedir } from 'os';
-import { fileURLToPath } from 'url';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { resolve, basename } from 'path';
 import { execFileSync } from 'node:child_process';
-import { ENV_DOCS, ENV_ORDER, GLOBAL_IMPORT_FILE, isStaleEntry, parseMcpConfig, serializeMcpConfig, SKILLS, updateGlobalImport, type McpConfig, type McpEntry } from './mcpConfig.js';
+import { ENV_DOCS, ENV_ORDER, isStaleEntry, parseMcpConfig, serializeMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
+import { PACKAGE_DIR } from './packageDir.js';
 
-const serverDir = dirname(fileURLToPath(import.meta.url));
-const serverEntry = resolve(serverDir, 'dist/server.js');
-
-/** Copy the slash-command skills into ~/.claude/commands, overwriting existing copies.
- *  Always runs — even when .mcp.json / CLAUDE.md are left untouched — so a skill
- *  update in this repo reliably propagates to every already-set-up project. */
-function installSkills(): void {
-  const commandsDir = resolve(homedir(), '.claude', 'commands');
-  mkdirSync(commandsDir, { recursive: true });
-  for (const skill of SKILLS) {
-    const src = resolve(serverDir, 'commands', `${skill}.md`);
-    const dest = resolve(commandsDir, `${skill}.md`);
-    copyFileSync(src, dest);
-    console.log(`  skill  : /${skill} → ${dest}`);
-  }
-}
-
-// ── --global: register the setup instructions in ~/.claude/CLAUDE.md ──────────
-if (process.argv[2] === '--global') {
-  const claudeMd = resolve(homedir(), '.claude', 'CLAUDE.md');
-  const existing = existsSync(claudeMd) ? readFileSync(claudeMd, 'utf8') : '';
-  const { content, action } = updateGlobalImport(existing, resolve(serverDir, GLOBAL_IMPORT_FILE));
-
-  if (action === 'unchanged') {
-    console.log(`simple-task-manager already registered in ${claudeMd}.`);
-  } else {
-    mkdirSync(dirname(claudeMd), { recursive: true });
-    writeFileSync(claudeMd, content);
-
-    if (action === 'migrated') {
-      console.log(`Repointed the import in ${claudeMd} at ${GLOBAL_IMPORT_FILE}.`);
-      console.log(`It used to pull in CLAUDE.md — this package's dev docs — on every session.`);
-    } else {
-      console.log(`Registered in ${claudeMd}`);
-      console.log(`Claude can now set up this MCP in any project.`);
-      console.log(`Start a new session and say: "setup the task manager"`);
-    }
-  }
-
-  installSkills();
-  process.exit(0);
-}
+const serverEntry = resolve(PACKAGE_DIR, 'dist/server.js');
 
 // ── Ensure dist/ is built from current source before pointing .mcp.json at it ──
 // .mcp.json points at dist/server.js; a stale dist/ (e.g. after a code pull that
 // added migrations) crashes the MCP on startup. Always rebuild — the build is
 // fast. node_modules may be absent on a fresh checkout — install first if so.
-if (!existsSync(resolve(serverDir, 'node_modules'))) {
+if (!existsSync(resolve(PACKAGE_DIR, 'node_modules'))) {
   console.log('node_modules not found — running npm install...');
-  execFileSync('npm', ['install'], { cwd: serverDir, stdio: 'inherit', shell: process.platform === 'win32' });
+  execFileSync('npm', ['install'], { cwd: PACKAGE_DIR, stdio: 'inherit', shell: process.platform === 'win32' });
 }
 console.log('Building dist/ from current source...');
-execFileSync('npm', ['run', 'build'], { cwd: serverDir, stdio: 'inherit', shell: process.platform === 'win32' });
+execFileSync('npm', ['run', 'build'], { cwd: PACKAGE_DIR, stdio: 'inherit', shell: process.platform === 'win32' });
 
 // ── per-project: write .mcp.json ───────────────────────────────────────────────
 const projectDir = resolve(process.argv[2] ?? process.cwd());
@@ -122,7 +79,5 @@ if (existingEntry && !isStaleEntry(existingEntry)) {
   console.log('');
 }
 
-// ── install skills ─────────────────────────────────────────────────────────────
-installSkills();
-
 console.log(`Restart Claude Code to activate.`);
+console.log(`Skills and extended rules: /plugin marketplace add dabalroman/mcp-servers, then /plugin install task-manager@dabalroman`);

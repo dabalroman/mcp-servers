@@ -18,7 +18,7 @@ Work through `todo` tasks one at a time, implementing simple ones inline and del
 
 ### Step 1 — Get next task
 
-- If `#NN` was passed: fetch that task. If it is an `epic`, invoke the `implement-as-coordinator` skill with `#NN` and stop here; that skill runs the epic's children. If its status is not `todo`, report the actual status and stop.
+- If `#NN` was passed: fetch that task. If it is an `epic`, invoke the `task-manager:implement-as-coordinator` skill with `#NN` and stop here; that skill runs the epic's children. If its status is not `todo`, report the actual status and stop.
 - Otherwise call `mcp__task-manager__getNext`, narrowed by the resolved scope. If nothing is returned, report "Queue empty" and stop.
 - **If the next task is in `refinement` or `plan`** (`getNext` returns both): do NOT refine or plan inline. Report "Task #NN is in <status> — run `/refine #NN` first" (or "finish and approve its plan first") and stop. Strict separation between the two commands.
 

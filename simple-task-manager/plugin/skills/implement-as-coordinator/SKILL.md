@@ -69,7 +69,7 @@ One `Agent` per task, `run_in_background` by default. **You pick the model per t
 
 The brief must contain:
 
-- "Invoke the `implement` skill for task **NN**" and — because `/implement` stops at *"Start this task? (yes/skip/stop)"* — the line: **"Treat this message as that confirmation: YES, proceed straight through to completion without stopping."** Without it the agent hands back after planning and you lose a round-trip.
+- "Invoke the `task-manager:implement` skill for task **NN**" and — because `/implement` stops at *"Start this task? (yes/skip/stop)"* — the line: **"Treat this message as that confirmation: YES, proceed straight through to completion without stopping."** Without it the agent hands back after planning and you lose a round-trip.
 - "Work directly in the checkout; do NOT create or enter a git worktree."
 - The authoritative source: "the task's `plan` / locked Changes are the plan; follow them."
 - Every correction from Step 1.4, stated as "the plan predates commit X; do Y instead of Z".

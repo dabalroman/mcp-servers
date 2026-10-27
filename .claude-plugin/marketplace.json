@@ -1,0 +1,16 @@
+{
+  "name": "dabalroman",
+  "owner": {
+    "name": "dabalroman"
+  },
+  "metadata": {
+    "description": "Claude Code plugins for the MCP servers in this repo"
+  },
+  "plugins": [
+    {
+      "name": "task-manager",
+      "source": "./simple-task-manager/plugin",
+      "description": "Skills and full usage rules for the simple-task-manager MCP"
+    }
+  ]
+}

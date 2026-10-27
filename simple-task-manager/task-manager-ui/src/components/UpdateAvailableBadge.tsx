@@ -15,15 +15,17 @@ type UpdateAvailableBadgeProps = {
   remoteVersion: string;
   mode: RunMode | null;
   projectName: string | null;
+  packageDir: string | null;
 };
 
-export default function UpdateAvailableBadge({ localVersion, remoteVersion, mode, projectName }: UpdateAvailableBadgeProps) {
+export default function UpdateAvailableBadge({ localVersion, remoteVersion, mode, projectName, packageDir }: UpdateAvailableBadgeProps) {
   const [open, setOpen] = useState(false);
 
   const restartNote = mode === 'bundled' ? ' (this also restarts the UI)' : '';
+  const dir = packageDir ?? '<package dir>';
   const steps = [
-    'git pull in ~/.claude/mcp-servers',
-    'Re-run npx tsx ~/.claude/mcp-servers/simple-task-manager/install.ts in each project (rebuilds dist/)',
+    `git -C ${dir} pull`,
+    `Re-run npx tsx ${dir}/install.ts in each project (rebuilds dist/)`,
     `Restart Claude Code${restartNote}`,
   ];
   if (mode === 'standalone') {
