@@ -17,6 +17,7 @@ import { tmpdir } from 'node:os';
 import { createStore, type AddInput, type Store } from './tasks.js';
 import { INSTRUCTIONS } from './instructions.js';
 import { PACKAGE_DIR } from './packageDir.js';
+import { ENV_ORDER } from './mcpConfig.js';
 import {
   handleGetByType,
   handleGetNext,
@@ -44,7 +45,8 @@ import {
   handleUiStart,
   handleUiStop,
 } from './mcp/mutationHandlers.js';
-import type { MCPContent } from './mcp/shared.js';
+import { withSchemaCheck, type MCPContent } from './mcp/shared.js';
+import Database from 'better-sqlite3';
 import { isWithin } from './mcp/planPath.js';
 import { resetUpdateCheckCache } from './updateCheck.js';
 
@@ -975,17 +977,33 @@ describe('health handler — ui field', () => {
 
 describe('health handler — config section env validation', () => {
   let savedCwd: string;
+  let savedEnv: Record<string, string | undefined>;
 
   beforeEach(() => {
     savedCwd = process.cwd();
+    savedEnv = Object.fromEntries(ENV_ORDER.map((k) => [k, process.env[k]]));
     process.chdir(dir);
   });
 
   afterEach(() => {
     process.chdir(savedCwd);
+    for (const [k, v] of Object.entries(savedEnv)) {
+      if (v === undefined) delete process.env[k];
+      else process.env[k] = v;
+    }
   });
 
+  // The server's real env carries the canonical values; .mcp.json is only
+  // scanned for legacy/unknown keys.
+  function setEnv(env: Record<string, string>): void {
+    for (const k of ENV_ORDER) {
+      if (env[k] === undefined) delete process.env[k];
+      else process.env[k] = env[k];
+    }
+  }
+
   function writeMcpJson(env: Record<string, string>): void {
+    setEnv(env);
     const config = {
       mcpServers: {
         'task-manager': {
@@ -1017,7 +1035,7 @@ describe('health handler — config section env validation', () => {
     assert.match(report, /✗ AUTO_OPEN_TASK_UI — renamed to `TASK_UI_AUTO_OPEN_IN_BROWSER`/);
   });
 
-  test('canonical .mcp.json produces ✓ for all five canonical vars', async () => {
+  test('canonical env produces ✓ for all five canonical vars', async () => {
     writeMcpJson({
       TASKS_DB: dbPath,
       PROJECT_NAME: 'demo',
@@ -1069,7 +1087,7 @@ describe('health handler — config section env validation', () => {
     assert.match(report, /✗ TASK_UI_PORT = abc/);
   });
 
-  test('health.ui structured field still resolves from .mcp.json env', async () => {
+  test('health.ui structured field resolves from the process env', async () => {
     writeMcpJson({
       TASKS_DB: dbPath,
       PROJECT_NAME: 'demo',
@@ -1079,6 +1097,24 @@ describe('health handler — config section env validation', () => {
     });
     const resp = await handleHealth();
     assert.equal((decode(resp) as { ui: string }).ui, 'standalone');
+  });
+
+  test('without any .mcp.json (user/local-scope binding) the env still validates and nothing is ✗', async () => {
+    setEnv({ TASKS_DB: dbPath, PROJECT_NAME: 'demo', TASK_UI_PORT: '7374', TASK_UI_MODE: 'disabled', TASK_UI_AUTO_OPEN_IN_BROWSER: '0' });
+    const report = getReport(await handleHealth());
+    const config = report.split('\n\n').find((sec) => sec.includes('Config (env)\n'))!;
+    assert.match(config, /✓ PROJECT_NAME = demo/);
+    assert.doesNotMatch(config, /✗/);
+    assert.doesNotMatch(report, /\.mcp\.json not found/);
+  });
+
+  test('a DB migrated past this build shows ✗ with the rebuild/restart hint; a current one names the last migration', async () => {
+    setEnv({ TASKS_DB: dbPath, PROJECT_NAME: 'demo', TASK_UI_PORT: '7374', TASK_UI_MODE: 'disabled', TASK_UI_AUTO_OPEN_IN_BROWSER: '0' });
+    assert.match(getReport(await handleHealth()), /✓ DB schema up to date \(\d+ migrations, last \d+_[\w-]+ applied .+ UTC\)/);
+    const other = new Database(dbPath);
+    other.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(99, 'future-migration');
+    other.close();
+    assert.match(getReport(await handleHealth()), /✗ DB was migrated by a newer task-manager build \(future-migration\).*Rebuild/);
   });
 });
 
@@ -1514,14 +1550,22 @@ describe('instructions size limits', () => {
 
 describe('plugin SessionStart hook (session-rules.mjs)', () => {
   let projectDir: string;
+  let home: string;
 
-  beforeEach(() => { projectDir = mkdtempSync(join(tmpdir(), 'stm-hook-')); });
-  afterEach(() => { rmSync(projectDir, { recursive: true, force: true }); });
+  beforeEach(() => {
+    projectDir = mkdtempSync(join(tmpdir(), 'stm-hook-'));
+    home = mkdtempSync(join(tmpdir(), 'stm-hook-home-'));
+  });
+  afterEach(() => {
+    rmSync(projectDir, { recursive: true, force: true });
+    rmSync(home, { recursive: true, force: true });
+  });
 
   function runHook(env: NodeJS.ProcessEnv = { CLAUDE_PROJECT_DIR: projectDir, CLAUDE_PLUGIN_ROOT: PLUGIN_DIR }) {
     const { CLAUDE_PROJECT_DIR: _, CLAUDE_PLUGIN_ROOT: __, ...base } = process.env;
     return spawnSync(process.execPath, [join(PLUGIN_DIR, 'hooks', 'session-rules.mjs')], {
-      env: { ...base, ...env },
+      // A tmp HOME keeps the real ~/.claude.json out of the test.
+      env: { ...base, HOME: home, USERPROFILE: home, ...env },
       encoding: 'utf8',
     });
   }
@@ -1562,6 +1606,30 @@ describe('plugin SessionStart hook (session-rules.mjs)', () => {
   });
 
   test('prints nothing when there is no .mcp.json', () => {
+    const r = runHook();
+    assert.equal(r.status, 0);
+    assert.equal(r.stdout, '');
+  });
+
+  const tmEntry = { 'task-manager': { command: 'node', args: [] } };
+
+  test('prints RULES.md for a user-scope binding in ~/.claude.json', () => {
+    writeFileSync(join(home, '.claude.json'), JSON.stringify({ mcpServers: tmEntry }));
+    assert.equal(runHook().stdout, RULES);
+  });
+
+  test('prints RULES.md for a local-scope binding of this project in ~/.claude.json', () => {
+    writeFileSync(join(home, '.claude.json'), JSON.stringify({ projects: { [projectDir]: { mcpServers: tmEntry } } }));
+    assert.equal(runHook().stdout, RULES);
+  });
+
+  test('prints nothing for a local-scope binding of another project', () => {
+    writeFileSync(join(home, '.claude.json'), JSON.stringify({ projects: { '/somewhere/else': { mcpServers: tmEntry } } }));
+    assert.equal(runHook().stdout, '');
+  });
+
+  test('prints nothing and exits 0 when ~/.claude.json is malformed', () => {
+    writeFileSync(join(home, '.claude.json'), '{ nope');
     const r = runHook();
     assert.equal(r.status, 0);
     assert.equal(r.stdout, '');
@@ -1639,5 +1707,105 @@ describe('project binding', () => {
     assert.match(ok.report, /✓ Bound project = default \(exists\)/);
     const bad = decode(await handleHealth({ store, ctx: { project: 'unbound' } })) as { report: string };
     assert.match(bad.report, /✗ Bound project = unbound — does not exist/);
+  });
+});
+
+describe('withSchemaCheck (DB migrated past this build mid-session)', () => {
+  function migrateUnderneath(): void {
+    const other = new Database(dbPath);
+    other.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(99, 'future-migration');
+    other.close();
+  }
+
+  test('passes results through untouched while the schema is current', async () => {
+    addTask();
+    const resp = await withSchemaCheck(store, () => handleGetAll(store, {}, CTX))();
+    assert.equal(resp.content.length, 1);
+  });
+
+  test('a write returns the rebuild/restart error, even from a handler that does not catch', async () => {
+    const { id } = addTask();
+    migrateUnderneath();
+    for (const call of [
+      () => handleAdd(store, { project: 'default', title: 't', type: 'bug', priority: 'low' }, CTX),
+      () => handleSetStatus(store, { id, status: 'done' }),
+      () => handleDelete(store, { id }),
+    ]) {
+      const resp = await withSchemaCheck(store, call)();
+      assert.equal(resp.isError, true);
+      assert.match(resp.content[0]!.text, /future-migration.*Rebuild .* restart/);
+    }
+  });
+
+  test('a read still answers and carries a restart warning', async () => {
+    addTask();
+    migrateUnderneath();
+    const resp = await withSchemaCheck(store, () => handleGetAll(store, {}, CTX))();
+    assert.notEqual(resp.isError, true);
+    assert.equal(resp.content.length, 2);
+    assert.match(resp.content[1]!.text, /^⚠ DB was migrated by a newer task-manager build \(future-migration\)/);
+  });
+});
+
+describe('health handler — plugin section', () => {
+  let home: string;
+  let savedCwd: string;
+
+  beforeEach(() => {
+    home = mkdtempSync(join(tmpdir(), 'stm-home-'));
+    mkdirSync(join(home, '.claude', 'plugins'), { recursive: true });
+    savedCwd = process.cwd();
+    process.chdir(dir);
+  });
+
+  afterEach(() => {
+    process.chdir(savedCwd);
+    rmSync(home, { recursive: true, force: true });
+  });
+
+  async function pluginSection(): Promise<string> {
+    const report = (decode(await handleHealth(undefined, { homeDir: home })) as { report: string }).report;
+    return report.split('\n\n').find((sec) => sec.includes('Plugin\n'))!;
+  }
+
+  function install(enabled?: boolean): void {
+    writeFileSync(join(home, '.claude', 'plugins', 'installed_plugins.json'),
+      JSON.stringify({ version: 2, plugins: { 'task-manager@dabalroman': [{ scope: 'user' }] } }));
+    if (enabled !== undefined) {
+      writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'task-manager@dabalroman': enabled } }));
+    }
+  }
+
+  test('a clean plugin install is all ✓', async () => {
+    install(true);
+    const section = await pluginSection();
+    assert.match(section, /✓ task-manager@dabalroman installed/);
+    assert.doesNotMatch(section, /✗/);
+  });
+
+  test('a missing plugin is ✗ with the install command', async () => {
+    assert.match(await pluginSection(), /✗ task-manager plugin not installed — run: claude plugin marketplace add/);
+  });
+
+  test('a disabled plugin is ✗ with the enable command', async () => {
+    install(false);
+    assert.match(await pluginSection(), /✗ task-manager@dabalroman installed but disabled — run: claude plugin enable task-manager@dabalroman/);
+  });
+
+  test('old skill copies in ~/.claude/commands are ✗, each named', async () => {
+    install(true);
+    mkdirSync(join(home, '.claude', 'commands'));
+    writeFileSync(join(home, '.claude', 'commands', 'implement.md'), 'old');
+    writeFileSync(join(home, '.claude', 'commands', 'refine.md'), 'old');
+    writeFileSync(join(home, '.claude', 'commands', 'unrelated.md'), 'mine');
+    const section = await pluginSection();
+    assert.match(section, /✗ Old skill copies shadow the plugin: .*refine\.md, .*implement\.md — delete them/);
+    assert.doesNotMatch(section, /unrelated/);
+  });
+
+  test('a dangling SETUP.md import in ~/.claude/CLAUDE.md is ✗', async () => {
+    install(true);
+    writeFileSync(join(home, '.claude', 'CLAUDE.md'), '# mine\n@~/.claude/mcp-servers/simple-task-manager/SETUP.md\n');
+    assert.match(await pluginSection(), /✗ ~\/\.claude\/CLAUDE\.md still imports @~\/\.claude\/mcp-servers\/simple-task-manager\/SETUP\.md/);
   });
 });

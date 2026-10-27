@@ -2,7 +2,7 @@
 // run on first open inside createStore() — no vendor mirror, no EXPECTED_MIGRATIONS
 // validation. When the MCP and the UI both open the same DB, whichever opens
 // first applies pending migrations; the other sees the migrated schema.
-import { createStore, type AddInput, type UpdatePatch, type LoadResult, type ProjectEntry, type Store } from '../../../tasks.js';
+import { createStore, StaleSchemaError, type AddInput, type UpdatePatch, type LoadResult, type ProjectEntry, type Store } from '../../../tasks.js';
 import type { TaskStatus } from '@/types/task';
 
 export type { AddInput, UpdatePatch, LoadResult, ProjectEntry };
@@ -61,4 +61,10 @@ export type TaskStore = ReturnType<typeof createTaskStore>;
 // We classify here so the HTTP layer can return 400 vs 500.
 export function isValidationError(err: unknown): boolean {
   return err instanceof Error && err.message.startsWith('Validation failed');
+}
+
+// Another process migrated the DB past this build: writes are refused until
+// the UI is rebuilt/restarted (409, so the client shows the message).
+export function isStaleSchemaError(err: unknown): boolean {
+  return err instanceof StaleSchemaError;
 }

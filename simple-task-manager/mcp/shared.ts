@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import * as net from 'node:net';
-import { RELATIONS, unknownProjectMessage, type Relation, type Task, type Store } from '../tasks.js';
+import { RELATIONS, unknownProjectMessage, staleSchemaMessage, StaleSchemaError, type Relation, type Task, type Store } from '../tasks.js';
 
 export type MCPContent = {
   content: { type: 'text'; text: string }[];
@@ -9,6 +9,28 @@ export type MCPContent = {
 
 export const text = (obj: unknown): MCPContent => ({ content: [{ type: 'text', text: JSON.stringify(obj) }] });
 export const errorText = (obj: unknown): MCPContent => ({ content: [{ type: 'text', text: JSON.stringify(obj) }], isError: true });
+
+// Wraps a tool callback for a DB that another process migrated past this
+// build: the store's writes throw StaleSchemaError (turned into a tool error,
+// since not every handler catches), and other results get a restart warning.
+export function withSchemaCheck<A extends unknown[]>(
+  store: Store,
+  cb: (...args: A) => MCPContent | Promise<MCPContent>,
+): (...args: A) => Promise<MCPContent> {
+  return async (...args) => {
+    let result: MCPContent;
+    try {
+      result = await cb(...args);
+    } catch (err) {
+      if (err instanceof StaleSchemaError) return errorText({ error: err.message });
+      throw err;
+    }
+    if (result.isError) return result;
+    const { unknown } = store.schemaStatus();
+    if (unknown.length === 0) return result;
+    return { ...result, content: [...result.content, { type: 'text', text: `⚠ ${staleSchemaMessage(unknown)}` }] };
+  };
+}
 
 // Token-saving for list responses: when a task has a summary, the full description
 // adds noise without value. Agents that need the body call getById.

@@ -13,6 +13,7 @@ import {
   type AddInput,
   type Store,
   type Task,
+  StaleSchemaError,
 } from './tasks.js';
 
 const MIGRATION_NAMES = [
@@ -98,6 +99,22 @@ describe('schema', () => {
     db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(99, 'future-migration');
     db.close();
     assert.throws(() => createStore(dbPath), /downgrade not supported/);
+  });
+
+  test('a DB migrated by another process mid-session blocks writes but not reads', () => {
+    const { id } = makeTask({ title: 'before' });
+    assert.deepEqual(store.schemaStatus().unknown, []);
+    const other = new Database(dbPath);
+    other.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(99, 'future-migration');
+    other.close();
+
+    assert.deepEqual(store.schemaStatus().unknown, ['future-migration']);
+    assert.equal(store.schemaStatus().last?.name, 'future-migration');
+    assert.throws(() => makeTask({ title: 'after' }), StaleSchemaError);
+    assert.throws(() => store.setStatus(id, 'done'), /Rebuild .* and restart/);
+    assert.throws(() => store.addNote(id, 'n'), StaleSchemaError);
+    assert.equal(store.getById(id)?.title, 'before');
+    assert.equal(store.getAll('default').length, 1);
   });
 
   test('enables foreign_keys on the live connection after migrations', () => {

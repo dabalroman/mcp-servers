@@ -35,6 +35,12 @@ type Tab = 'active' | 'done';
 
 // Tree rail: each child draws its own segment (bridging the gap-2 above it) plus a
 // tick to its title row; the last segment stops at its tick.
+// Server messages worth showing verbatim: bad input, and the notice that the
+// DB was migrated past this build.
+function failureReason(err: unknown): string {
+  return err instanceof Error && /^(Validation failed|DB was migrated)/.test(err.message) ? ` ${err.message}` : '';
+}
+
 const EPIC_RAIL = 'relative ml-2 pl-5 before:absolute before:left-0 before:-top-2 before:bottom-0 before:border-l before:border-primary/40 after:absolute after:left-0 after:top-6 after:w-4 after:border-t after:border-primary/40 last:before:bottom-auto last:before:h-8';
 
 export default function TaskManager() {
@@ -84,7 +90,7 @@ export default function TaskManager() {
       await update(id, { status });
     } catch (err) {
       console.error('[task-ui] status update failed', { id, status, error: err });
-      toast.error(`Failed to update status of #${id}.`);
+      toast.error(`Failed to update status of #${id}.${failureReason(err)}`);
     }
   }
 
@@ -94,7 +100,7 @@ export default function TaskManager() {
       return true;
     } catch (err) {
       console.error('[task-ui] delete failed', { id, error: err });
-      toast.error(`Failed to delete #${id}.`);
+      toast.error(`Failed to delete #${id}.${failureReason(err)}`);
       return false;
     }
   }
@@ -114,8 +120,7 @@ export default function TaskManager() {
       selectProject(await createProject(name));
       return true;
     } catch (err) {
-      const reason = err instanceof Error && err.message.startsWith('Validation failed') ? ` ${err.message}` : '';
-      toast.error(`Failed to create project.${reason}`);
+      toast.error(`Failed to create project.${failureReason(err)}`);
       return false;
     }
   }
@@ -164,8 +169,7 @@ export default function TaskManager() {
         scope: form.scope || null,
         error: err,
       });
-      const reason = err instanceof Error && err.message.startsWith('Validation failed') ? ` ${err.message}` : '';
-      toast.error((editing ? `Failed to save #${editing.id}.` : 'Failed to add task.') + reason);
+      toast.error((editing ? `Failed to save #${editing.id}.` : 'Failed to add task.') + failureReason(err));
       return false;
     }
   }

@@ -4,7 +4,7 @@
 
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
@@ -394,5 +394,79 @@ describe('add-projects migration', () => {
       /FOREIGN KEY constraint failed/,
     );
     store.close();
+  });
+});
+
+describe('pre-migration backup', () => {
+  const backups = () => readdirSync(dir).filter((f) => f.startsWith('tasks.db.backup-'));
+  const last = loadMigrations().at(-1)!.name;
+
+  // A DB one migration behind this build.
+  function seedOneBehind(): void {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    loadMigrations().slice(0, -1).forEach((m, i) => {
+      m.up(db);
+      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(i + 1, m.name);
+    });
+    db.close();
+  }
+
+  function appliedNames(path: string): string[] {
+    const db = new Database(path, { readonly: true });
+    const names = (db.prepare('SELECT name FROM schema_migrations ORDER BY version').all() as { name: string }[]).map((r) => r.name);
+    db.close();
+    return names;
+  }
+
+  function captureStderr<T>(fn: () => T): { result: T; stderr: string } {
+    const original = process.stderr.write.bind(process.stderr);
+    let stderr = '';
+    process.stderr.write = ((chunk: string | Uint8Array) => { stderr += String(chunk); return true; }) as typeof process.stderr.write;
+    try {
+      return { result: fn(), stderr };
+    } finally {
+      process.stderr.write = original;
+    }
+  }
+
+  test('a fresh DB gets no backup', () => {
+    createStore(dbPath).close();
+    assert.deepEqual(backups(), []);
+  });
+
+  test('a pending migration is preceded by one backup holding the pre-migration state', () => {
+    seedOneBehind();
+    const { result: store, stderr } = captureStderr(() => createStore(dbPath));
+    store.close();
+
+    const files = backups();
+    assert.equal(files.length, 1);
+    assert.ok(files[0]!.endsWith(`-pre-${last}`), files[0]);
+    assert.ok(!appliedNames(join(dir, files[0]!)).includes(last), 'backup predates the migration');
+    assert.ok(appliedNames(dbPath).includes(last), 'live DB is migrated');
+    assert.match(stderr, new RegExp(`backup .*${files[0]} before migrating: ${last}`));
+  });
+
+  test('a second opener finds nothing pending and makes no second backup', () => {
+    seedOneBehind();
+    captureStderr(() => createStore(dbPath)).result.close();
+    createStore(dbPath).close();
+    assert.equal(backups().length, 1);
+  });
+
+  test('a failed backup aborts the migration', () => {
+    seedOneBehind();
+    // COPYFILE_EXCL refuses an existing target: occupy every name the next few seconds could produce.
+    const now = Date.now();
+    for (let s = 0; s < 5; s++) {
+      const d = new Date(now + s * 1000);
+      const p = (n: number) => String(n).padStart(2, '0');
+      const stamp = `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+      writeFileSync(join(dir, `tasks.db.backup-${stamp}-pre-${last}`), '');
+    }
+    assert.throws(() => createStore(dbPath), /EEXIST/);
+    assert.ok(!appliedNames(dbPath).includes(last), 'migration rolled back');
   });
 });

@@ -117,3 +117,19 @@ function orderEnv(env: Record<string, string>): string[] {
   const rest = Object.keys(env).filter((k) => !ENV_ORDER.includes(k));
   return [...known, ...rest];
 }
+
+export const INSTALL_USAGE = 'Usage: npx tsx install.ts [project-dir]   (default: the current directory)';
+
+const PLUGIN_INSTALL = 'claude plugin marketplace add dabalroman/mcp-servers && claude plugin install task-manager@dabalroman --scope user';
+
+// Parsed before the build so a typo fails fast. --global was the pre-plugin
+// way to install the skills; without this check it would be taken as a dir.
+export function parseInstallArgs(argv: string[]): { projectDir?: string } | { error: string } {
+  if (argv.includes('--global')) {
+    return { error: `--global is gone: skills and rules ship as a Claude Code plugin now. Run: ${PLUGIN_INSTALL}` };
+  }
+  const flag = argv.find((a) => a.startsWith('-'));
+  if (flag) return { error: `Unknown option ${flag}` };
+  if (argv.length > 1) return { error: `Expected at most one project dir, got: ${argv.join(' ')}` };
+  return argv[0] === undefined ? {} : { projectDir: argv[0] };
+}

@@ -1,7 +1,7 @@
 // SQLite-backed task store.
 // Schema is managed by file-per-migration in ./migrations/.
 import { createRequire } from 'node:module';
-import { readdirSync } from 'node:fs';
+import { readdirSync, copyFileSync, constants as fsConstants } from 'node:fs';
 import { join, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
@@ -131,7 +131,25 @@ export function loadMigrations(dir?: string): MigrationModule[] {
   });
 }
 
-function runMigrations(db: DB): void {
+export function staleSchemaMessage(unknown: string[]): string {
+  return `DB was migrated by a newer task-manager build (${unknown.join(', ')}); downgrade not supported. ` +
+    'Rebuild (npx tsx install.ts in a bound repo) and restart this session / the UI.';
+}
+
+export class StaleSchemaError extends Error {
+  constructor(unknown: string[]) {
+    super(staleSchemaMessage(unknown));
+    this.name = 'StaleSchemaError';
+  }
+}
+
+function backupStamp(d = new Date()): string {
+  const p = (n: number) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
+}
+
+// Returns the migration names this build ships, for the per-call stale check.
+function runMigrations(db: DB): Set<string> {
   // Disable FKs around the migration loop. Some migrations rebuild a table by
   // CREATE-new / INSERT...SELECT / DROP / RENAME; with FKs ON, the DROP fires
   // ON DELETE CASCADE on dependent tables and wipes refs. Setting
@@ -142,6 +160,7 @@ function runMigrations(db: DB): void {
   // after the MCP calls createStore on a fresh DB) wait on the BEGIN IMMEDIATE
   // below instead of taking immediate SQLITE_BUSY.
   db.pragma('busy_timeout = 5000');
+  let knownNames = new Set<string>();
 
   // Wrap the entire migration bootstrap in one BEGIN IMMEDIATE so two processes
   // racing createStore() on a fresh DB serialise on the write lock instead of
@@ -167,6 +186,7 @@ function runMigrations(db: DB): void {
 
     const migrations = loadMigrations();
     const onDiskNames = new Set(migrations.map((m) => m.name));
+    knownNames = onDiskNames;
 
     const appliedRows = db.prepare('SELECT version, name FROM schema_migrations ORDER BY version').all() as
       { version: number; name: string }[];
@@ -174,10 +194,19 @@ function runMigrations(db: DB): void {
 
     // Downgrade guard: applied name not present on disk means a newer code version ran.
     const missing = [...appliedNames].filter((n) => !onDiskNames.has(n));
-    if (missing.length > 0) {
-      throw new Error(
-        `DB was migrated by newer code; downgrade not supported. Missing migration files: ${missing.join(', ')}`
-      );
+    if (missing.length > 0) throw new StaleSchemaError(missing);
+
+    // Back up before the first migration write. Only the lock holder sees
+    // anything pending, so racing openers never make a second copy. With
+    // journal_mode = DELETE the main file is untouched until commit, so the
+    // copy is the pre-migration state. VACUUM INTO would be the obvious tool
+    // but can't run inside a transaction. A failed copy throws and rolls back.
+    const pending = migrations.filter((m) => !appliedNames.has(m.name));
+    const firstPending = pending[0];
+    if (firstPending && appliedRows.length > 0 && !db.memory) {
+      const backupPath = `${db.name}.backup-${backupStamp()}-pre-${firstPending.name}`;
+      copyFileSync(db.name, backupPath, fsConstants.COPYFILE_EXCL);
+      process.stderr.write(`[task-manager] backup ${backupPath} before migrating: ${pending.map((m) => m.name).join(', ')}\n`);
     }
 
     const insertMigration = db.prepare(
@@ -206,6 +235,7 @@ function runMigrations(db: DB): void {
       throw new Error(`Foreign key violations after migrations: ${JSON.stringify(violations)}`);
     }
   }).immediate();
+  return knownNames;
 }
 
 // ── Row mapping ───────────────────────────────────────────────────────────────
@@ -357,8 +387,11 @@ export type Store = {
   addNote(taskId: number, body: string): Note | null;
   updateNote(noteId: number, body: string): Note | null;
   deleteNote(noteId: number): boolean;
+  schemaStatus(): SchemaStatus;
   close(): void;
 };
+
+export type SchemaStatus = { last: { name: string; appliedAt: string } | null; unknown: string[] };
 
 export const PROJECT_NAME_MAX = 64;
 
@@ -402,8 +435,9 @@ export function createStore(dbPath: string): Store {
   // we re-enable after so normal operation enforces them. try/finally so a
   // thrown migration can't leave the connection with FKs off for its lifetime
   // — that would silently break ON DELETE CASCADE on `refs`.
+  let knownMigrations: Set<string>;
   try {
-    runMigrations(db);
+    knownMigrations = runMigrations(db);
   } finally {
     db.pragma('foreign_keys = ON');
   }
@@ -413,6 +447,7 @@ export function createStore(dbPath: string): Store {
     'INSERT INTO tasks (title, type, status, priority, project, scope, summary, description, plan, parent_id, external_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   );
   const stmtSelectTask      = db.prepare('SELECT * FROM tasks WHERE id = ?');
+  const stmtAppliedMigrations = db.prepare('SELECT name, applied_at FROM schema_migrations ORDER BY version');
   const stmtSelectAllTasks  = db.prepare('SELECT * FROM tasks');
   const stmtSelectAllIds    = db.prepare('SELECT id FROM tasks ORDER BY id');
   const stmtDeleteTask      = db.prepare('DELETE FROM tasks WHERE id = ?');
@@ -607,6 +642,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function add(input: AddInput): { id: number } {
+    assertSchemaCurrent();
     const { project, type, priority, title, description = '', scope, summary, plan, refs, status = 'refinement', parentId, externalId } = input;
     const trimmedTitle = String(title ?? '').trim();
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
@@ -637,6 +673,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function update(id: number, patch: UpdatePatch): { task: Task } | null {
+    assertSchemaCurrent();
     return db.transaction(() => {
       const existing = stmtSelectTask.get(id) as TaskRow | undefined;
       if (!existing) return null;
@@ -682,6 +719,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function setStatus(id: number, status: TaskStatus): boolean {
+    assertSchemaCurrent();
     return db.transaction(() => {
       const existing = stmtSelectTask.get(id) as TaskRow | undefined;
       if (!existing) return false;
@@ -705,6 +743,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function deleteTask(id: number): boolean {
+    assertSchemaCurrent();
     return db.transaction(() => {
       const existing = stmtSelectTask.get(id) as TaskRow | undefined;
       if (!existing) return false;
@@ -930,6 +969,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function createProject(name: string): { name: string } {
+    assertSchemaCurrent();
     const trimmed = validProjectName(name);
     const existing = stmtSelectProject.get(trimmed) as { name: string } | undefined;
     if (existing) throw new Error(`Validation failed: project "${existing.name}" already exists.`);
@@ -941,6 +981,7 @@ export function createStore(dbPath: string): Store {
   // connection's PROJECT_NAME instead, so single-project installs need no
   // setup. ON UPDATE CASCADE carries the tasks along.
   function adoptDefaultProject(name: string): boolean {
+    assertSchemaCurrent();
     const trimmed = name.trim();
     if (!isValidProjectName(trimmed) || trimmed.toLowerCase() === 'default') return false;
     return db.transaction(() => {
@@ -959,6 +1000,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function addNote(taskId: number, body: string): Note | null {
+    assertSchemaCurrent();
     const trimmed = validNoteBody(body);
     return db.transaction(() => {
       if (!stmtSelectTask.get(taskId)) return null;
@@ -969,6 +1011,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function updateNote(noteId: number, body: string): Note | null {
+    assertSchemaCurrent();
     const trimmed = validNoteBody(body);
     return db.transaction(() => {
       const existing = stmtSelectNote.get(noteId) as Note | undefined;
@@ -980,6 +1023,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function deleteNote(noteId: number): boolean {
+    assertSchemaCurrent();
     return db.transaction(() => {
       const existing = stmtSelectNote.get(noteId) as Note | undefined;
       if (!existing) return false;
@@ -987,6 +1031,22 @@ export function createStore(dbPath: string): Store {
       stmtTouchTask.run(existing.task_id);
       return true;
     })();
+  }
+
+  // Another process may migrate the DB while this one runs; the check at open
+  // can't see that, so every write re-checks. Reads stay allowed.
+  function schemaStatus(): SchemaStatus {
+    const rows = stmtAppliedMigrations.all() as { name: string; applied_at: string }[];
+    const last = rows.at(-1);
+    return {
+      last: last ? { name: last.name, appliedAt: last.applied_at } : null,
+      unknown: rows.map((r) => r.name).filter((n) => !knownMigrations.has(n)),
+    };
+  }
+
+  function assertSchemaCurrent(): void {
+    const { unknown } = schemaStatus();
+    if (unknown.length > 0) throw new StaleSchemaError(unknown);
   }
 
   function close(): void {
@@ -1019,6 +1079,7 @@ export function createStore(dbPath: string): Store {
     addNote,
     updateNote,
     deleteNote,
+    schemaStatus,
     close,
   };
 }

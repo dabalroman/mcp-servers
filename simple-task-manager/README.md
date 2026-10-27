@@ -46,9 +46,7 @@ The plugin follows GitHub `main`. If the server runs on a separate host, pull th
 push, or the skills may call tools the host doesn't have yet. On the host itself you can add the
 marketplace from the local clone instead (`/plugin marketplace add <dir>`); it loads in place.
 
-Upgrading from the old `install.ts --global` setup: after installing the plugin, delete the
-`refine`, `implement`, `implement-as-coordinator` and `assess` copies from `~/.claude/commands/`
-and remove the `@…/simple-task-manager/SETUP.md` line from `~/.claude/CLAUDE.md`.
+**Upgrading an existing clone?** Follow [UPGRADING.md](UPGRADING.md): the steps for every pull, version notes (plugin, projects), rollback and FAQ.
 
 ### Step 2 — Bind a repo
 
@@ -358,6 +356,7 @@ Every task belongs to exactly one project, so several repos can share one `tasks
 - Projects are created explicitly (`createProject`, or `+ Project` in the UI). An unknown name is an error that says how to create it; nothing is auto-created. Names are case-insensitive.
 - **Zero setup for a single repo:** a database created before projects existed puts every task in a project called `default`. While `default` is the only project, the first MCP start renames it to that repo's `PROJECT_NAME`.
 - `health` shows the bound project and whether it exists.
+- **Several repos, one DB:** give each repo's `.mcp.json` the same absolute `TASKS_DB` and its own `PROJECT_NAME`, then create those projects. In `standalone` mode, also give them the same `TASK_UI_PORT`; one pm2 UI then serves them all.
 
 ### Scope — tagging tasks to an area
 

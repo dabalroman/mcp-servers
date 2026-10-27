@@ -2,10 +2,10 @@ import { readdirSync, existsSync, accessSync, constants as fsConstants, readFile
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import * as http from 'node:http';
-import { networkInterfaces } from 'node:os';
+import { networkInterfaces, homedir } from 'node:os';
 import Database from 'better-sqlite3';
 import { text, toListTask, notFoundError, resolveProject, type MCPContent, type SessionContext } from './shared.js';
-import { ALL_TYPES } from '../tasks.js';
+import { ALL_TYPES, staleSchemaMessage } from '../tasks.js';
 import { ENV_ORDER, LEGACY_ENV_KEYS } from '../mcpConfig.js';
 import { PACKAGE_DIR } from '../packageDir.js';
 import { checkForUpdate } from '../updateCheck.js';
@@ -126,7 +126,7 @@ function validateCanonicalEnv(key: string, raw: string): CheckResult {
 
 function validateTasksDb(raw: string): CheckResult {
   if (!raw) {
-    return check('✗', 'TASKS_DB not set in .mcp.json — add it to mcpServers.task-manager.env');
+    return check('✗', 'TASKS_DB not set in the server env — add it to the task-manager env block in .mcp.json (or `claude mcp add -e`)');
   }
   if (existsSync(raw)) {
     return check('✓', `TASKS_DB = ${raw} (exists, writable)`);
@@ -181,7 +181,53 @@ function probeHttp(url: string, timeoutMs: number): Promise<number> {
   });
 }
 
-export async function handleHealth(binding?: { store: Store; ctx: SessionContext }): Promise<MCPContent> {
+const SHADOWING_COMMANDS = ['refine', 'implement', 'implement-as-coordinator', 'assess'];
+
+function readJson(path: string): Record<string, unknown> | null {
+  try {
+    const parsed: unknown = JSON.parse(readFileSync(path, 'utf-8').replace(/^\uFEFF/, ''));
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+// Leftovers of the pre-plugin install that silently break the plugin: copies
+// in ~/.claude/commands win over the plugin's bare skill names, and a dangling
+// @…/SETUP.md import is ignored by Claude Code without an error.
+function pluginChecks(homeDir: string): CheckResult[] {
+  const claudeDir = join(homeDir, '.claude');
+  const results: CheckResult[] = [];
+
+  const installed = readJson(join(claudeDir, 'plugins', 'installed_plugins.json'))?.['plugins'];
+  const installedId = installed && typeof installed === 'object'
+    ? Object.keys(installed).find((k) => k.startsWith('task-manager@'))
+    : undefined;
+  const enabled = readJson(join(claudeDir, 'settings.json'))?.['enabledPlugins'] as Record<string, unknown> | undefined;
+  if (!installedId) {
+    results.push(check('✗', 'task-manager plugin not installed — run: claude plugin marketplace add dabalroman/mcp-servers && claude plugin install task-manager@dabalroman --scope user'));
+  } else if (enabled?.[installedId] === false) {
+    results.push(check('✗', `${installedId} installed but disabled — run: claude plugin enable ${installedId}`));
+  } else {
+    results.push(check('✓', `${installedId} installed`));
+  }
+
+  const shadowing = SHADOWING_COMMANDS.map((n) => join(claudeDir, 'commands', `${n}.md`)).filter((p) => existsSync(p));
+  results.push(shadowing.length > 0
+    ? check('✗', `Old skill copies shadow the plugin: ${shadowing.join(', ')} — delete them`)
+    : check('✓', 'No old skill copies in ~/.claude/commands'));
+
+  let claudeMd = '';
+  try { claudeMd = readFileSync(join(claudeDir, 'CLAUDE.md'), 'utf-8'); } catch { /* none */ }
+  const setupImport = claudeMd.split(/\r?\n/).find((l) => /^@.*simple-task-manager\/SETUP\.md\s*$/.test(l.trim()));
+  results.push(setupImport
+    ? check('✗', `~/.claude/CLAUDE.md still imports ${setupImport.trim()} (file removed; the plugin replaces it) — remove that line`)
+    : check('✓', 'No SETUP.md import in ~/.claude/CLAUDE.md'));
+
+  return results;
+}
+
+export async function handleHealth(binding?: { store: Store; ctx: SessionContext }, opts: { homeDir?: string } = {}): Promise<MCPContent> {
   const sections: string[] = [];
 
   if (binding) {
@@ -192,69 +238,50 @@ export async function handleHealth(binding?: { store: Store; ctx: SessionContext
   }
 
   // ── Config section ───────────────────────────────────────────────────────────
+  // Values come from the env this process actually got, so user/local-scope
+  // bindings (`claude mcp add`, no .mcp.json) report correctly. .mcp.json is
+  // only scanned for legacy/unknown keys when one is found above the cwd.
   const configChecks: CheckResult[] = [];
+  const envValue = (key: string): string => process.env[key] ?? '';
+  for (const key of ENV_ORDER) {
+    configChecks.push(validateCanonicalEnv(key, envValue(key)));
+  }
 
   const mcpJsonPath = findMcpJson(process.cwd());
-  if (!mcpJsonPath) {
-    configChecks.push(check('✗', `.mcp.json not found — run: npx tsx ${resolve(PACKAGE_DIR, 'install.ts')}`));
-    sections.push(renderSection('Config (.mcp.json)', configChecks));
-
-    // Runtime section — skip most checks without config
-    const runtimeChecks: CheckResult[] = [
-      check('✗', 'Skipped — no .mcp.json found'),
-    ];
-    sections.push(renderSection('Runtime', runtimeChecks));
-
-    return buildOutput(sections);
-  }
-
-  // Parse .mcp.json
-  let mcpConfig: Record<string, unknown> = {};
-  try {
-    const raw = readFileSync(mcpJsonPath, 'utf-8');
-    mcpConfig = JSON.parse(raw) as Record<string, unknown>;
-  } catch {
-    configChecks.push(check('✗', `.mcp.json found at ${mcpJsonPath} but failed to parse — check JSON syntax`));
-    sections.push(renderSection('Config (.mcp.json)', configChecks));
-    return buildOutput(sections);
-  }
-
-  // Extract task-manager env block
-  const servers = mcpConfig['mcpServers'];
-  const taskManagerEntry = (servers && typeof servers === 'object' && !Array.isArray(servers))
-    ? (servers as Record<string, unknown>)['task-manager']
-    : undefined;
-  const envBlock = (taskManagerEntry && typeof taskManagerEntry === 'object' && !Array.isArray(taskManagerEntry))
-    ? (taskManagerEntry as Record<string, unknown>)['env']
-    : undefined;
-  const env = (envBlock && typeof envBlock === 'object' && !Array.isArray(envBlock))
-    ? envBlock as Record<string, unknown>
-    : {};
-
-  // Validate each canonical env var by iterating ENV_ORDER — keeps health
-  // honest when mcpConfig.ts adds/removes keys.
-  for (const key of ENV_ORDER) {
-    const raw = typeof env[key] === 'string' ? (env[key] as string) : '';
-    configChecks.push(validateCanonicalEnv(key, raw));
-  }
-
-  // Flag legacy/unknown keys present in the env block.
-  for (const key of Object.keys(env)) {
-    if (ENV_ORDER.includes(key)) continue;
-    const legacyHint = LEGACY_ENV_KEYS[key];
-    if (legacyHint) {
-      configChecks.push(check('✗', `${key} — ${legacyHint}`));
-    } else {
-      configChecks.push(check('⚠', `${key} — unknown, not consumed by MCP`));
+  if (mcpJsonPath) {
+    let fileEnv: Record<string, unknown> = {};
+    try {
+      const mcpConfig = JSON.parse(readFileSync(mcpJsonPath, 'utf-8').replace(/^\uFEFF/, '')) as Record<string, unknown>;
+      const servers = mcpConfig['mcpServers'];
+      const entry = (servers && typeof servers === 'object' && !Array.isArray(servers))
+        ? (servers as Record<string, unknown>)['task-manager']
+        : undefined;
+      const envBlock = (entry && typeof entry === 'object' && !Array.isArray(entry))
+        ? (entry as Record<string, unknown>)['env']
+        : undefined;
+      if (envBlock && typeof envBlock === 'object' && !Array.isArray(envBlock)) fileEnv = envBlock as Record<string, unknown>;
+    } catch {
+      configChecks.push(check('✗', `.mcp.json found at ${mcpJsonPath} but failed to parse — check JSON syntax`));
+    }
+    for (const key of Object.keys(fileEnv)) {
+      if (ENV_ORDER.includes(key)) continue;
+      const legacyHint = LEGACY_ENV_KEYS[key];
+      if (legacyHint) {
+        configChecks.push(check('✗', `${key} — ${legacyHint}`));
+      } else {
+        configChecks.push(check('⚠', `${key} — unknown, not consumed by MCP`));
+      }
     }
   }
 
-  sections.push(renderSection('Config (.mcp.json)', configChecks));
+  sections.push(renderSection('Config (env)', configChecks));
 
-  const uiModeRaw = typeof env['TASK_UI_MODE'] === 'string' ? env['TASK_UI_MODE'] : '';
-  const projectName = typeof env['PROJECT_NAME'] === 'string' ? env['PROJECT_NAME'] : '';
-  const uiPort = typeof env['TASK_UI_PORT'] === 'string' ? env['TASK_UI_PORT'] : '';
-  const tasksDb = typeof env['TASKS_DB'] === 'string' ? env['TASKS_DB'] : '';
+  sections.push(renderSection('Plugin', pluginChecks(opts.homeDir ?? homedir())));
+
+  const uiModeRaw = envValue('TASK_UI_MODE');
+  const projectName = envValue('PROJECT_NAME');
+  const uiPort = envValue('TASK_UI_PORT');
+  const tasksDb = envValue('TASKS_DB');
 
   const uiMode: 'standalone' | 'disabled' | 'bundled' =
     uiModeRaw === 'standalone' ? 'standalone'
@@ -285,7 +312,7 @@ export async function handleHealth(binding?: { store: Store; ctx: SessionContext
   }
 
   // DB migration check
-  const dbPath = tasksDb || (typeof process.env['TASKS_DB'] === 'string' ? process.env['TASKS_DB'] : '');
+  const dbPath = tasksDb;
   if (!dbPath) {
     runtimeChecks.push(check('✗', 'DB migration check skipped — TASKS_DB not configured'));
   } else if (!existsSync(dbPath)) {
@@ -293,32 +320,34 @@ export async function handleHealth(binding?: { store: Store; ctx: SessionContext
   } else {
     try {
       const migrationsDir = join(dirname(fileURLToPath(import.meta.url)), '../migrations');
-      let totalMigrations = 0;
+      let shipped: string[] = [];
       try {
         const files = readdirSync(migrationsDir);
-        const jsCount = files.filter(f => f.endsWith('.js')).length;
-        const tsCount = files.filter(f => f.endsWith('.ts')).length;
-        totalMigrations = jsCount > 0 ? jsCount : tsCount;
+        const ext = files.some((f) => f.endsWith('.js')) ? '.js' : '.ts';
+        shipped = files.filter((f) => f.endsWith(ext)).map((f) => f.slice(0, -ext.length));
       } catch { /* migrations dir not found */ }
 
       const db = new Database(dbPath, { readonly: true });
       // Short busy_timeout so health doesn't spuriously fail mid-migration or
       // during a large write — but stays bounded if something's actually stuck.
       db.pragma('busy_timeout = 2000');
-      let appliedCount = 0;
+      let applied: { name: string; applied_at: string }[] = [];
       try {
-        const row = db.prepare<[], { count: number }>('SELECT COUNT(*) AS count FROM schema_migrations').get();
-        appliedCount = row !== undefined ? row.count : 0;
+        applied = db.prepare<[], { name: string; applied_at: string }>('SELECT name, applied_at FROM schema_migrations ORDER BY version').all();
       } finally {
         db.close();
       }
 
-      if (totalMigrations === 0) {
+      const unknown = applied.map((r) => r.name).filter((n) => !shipped.includes(n));
+      const last = applied.at(-1);
+      if (shipped.length === 0) {
         runtimeChecks.push(check('⚠', `DB schema check — could not determine migration file count (migrations dir missing or empty)`));
-      } else if (appliedCount === totalMigrations) {
-        runtimeChecks.push(check('✓', `DB schema up to date (${appliedCount}/${totalMigrations} migrations applied)`));
+      } else if (unknown.length > 0) {
+        runtimeChecks.push(check('✗', staleSchemaMessage(unknown)));
+      } else if (applied.length === shipped.length) {
+        runtimeChecks.push(check('✓', `DB schema up to date (${applied.length} migrations, last ${last?.name} applied ${last?.applied_at} UTC)`));
       } else {
-        runtimeChecks.push(check('✗', `DB schema out of date — ${appliedCount}/${totalMigrations} migrations applied. Restart the MCP to apply pending migrations.`));
+        runtimeChecks.push(check('✗', `DB schema out of date — ${applied.length}/${shipped.length} migrations applied. Restart the MCP to apply pending migrations.`));
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -365,6 +394,6 @@ function buildOutput(sections: string[], ui?: 'standalone' | 'disabled' | 'bundl
   return text({
     report,
     ui: ui ?? resolveUiModeFromProcess(),
-    displayInstruction: 'Present this health report to the user as a markdown table with three columns: Status (✓/⚠/✗), Category (Project / Config / Runtime / Version), and Message. Each indented check line is one table row.',
+    displayInstruction: 'Present this health report to the user as a markdown table with three columns: Status (✓/⚠/✗), Category (Project / Config / Plugin / Runtime / Version), and Message. Each indented check line is one table row.',
   });
 }

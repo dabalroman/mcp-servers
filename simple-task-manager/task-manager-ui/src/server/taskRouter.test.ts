@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { mountTaskApi } from './taskRouter.js';
+import { createStore } from '../../../tasks.js';
 
 let dir: string;
 let dbPath: string;
@@ -90,5 +91,20 @@ describe('/api/projects', () => {
     expect((await request(app).post('/api/projects/').send({ name: ' ' })).status).toBe(400);
     const list = await request(app).get('/api/projects/');
     expect(list.body.map((p: { name: string }) => p.name)).toEqual(['default', 'example-project']);
+  });
+});
+
+describe('DB migrated past this build mid-session', () => {
+  it('refuses writes with 409 and the rebuild/restart message, but still serves reads', async () => {
+    const other = createStore(dbPath);
+    other.db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(99, 'future-migration');
+    other.close();
+
+    const write = await request(app).post('/api/tasks/').send({ project: 'default', type: 'bug', priority: 'high', title: 'x' });
+    expect(write.status).toBe(409);
+    expect(write.body.error).toMatch(/future-migration.*Rebuild .* restart/);
+
+    const read = await request(app).get('/api/tasks/');
+    expect(read.status).toBe(200);
   });
 });

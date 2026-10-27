@@ -5,7 +5,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  isStaleEntry, serializeMcpConfig, parseMcpConfig,
+  isStaleEntry, serializeMcpConfig, parseMcpConfig, parseInstallArgs,
   type McpConfig, type McpEntry
 } from './mcpConfig.js';
 
@@ -106,5 +106,29 @@ describe('isStaleEntry — rewrite path detection', () => {
   test('returns false for empty args', () => {
     const e: McpEntry = { command: 'node', args: [] };
     assert.equal(isStaleEntry(e), false);
+  });
+});
+
+describe('parseInstallArgs', () => {
+  test('no args → current directory', () => {
+    assert.deepEqual(parseInstallArgs([]), {});
+  });
+
+  test('one positional → project dir', () => {
+    assert.deepEqual(parseInstallArgs(['../repo']), { projectDir: '../repo' });
+  });
+
+  test('--global points at the plugin install', () => {
+    const r = parseInstallArgs(['--global']);
+    assert.ok('error' in r);
+    assert.match(r.error, /claude plugin install task-manager@dabalroman/);
+  });
+
+  test('an unknown flag is rejected', () => {
+    assert.deepEqual(parseInstallArgs(['--force']), { error: 'Unknown option --force' });
+  });
+
+  test('two positionals are rejected', () => {
+    assert.ok('error' in parseInstallArgs(['a', 'b']));
   });
 });

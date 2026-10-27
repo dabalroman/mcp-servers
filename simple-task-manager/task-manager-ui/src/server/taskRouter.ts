@@ -4,7 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createTaskApi, type TaskApi } from './taskApi.js';
-import { isValidationError } from './taskStore.js';
+import { isStaleSchemaError, isValidationError } from './taskStore.js';
 
 type Next = (err?: unknown) => void;
 type Handler = (req: IncomingMessage & { body?: unknown }, res: ServerResponse, next?: Next) => void;
@@ -81,7 +81,9 @@ async function dispatchProjects(
 function sendError(res: ServerResponse, err: unknown): void {
   const e = err as Error;
   console.error('[task-api]', e);
-  res.statusCode = isValidationError(err) ? 400 : 500;
+  res.statusCode = 500;
+  if (isValidationError(err)) res.statusCode = 400;
+  else if (isStaleSchemaError(err)) res.statusCode = 409;
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({ error: e.message }));
 }

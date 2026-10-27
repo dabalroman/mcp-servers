@@ -8,10 +8,17 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, basename } from 'path';
 import { execFileSync } from 'node:child_process';
-import { ENV_DOCS, ENV_ORDER, isStaleEntry, parseMcpConfig, serializeMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
+import { ENV_DOCS, ENV_ORDER, INSTALL_USAGE, isStaleEntry, parseInstallArgs, parseMcpConfig, serializeMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
 import { PACKAGE_DIR } from './packageDir.js';
 
 const serverEntry = resolve(PACKAGE_DIR, 'dist/server.js');
+
+const args = parseInstallArgs(process.argv.slice(2));
+if ('error' in args) {
+  console.error(`Error: ${args.error}`);
+  console.error(INSTALL_USAGE);
+  process.exit(1);
+}
 
 // ── Ensure dist/ is built from current source before pointing .mcp.json at it ──
 // .mcp.json points at dist/server.js; a stale dist/ (e.g. after a code pull that
@@ -23,9 +30,10 @@ if (!existsSync(resolve(PACKAGE_DIR, 'node_modules'))) {
 }
 console.log('Building dist/ from current source...');
 execFileSync('npm', ['run', 'build'], { cwd: PACKAGE_DIR, stdio: 'inherit', shell: process.platform === 'win32' });
+console.log('Rebuilt dist/ from current source.');
 
 // ── per-project: write .mcp.json ───────────────────────────────────────────────
-const projectDir = resolve(process.argv[2] ?? process.cwd());
+const projectDir = resolve(args.projectDir ?? process.cwd());
 const mcpFile = resolve(projectDir, '.mcp.json');
 
 const entry: McpEntry = {
@@ -54,7 +62,7 @@ if (existsSync(mcpFile)) {
 const existingEntry = config.mcpServers['task-manager'];
 
 if (existingEntry && !isStaleEntry(existingEntry)) {
-  console.log(`task-manager is already registered in ${mcpFile} — .mcp.json left unchanged.`);
+  console.log(`task-manager is already registered in ${mcpFile} — .mcp.json left unchanged (dist/ was rebuilt above).`);
 } else {
   const action = existingEntry ? 'Refreshed' : 'Registered';
   config.mcpServers['task-manager'] = entry;
@@ -79,5 +87,5 @@ if (existingEntry && !isStaleEntry(existingEntry)) {
   console.log('');
 }
 
-console.log(`Restart Claude Code to activate.`);
+console.log('Restart open Claude sessions and any standalone UI (pm2 restart <name>) so they run the new build.');
 console.log(`Skills and extended rules: /plugin marketplace add dabalroman/mcp-servers, then /plugin install task-manager@dabalroman`);
