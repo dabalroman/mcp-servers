@@ -44,7 +44,7 @@ if (store.adoptDefaultProject(project)) {
   logToClient('info', `[simple-task-manager] Adopted the "default" project as "${project}"`);
 }
 
-registerTools(server, store, { project });
+registerTools(server, store, { project, transport: 'stdio' });
 
 // ── task-manager-ui spawn ────────────────────────────────────────────────────
 // UI child state and spawn logic live in mcp/uiChild.ts to break the circular

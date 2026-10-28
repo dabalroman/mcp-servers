@@ -80,7 +80,7 @@ export async function handleGetProjects(store: Store, ctx: SessionContext): Prom
 
 // ── health ─────────────────────────────────────────────────────────────────────
 
-type CheckResult = { symbol: '✓' | '⚠' | '✗'; line: string };
+type CheckResult = { symbol: '✓' | '⚠' | '✗' | '–'; line: string };
 
 function check(symbol: CheckResult['symbol'], line: string): CheckResult {
   return { symbol, line };
@@ -227,22 +227,11 @@ function pluginChecks(homeDir: string): CheckResult[] {
   return results;
 }
 
-export async function handleHealth(binding?: { store: Store; ctx: SessionContext }, opts: { homeDir?: string } = {}): Promise<MCPContent> {
-  const sections: string[] = [];
-
-  if (binding) {
-    const { project } = binding.ctx;
-    sections.push(renderSection('Project', [binding.store.hasProject(project)
-      ? check('✓', `Bound project = ${project} (exists)`)
-      : check('✗', `Bound project = ${project} — does not exist; create it with createProject or in the task-manager UI, or fix PROJECT_NAME`)]));
-  }
-
-  // ── Config section ───────────────────────────────────────────────────────────
-  // Values come from the env this process actually got, so user/local-scope
-  // bindings (`claude mcp add`, no .mcp.json) report correctly. .mcp.json is
-  // only scanned for legacy/unknown keys when one is found above the cwd.
+// Values come from the env this process actually got, so user/local-scope
+// bindings (`claude mcp add`, no .mcp.json) report correctly. .mcp.json is
+// only scanned for legacy/unknown keys when one is found above the cwd.
+function configChecksFromEnv(envValue: (key: string) => string): CheckResult[] {
   const configChecks: CheckResult[] = [];
-  const envValue = (key: string): string => process.env[key] ?? '';
   for (const key of ENV_ORDER) {
     configChecks.push(validateCanonicalEnv(key, envValue(key)));
   }
@@ -274,9 +263,33 @@ export async function handleHealth(binding?: { store: Store; ctx: SessionContext
     }
   }
 
-  sections.push(renderSection('Config (env)', configChecks));
+  return configChecks;
+}
 
-  sections.push(renderSection('Plugin', pluginChecks(opts.homeDir ?? homedir())));
+export async function handleHealth(binding?: { store: Store; ctx: SessionContext }, opts: { homeDir?: string } = {}): Promise<MCPContent> {
+  const sections: string[] = [];
+
+  const http = binding?.ctx.transport === 'http';
+  if (binding) {
+    const { project } = binding.ctx;
+    const fix = http ? 'the X-Project header' : 'PROJECT_NAME';
+    sections.push(renderSection('Project', [
+      check('✓', http ? 'Transport = http (project from X-Project header)' : 'Transport = stdio'),
+      binding.store.hasProject(project)
+        ? check('✓', `Bound project = ${project} (exists)`)
+        : check('✗', `Bound project = ${project} — does not exist; create it with createProject or in the task-manager UI, or fix ${fix}`),
+    ]));
+  }
+
+  const envValue = (key: string): string => process.env[key] ?? '';
+  if (http) {
+    // process.env is the UI server process's env, not the client's, and
+    // ~/.claude would be the server host's.
+    sections.push(renderSection('Config (env) · Plugin', [check('–', 'skipped over HTTP: these describe a stdio server\'s env and the client machine; run health from a stdio session to check them')]));
+  } else {
+    sections.push(renderSection('Config (env)', configChecksFromEnv(envValue)));
+    sections.push(renderSection('Plugin', pluginChecks(opts.homeDir ?? homedir())));
+  }
 
   const uiModeRaw = envValue('TASK_UI_MODE');
   const uiPort = envValue('TASK_UI_PORT');
@@ -393,6 +406,6 @@ function buildOutput(sections: string[], ui?: 'standalone' | 'disabled' | 'bundl
   return text({
     report,
     ui: ui ?? resolveUiModeFromProcess(),
-    displayInstruction: 'Present this health report to the user as a markdown table with three columns: Status (✓/⚠/✗), Category (Project / Config / Plugin / Runtime / Version), and Message. Each indented check line is one table row.',
+    displayInstruction: 'Present this health report to the user as a markdown table with three columns: Status (✓/⚠/✗/–), Category (Project / Config / Plugin / Runtime / Version), and Message. Each indented check line is one table row.',
   });
 }

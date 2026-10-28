@@ -1705,6 +1705,8 @@ describe('project binding', () => {
   test('health reports the bound project', async () => {
     const ok = decode(await handleHealth({ store, ctx: CTX })) as { report: string };
     assert.match(ok.report, /✓ Bound project = default \(exists\)/);
+    assert.match(ok.report, /Transport = stdio/);
+    assert.match(ok.report, /Config \(env\)\n/);
     const bad = decode(await handleHealth({ store, ctx: { project: 'unbound' } })) as { report: string };
     assert.match(bad.report, /✗ Bound project = unbound — does not exist/);
   });

@@ -14,6 +14,8 @@ How to move a local clone to a newer version without losing data or quietly losi
 
 **Sessions on old code.** Once a newer build has migrated the database, an older process (from the version that added backups onward) refuses to write. Reads still work and carry a "rebuild and restart" warning. Restart the session, or `pm2 restart` the UI.
 
+**Sessions on HTTP.** A session connected over `type: http` runs the UI process's code, so step 4's `pm2 restart` updates it; it doesn't need a session restart.
+
 **pm2 keeps the old env.** `pm2 restart <name>` reuses the env from the first start, so a changed key in `ecosystem.task-ui.config.cjs` (e.g. `TASKS_DB`) is silently ignored. Use `pm2 restart <file> --update-env`, or `pm2 delete <name>` and `pm2 start <file>`.
 
 ## Version notes

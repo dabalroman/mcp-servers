@@ -5,6 +5,8 @@ import { mountTaskApi } from './src/server/taskRouter.js';
 import { VERSION } from '../version.js';
 import { checkForUpdate } from '../updateCheck.js';
 import { PACKAGE_DIR } from '../packageDir.js';
+import { createStore } from '../tasks.js';
+import { createMcpHttpHandler } from '../mcp/http.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const dist = path.join(__dirname, 'dist');
@@ -21,11 +23,20 @@ const TASK_UI_MODE: 'bundled' | 'standalone' | 'disabled' =
   'bundled';
 
 const app = express();
+
+// MCP over Streamable HTTP, loopback-only. Mounted before the global parser,
+// whose 100 kB limit a long plan exceeds; the handler reads the body itself.
+// Its own store connection, so the UI's data_version poll sees MCP writes as
+// foreign and pushes SSE.
+const mcpStore = createStore(TASKS_DB);
+const handleMcp = createMcpHttpHandler({ store: mcpStore, port });
+app.all('/mcp', (req, res) => { void handleMcp(req, res); });
+
 app.use(express.json());
 
 const { dispose } = mountTaskApi(app, { dbPath: TASKS_DB });
-process.once('SIGTERM', () => { try { dispose(); } catch { /* ignore */ } process.exit(0); });
-process.once('SIGINT',  () => { try { dispose(); } catch { /* ignore */ } process.exit(0); });
+process.once('SIGTERM', () => { try { dispose(); } catch { /* ignore */ } try { mcpStore.close(); } catch { /* ignore */ } process.exit(0); });
+process.once('SIGINT',  () => { try { dispose(); } catch { /* ignore */ } try { mcpStore.close(); } catch { /* ignore */ } process.exit(0); });
 
 // Surface a few server-side env values to the client. The static dist HTML is
 // built once and served as-is; this endpoint is how the SPA learns the current

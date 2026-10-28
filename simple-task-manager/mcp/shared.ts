@@ -47,9 +47,9 @@ export function toListTask<T extends Task>(task: T): Omit<T, ListOmit> | Omit<T,
   return rest as Omit<T, ListOmit | 'description'>;
 }
 
-// Per-connection state. stdio has one per process; #361's HTTP transport will
-// build one per session.
-export type SessionContext = { project: string };
+// Per-connection state. stdio has one per process; HTTP builds one per request
+// from X-Project. transport absent = stdio.
+export type SessionContext = { project: string; transport?: 'stdio' | 'http' };
 
 // Explicit `project` arg wins over the session's bound project. Unknown names
 // are an error, never auto-created.
@@ -57,7 +57,8 @@ export function resolveProject(store: Store, ctx: SessionContext, argProject?: s
   const explicit = argProject?.trim();
   const name = explicit || ctx.project;
   if (store.hasProject(name)) return name;
-  const hint = explicit ? '' : ' This is the session\'s bound project (PROJECT_NAME); pass `project` to use another one.';
+  const source = ctx.transport === 'http' ? 'X-Project header' : 'PROJECT_NAME';
+  const hint = explicit ? '' : ` This is the session's bound project (${source}); pass \`project\` to use another one.`;
   return errorText({ error: `${capitalise(unknownProjectMessage(name))}${hint}` });
 }
 

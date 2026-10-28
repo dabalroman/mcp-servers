@@ -253,6 +253,21 @@ One UI serves every project in its database, and its project tabs show which one
 
 Repos with separate databases need separate UIs: give them distinct `TASK_UI_PORT` values, and each gets its own pm2 app (`task-manager-<port>`).
 
+### Shared server over HTTP (local)
+
+Every UI process, bundled or standalone, also serves the MCP itself at `/mcp` (Streamable HTTP). With a standalone UI running, sessions can connect to it instead of each starting their own stdio server:
+
+```sh
+# from the repo, once per repo
+claude mcp add --transport http task-manager http://localhost:7374/mcp --header "X-Project: <project>" --scope local
+```
+
+- The `X-Project` header binds the connection to a project, just as `PROJECT_NAME` does over stdio. Without it, every request is rejected with an error naming the header. An unknown project gives the same error as an unknown `PROJECT_NAME`.
+- `/mcp` only accepts connections from the same machine (loopback) until API keys are supported.
+- The server is stateless, so `pm2 restart task-manager` doesn't break connected sessions; the next tool call just works.
+- `ui-start` / `ui-stop` aren't offered over HTTP: the server is the UI.
+- `health` over HTTP reports `Transport = http` and skips the Config and Plugin sections, which describe a stdio server's env and the client machine. Run it from a stdio session to check those.
+
 
 &nbsp;
 &nbsp;

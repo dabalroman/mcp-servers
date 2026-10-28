@@ -305,6 +305,9 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof deleteSchema>>): Promise<MCPContent> => handleDelete(store, args))
   );
 
+  // Over HTTP this process is the UI itself; pm2/child answers would mislead.
+  if (ctx.transport === 'http') return;
+
   // ── ui-start ──────────────────────────────────────────────────────────────────
   server.tool(
     'ui-start',
