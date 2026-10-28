@@ -87,5 +87,5 @@ if (existingEntry && !isStaleEntry(existingEntry)) {
   console.log('');
 }
 
-console.log('Restart open Claude sessions and any standalone UI (pm2 restart <name>) so they run the new build.');
+console.log('Restart open Claude sessions and any standalone UI (pm2 restart task-manager) so they run the new build.');
 console.log(`Skills and extended rules: /plugin marketplace add dabalroman/mcp-servers, then /plugin install task-manager@dabalroman`);

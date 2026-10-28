@@ -1203,7 +1203,7 @@ describe('ui-start / ui-stop — TASK_UI_MODE', () => {
     assert.ok(resp.isError, 'should be an error');
     const msg = (decode(resp) as { error: string }).error;
     assert.ok(msg.includes('standalone'), 'error should mention standalone mode');
-    assert.ok(msg.includes('pm2 restart my-project'), 'error should include the pm2 hint with the PROJECT_NAME');
+    assert.ok(msg.includes('pm2 restart task-manager'), 'the pm2 name is fixed, not PROJECT_NAME');
   });
 
   test('ui-start returns an error explaining disabled when mode=disabled', async () => {
@@ -1222,7 +1222,7 @@ describe('ui-start / ui-stop — TASK_UI_MODE', () => {
     assert.ok(resp.isError, 'should be an error');
     const msg = (decode(resp) as { error: string }).error;
     assert.ok(msg.includes('standalone'));
-    assert.ok(msg.includes('pm2 stop my-project'));
+    assert.ok(msg.includes('pm2 stop task-manager'));
   });
 });
 

@@ -381,6 +381,8 @@ describe('add-projects migration', () => {
   test('keeps the AUTOINCREMENT high-water mark, so a deleted top id is not reused', () => {
     seedPreProjectsDb();
     const store = createStore(dbPath);
+    // A JS number bound as-is is stored as REAL until the next insert rewrites it.
+    assert.deepEqual(store.db.prepare("SELECT seq, typeof(seq) AS type FROM sqlite_sequence WHERE name = 'tasks'").get(), { seq: 3, type: 'integer' });
     const { id } = store.add({ project: 'default', type: 'bug', priority: 'low', title: 'New' });
     store.close();
     assert.equal(id, 4);

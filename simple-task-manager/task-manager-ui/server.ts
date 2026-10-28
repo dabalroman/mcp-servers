@@ -19,7 +19,6 @@ const TASK_UI_MODE: 'bundled' | 'standalone' | 'disabled' =
   RAW_MODE === 'standalone' ? 'standalone' :
   RAW_MODE === 'disabled' ? 'disabled' :
   'bundled';
-const PROJECT_NAME = process.env.PROJECT_NAME ?? null;
 
 const app = express();
 app.use(express.json());
@@ -29,8 +28,9 @@ process.once('SIGTERM', () => { try { dispose(); } catch { /* ignore */ } proces
 process.once('SIGINT',  () => { try { dispose(); } catch { /* ignore */ } process.exit(0); });
 
 // Surface a few server-side env values to the client. The static dist HTML is
-// built once and served as-is; this endpoint is how the SPA learns the project
-// name and the current run mode so it can render the header pill + mode label.
+// built once and served as-is; this endpoint is how the SPA learns the current
+// run mode so it can render the mode label. No project name: one UI serves every
+// project on the DB, and the tabs already show the active one.
 // Deliberately does not expose TASKS_DB — the absolute path leaks the host
 // username + directory layout to any client that can reach the endpoint,
 // which is auth-less. The client doesn't need it for rendering.
@@ -40,7 +40,7 @@ void checkForUpdate();
 
 app.get('/api/config', async (_req, res) => {
   const { state, remote } = await checkForUpdate();
-  res.json({ name: PROJECT_NAME, mode: TASK_UI_MODE, version: VERSION, packageDir: PACKAGE_DIR, update: { state, remote } });
+  res.json({ mode: TASK_UI_MODE, version: VERSION, packageDir: PACKAGE_DIR, update: { state, remote } });
 });
 
 app.use(express.static(dist, { index: 'index.html', maxAge: '1h' }));

@@ -204,7 +204,7 @@ All of these are written to `.mcp.json` by `install.ts` with the defaults below 
 | Variable | Default | Effect |
 |---|---|---|
 | `TASKS_DB` | `<project>/tasks.db` | Path to the SQLite database. Forwarded to the UI so both processes open the same file. |
-| `PROJECT_NAME` | project dir name | The [project](#projects--one-database-many-repos) this repo's sessions work in; unset means `default`. Also the big pill in the UI header, the browser tab title (`<name> · tasks`), and the pm2 process name in `standalone` mode. |
+| `PROJECT_NAME` | project dir name | The [project](#projects--one-database-many-repos) this repo's sessions work in; unset means `default`. |
 | `TASK_UI_PORT` | `7374` | HTTP port the UI binds to. |
 | `TASK_UI_MODE` | `bundled` | How the UI runs. One of `bundled`, `standalone`, `disabled` — see below. |
 | `TASK_UI_AUTO_OPEN_IN_BROWSER` | `0` | Set to `1` to open the UI in the system browser on startup. |
@@ -231,10 +231,13 @@ npx tsx <dir>/simple-task-manager/setup-standalone.ts on
 The script will:
 
 1. Set `TASK_UI_MODE=standalone` in `.mcp.json` and ensure `PROJECT_NAME` + `TASK_UI_PORT` are populated (defaults: project dir name, `7374`).
-2. Generate `<project>/ecosystem.task-ui.config.cjs` (a pm2 config file). The filename must include `.config.` — that's how pm2 recognises it as a config file rather than a script.
-3. Run `pm2 start ./ecosystem.task-ui.config.cjs && pm2 save` so the UI process restarts on boot (assuming `pm2 startup` is configured).
+2. If another repo already runs a task-manager UI on that port, join it and stop here (see [Sharing one UI](#sharing-one-ui-across-repos)).
+3. Otherwise generate `<project>/ecosystem.task-ui.config.cjs` (a pm2 config file). The filename must include `.config.` — that's how pm2 recognises it as a config file rather than a script.
+4. Run `pm2 start ./ecosystem.task-ui.config.cjs && pm2 save` so the UI process restarts on boot (assuming `pm2 startup` is configured). The pm2 app is called `task-manager` (`task-manager-<port>` on a port other than `7374`).
 
-Restart Claude Code afterwards. The MCP sees `TASK_UI_MODE=standalone` and skips spawning its own UI child; the `ui-start` / `ui-stop` MCP tools point you at `pm2 restart <PROJECT_NAME>` instead.
+Restart Claude Code afterwards. The MCP sees `TASK_UI_MODE=standalone` and skips spawning its own UI child; the `ui-start` / `ui-stop` MCP tools point you at `pm2 restart task-manager` instead.
+
+**Changing the env.** `pm2 restart task-manager` keeps the env the app was first started with, so an edited ecosystem file is silently ignored. After any env change run `pm2 restart ./ecosystem.task-ui.config.cjs --update-env` (or `pm2 delete task-manager` and `pm2 start ./ecosystem.task-ui.config.cjs`). Re-running `setup-standalone.ts on` does this for you.
 
 To turn it off:
 
@@ -242,9 +245,13 @@ To turn it off:
 npx tsx <dir>/simple-task-manager/setup-standalone.ts off
 ```
 
-That deletes the pm2 process, removes the ecosystem file, sets `TASK_UI_MODE=bundled`, and (after a Claude restart) the MCP resumes spawning the UI.
+That sets `TASK_UI_MODE=bundled`. In the repo that owns the UI (the one holding the ecosystem file) it also deletes the pm2 app and the file; in a repo that joined, the shared UI keeps running.
 
-Two projects can each have their own standalone UI in parallel — give them distinct `PROJECT_NAME` and distinct `TASK_UI_PORT` values in their respective `.mcp.json` files.
+#### Sharing one UI across repos
+
+One UI serves every project in its database, and its project tabs show which one you're on. So repos that share a `TASKS_DB` share one standalone UI too: give them the same `TASK_UI_PORT` and run `setup-standalone.ts on` in each. The first repo owns the UI; the others find it on the port and only update their own `.mcp.json`.
+
+Repos with separate databases need separate UIs: give them distinct `TASK_UI_PORT` values, and each gets its own pm2 app (`task-manager-<port>`).
 
 
 &nbsp;

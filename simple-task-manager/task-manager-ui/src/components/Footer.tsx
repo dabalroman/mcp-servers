@@ -5,28 +5,20 @@ type RunMode = 'bundled' | 'standalone' | 'disabled';
 type FooterProps = {
   version: string | null;
   repoUrl: string;
-  projectName: string | null;
   mode: RunMode | null;
 };
 
-export default function Footer({ version, repoUrl, projectName, mode }: FooterProps) {
+export default function Footer({ version, repoUrl, mode }: FooterProps) {
   return (
     <footer className="mt-8 border-t border-border bg-card">
       <div className="max-w-[1080px] mx-auto px-8 py-5 flex items-center justify-between gap-6">
         <span className="font-bold uppercase tracking-widest text-lg text-foreground">
           task<span className="text-primary">/</span>manager
         </span>
-        {projectName && (
-          <div className="flex flex-col items-end gap-1">
-            <span className="font-bold uppercase tracking-widest text-lg text-foreground">
-              {projectName}
-            </span>
-            {mode && (
-              <span className="text-xs tracking-widest uppercase text-muted-foreground">
-                {mode} mode
-              </span>
-            )}
-          </div>
+        {mode && (
+          <span className="text-xs tracking-widest uppercase text-muted-foreground">
+            {mode} mode
+          </span>
         )}
       </div>
       <div className="max-w-[1080px] mx-auto px-8 pb-6 flex items-center justify-between gap-4 text-2xs tracking-widest text-muted-foreground uppercase border-t border-border/50 pt-4">

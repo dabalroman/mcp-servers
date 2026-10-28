@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
+import { pm2AppName } from '../lib/pm2';
 import {
   Dialog,
   DialogContent,
@@ -14,11 +15,10 @@ type UpdateAvailableBadgeProps = {
   localVersion: string | null;
   remoteVersion: string;
   mode: RunMode | null;
-  projectName: string | null;
   packageDir: string | null;
 };
 
-export default function UpdateAvailableBadge({ localVersion, remoteVersion, mode, projectName, packageDir }: UpdateAvailableBadgeProps) {
+export default function UpdateAvailableBadge({ localVersion, remoteVersion, mode, packageDir }: UpdateAvailableBadgeProps) {
   const [open, setOpen] = useState(false);
 
   const restartNote = mode === 'bundled' ? ' (this also restarts the UI)' : '';
@@ -29,7 +29,7 @@ export default function UpdateAvailableBadge({ localVersion, remoteVersion, mode
     `Restart Claude Code${restartNote}`,
   ];
   if (mode === 'standalone') {
-    steps.push(`Standalone mode: pm2 restart ${projectName ?? '<PROJECT_NAME>'}`);
+    steps.push(`Standalone mode: pm2 restart ${pm2AppName()}`);
   }
 
   return (

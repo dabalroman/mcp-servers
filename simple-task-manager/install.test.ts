@@ -5,7 +5,7 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  isStaleEntry, serializeMcpConfig, parseMcpConfig, parseInstallArgs,
+  isStaleEntry, serializeMcpConfig, parseMcpConfig, parseInstallArgs, pm2AppName,
   type McpConfig, type McpEntry
 } from './mcpConfig.js';
 
@@ -106,6 +106,17 @@ describe('isStaleEntry — rewrite path detection', () => {
   test('returns false for empty args', () => {
     const e: McpEntry = { command: 'node', args: [] };
     assert.equal(isStaleEntry(e), false);
+  });
+});
+
+describe('pm2AppName', () => {
+  test('is task-manager on the default port, whatever the repo', () => {
+    assert.equal(pm2AppName(undefined), 'task-manager');
+    assert.equal(pm2AppName('7374'), 'task-manager');
+  });
+
+  test('carries the port otherwise, so two UIs on two ports never share a name', () => {
+    assert.equal(pm2AppName('7380'), 'task-manager-7380');
   });
 });
 

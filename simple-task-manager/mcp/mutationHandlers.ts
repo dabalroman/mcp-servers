@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { text, errorText, notFoundError, probeTcp, resolveProject, type MCPContent, type SessionContext } from './shared.js';
 import type { AddInput, Store, TaskStatus, UpdatePatch } from '../tasks.js';
 import { checkPlanPath, defaultPlanRoots } from './planPath.js';
+import { pm2AppName } from '../mcpConfig.js';
 import { uiPkgDir, uiServerEntry, getUiChild, setUiChild, spawnUi } from './uiChild.js';
 
 const UI_PORT = parseInt(process.env['TASK_UI_PORT'] ?? '7374', 10);
@@ -138,8 +139,7 @@ export function handleDelete(store: Store, { id }: { id: number }): MCPContent {
 export async function handleUiStart(): Promise<MCPContent> {
   const uiMode = process.env['TASK_UI_MODE'] ?? 'bundled';
   if (uiMode === 'standalone') {
-    const name = process.env['PROJECT_NAME'] ?? '<PROJECT_NAME>';
-    return errorText({ error: `UI is pm2-managed (TASK_UI_MODE=standalone). Use \`pm2 restart ${name}\` to control it.` });
+    return errorText({ error: `UI is pm2-managed (TASK_UI_MODE=standalone). Use \`pm2 restart ${pm2AppName(process.env['TASK_UI_PORT'])}\` to control it.` });
   }
   if (uiMode === 'disabled') {
     return errorText({ error: 'TASK_UI_MODE=disabled — UI is intentionally off. Set TASK_UI_MODE=bundled in .mcp.json and restart the MCP to enable it.' });
@@ -165,8 +165,7 @@ export async function handleUiStart(): Promise<MCPContent> {
 
 export async function handleUiStop(): Promise<MCPContent> {
   if (process.env['TASK_UI_MODE'] === 'standalone') {
-    const name = process.env['PROJECT_NAME'] ?? '<PROJECT_NAME>';
-    return errorText({ error: `UI is pm2-managed (TASK_UI_MODE=standalone). Use \`pm2 stop ${name}\` to control it.` });
+    return errorText({ error: `UI is pm2-managed (TASK_UI_MODE=standalone). Use \`pm2 stop ${pm2AppName(process.env['TASK_UI_PORT'])}\` to control it.` });
   }
   const running = await probeTcp(UI_PORT, 1000);
   if (!running) {

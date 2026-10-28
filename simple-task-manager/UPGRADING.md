@@ -4,17 +4,25 @@ How to move a local clone to a newer version without losing data or quietly losi
 
 ## Every upgrade
 
-1. **Stop the standalone UIs** (`pm2 stop <name>`). A running UI applies new migrations as soon as it restarts on the new code.
+1. **Stop the standalone UIs** (`pm2 stop task-manager`). A running UI applies new migrations as soon as it restarts on the new code.
 2. `git -C <dir> pull`
 3. Run `npx tsx <dir>/simple-task-manager/install.ts` in each bound repo. It rebuilds `dist/`, which is what the MCP runs. An already-registered `.mcp.json` is left as it is.
-4. Start the UIs again (`pm2 restart <name>`), and restart every open Claude Code session.
+4. Start the UIs again (`pm2 restart task-manager`), and restart every open Claude Code session. If the ecosystem file's env changed, add `--update-env` (see below).
 5. Run the `health` tool. Every line should be ✓.
 
 **Backups are automatic.** Whichever process applies a migration first (an MCP or a UI) copies the database next to itself as `<db>.backup-<YYYYMMDD-HHMMSS>-pre-<migration>` and logs the path to stderr. Backups are never deleted automatically. If you want an extra copy before pulling, run `sqlite3 <db> ".backup <db>.bak-<date>"`.
 
 **Sessions on old code.** Once a newer build has migrated the database, an older process (from the version that added backups onward) refuses to write. Reads still work and carry a "rebuild and restart" warning. Restart the session, or `pm2 restart` the UI.
 
+**pm2 keeps the old env.** `pm2 restart <name>` reuses the env from the first start, so a changed key in `ecosystem.task-ui.config.cjs` (e.g. `TASKS_DB`) is silently ignored. Use `pm2 restart <file> --update-env`, or `pm2 delete <name>` and `pm2 start <file>`.
+
 ## Version notes
+
+### Shared standalone UI (2026-10-028)
+
+- The standalone UI's pm2 app is now `task-manager` (`task-manager-<port>` on a non-default port), not the repo's `PROJECT_NAME`, and the UI no longer shows a project label: its tabs do that.
+- Re-run `npx tsx <dir>/simple-task-manager/setup-standalone.ts on` once in the repo that holds `ecosystem.task-ui.config.cjs`. It replaces the old per-repo app with the new name.
+- Other repos on the same DB can now run `setup-standalone.ts on` too: they join the UI already on the port instead of starting a second one.
 
 ### Projects (2026-10-025)
 

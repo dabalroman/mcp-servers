@@ -6,7 +6,7 @@ import { networkInterfaces, homedir } from 'node:os';
 import Database from 'better-sqlite3';
 import { text, toListTask, notFoundError, resolveProject, type MCPContent, type SessionContext } from './shared.js';
 import { ALL_TYPES, staleSchemaMessage } from '../tasks.js';
-import { ENV_ORDER, LEGACY_ENV_KEYS } from '../mcpConfig.js';
+import { ENV_ORDER, LEGACY_ENV_KEYS, pm2AppName } from '../mcpConfig.js';
 import { PACKAGE_DIR } from '../packageDir.js';
 import { checkForUpdate } from '../updateCheck.js';
 import type { Store, Task, TaskType, StatusFilter } from '../tasks.js';
@@ -279,7 +279,6 @@ export async function handleHealth(binding?: { store: Store; ctx: SessionContext
   sections.push(renderSection('Plugin', pluginChecks(opts.homeDir ?? homedir())));
 
   const uiModeRaw = envValue('TASK_UI_MODE');
-  const projectName = envValue('PROJECT_NAME');
   const uiPort = envValue('TASK_UI_PORT');
   const tasksDb = envValue('TASKS_DB');
 
@@ -295,7 +294,7 @@ export async function handleHealth(binding?: { store: Store; ctx: SessionContext
   const displayUrl = `http://${getLanIp()}:${resolvedPort}/`;
 
   const notReachableHint = uiMode === 'standalone'
-    ? `is the standalone pm2 process running? Try \`pm2 status ${projectName || '<PROJECT_NAME>'}\``
+    ? `is the standalone pm2 process running? Try \`pm2 status ${pm2AppName(uiPort)}\``
     : uiMode === 'disabled'
     ? 'TASK_UI_MODE=disabled — set it to "bundled" and restart the MCP'
     : 'is the MCP running?';
@@ -358,12 +357,12 @@ export async function handleHealth(binding?: { store: Store; ctx: SessionContext
   sections.push(renderSection('Runtime', runtimeChecks));
 
   // ── Version section ──────────────────────────────────────────────────────────
-  sections.push(renderSection('Version', [await buildVersionCheck(uiMode, projectName)]));
+  sections.push(renderSection('Version', [await buildVersionCheck(uiMode, uiPort)]));
 
   return buildOutput(sections, uiMode);
 }
 
-async function buildVersionCheck(uiMode: 'standalone' | 'disabled' | 'bundled', projectName: string): Promise<CheckResult> {
+async function buildVersionCheck(uiMode: 'standalone' | 'disabled' | 'bundled', uiPort: string): Promise<CheckResult> {
   const update = await checkForUpdate();
   if (update.state === 'current') {
     return check('✓', `Version v${update.local} is up to date`);
@@ -376,7 +375,7 @@ async function buildVersionCheck(uiMode: 'standalone' | 'disabled' | 'bundled', 
     `npx tsx ${resolve(PACKAGE_DIR, 'install.ts')} in each project`,
     'restart Claude Code',
   ];
-  if (uiMode === 'standalone') steps.push(`pm2 restart ${projectName || '<PROJECT_NAME>'}`);
+  if (uiMode === 'standalone') steps.push(`pm2 restart ${pm2AppName(uiPort)}`);
   return check('⚠', `Update available: v${update.remote} (local v${update.local}) — ${steps.join('; ')}`);
 }
 

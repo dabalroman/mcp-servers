@@ -8,6 +8,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from './ui/dialog';
+import { pm2AppName } from '../lib/pm2';
 
 type RunMode = 'bundled' | 'standalone' | 'disabled';
 
@@ -24,7 +25,7 @@ const modes = (packageDir: string | null): ModeBlock[] => [
   {
     mode: 'bundled',
     label: 'Bundled',
-    description: 'Default. The MCP spawns the UI as a child process; the UI dies with the MCP.',
+    description: 'Default. The MCP spawns the UI as a child process; the UI dies with the MCP. Leaving standalone: the repo that started the shared UI also deletes its pm2 app; any other repo just stops using it.',
     switchLabel: 'Switch to this mode:',
     commands: [
       {
@@ -36,7 +37,7 @@ const modes = (packageDir: string | null): ModeBlock[] => [
   {
     mode: 'standalone',
     label: 'Standalone',
-    description: 'The UI runs as a long-lived pm2 process, independent of the MCP. Survives MCP restarts.',
+    description: `The UI runs as the long-lived pm2 app "${pm2AppName()}", independent of the MCP, and survives MCP restarts. One UI serves every repo on the same database and port: the first repo to switch starts it, later repos join it.`,
     switchLabel: 'Switch to this mode:',
     commands: [
       {
@@ -53,7 +54,7 @@ const modes = (packageDir: string | null): ModeBlock[] => [
     commands: [
       { text: '1. Set TASK_UI_MODE to "disabled" in .mcp.json:', copyable: false },
       { text: '"TASK_UI_MODE": "disabled"', copyable: true },
-      { text: '2. Restart Claude Code to apply.', copyable: false },
+      { text: '2. Restart Claude Code.', copyable: false },
     ],
   },
 ];
@@ -126,7 +127,7 @@ export default function ModeExplainer({ currentMode, packageDir }: { currentMode
           <DialogHeader>
             <DialogTitle className="text-sm tracking-widest uppercase">UI run mode</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Three modes control how the task-manager UI process is managed.
+              Three modes control how the task-manager UI process is managed. Run the commands in the repo directory (where .mcp.json lives), then restart Claude Code.
             </DialogDescription>
           </DialogHeader>
 

@@ -56,6 +56,6 @@ export function up(db: DB): void {
   if (seq) {
     const now = db.prepare(`SELECT seq FROM sqlite_sequence WHERE name = 'tasks'`).get() as { seq: number } | undefined;
     db.prepare(`DELETE FROM sqlite_sequence WHERE name = 'tasks'`).run();
-    db.prepare(`INSERT INTO sqlite_sequence (name, seq) VALUES ('tasks', ?)`).run(Math.max(seq.seq, now?.seq ?? 0));
+    db.prepare(`INSERT INTO sqlite_sequence (name, seq) VALUES ('tasks', CAST(? AS INTEGER))`).run(Math.max(seq.seq, now?.seq ?? 0));
   }
 }

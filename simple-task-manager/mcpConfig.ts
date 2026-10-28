@@ -9,6 +9,15 @@
 import { resolve } from 'node:path';
 import { PACKAGE_DIR } from './packageDir.js';
 
+/**
+ * The standalone UI's pm2 app. One UI serves every project on its DB, so the name
+ * follows the port (one UI per port), not the repo: `task-manager` on the default
+ * port, `task-manager-<port>` otherwise.
+ */
+export function pm2AppName(port: string | undefined): string {
+  return !port || port === '7374' ? 'task-manager' : `task-manager-${port}`;
+}
+
 export type McpEntry = {
   command: string;
   args: string[];
@@ -27,9 +36,7 @@ export const ENV_DOCS: Record<string, string[]> = {
   PROJECT_NAME: [
     'The project this repo\'s MCP sessions are bound to: list tools and add',
     'default to it. Unset means "default". A DB that only holds the "default"',
-    'project adopts this name on the first MCP start. Also the UI header label,',
-    'browser tab title and, in standalone mode, the pm2 process name, so it',
-    'must be unique across your pm2 process list.',
+    'project adopts this name on the first MCP start.',
   ],
   TASK_UI_PORT: [
     'HTTP port the UI binds to. Default 7374.',
