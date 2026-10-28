@@ -93,7 +93,7 @@ function validateCanonicalEnv(key: string, raw: string): CheckResult {
     case 'PROJECT_NAME':
       return raw
         ? check('✓', `PROJECT_NAME = ${raw}`)
-        : check('✗', 'PROJECT_NAME missing or empty — sessions bind to the "default" project and the UI header + tab title will be empty');
+        : check('✗', 'PROJECT_NAME missing or empty — sessions bind to the "default" project');
     case 'TASK_UI_PORT': {
       const n = Number(raw);
       if (raw && Number.isInteger(n) && n >= 1 && n <= 65535) {
