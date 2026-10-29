@@ -36,7 +36,7 @@ Claude Code cuts MCP server instructions at 4,096 chars and SessionStart hook ou
 
 The package is **TypeScript** (strict mode, `noUncheckedIndexedAccess`). Source `.ts` files live at the package root; production runs from `dist/` (built by `tsc`).
 
-After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.ts`, `install.ts`, `plugin/` (skills, RULES.md, hook), or `CLAUDE.md` — review `simple-task-manager/README.md` and update it to reflect the change. The README is the user-facing source of truth; keep it in sync.
+After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.ts`, `install.ts`, `plugin/` (skills, RULES.md, hook), or `CLAUDE.md` — review `simple-task-manager/README.md` and update it to reflect the change. The README is the user-facing source of truth; keep it in sync, but keep it compact (#374): no per-tool reference tables or restated rules, because the tool descriptions and plugin/RULES.md already reach Claude. Add a line, not a section.
 
 ## File layout
 
