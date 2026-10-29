@@ -14,7 +14,8 @@ A persistent task manager for [Claude Code](https://claude.ai/code), exposed as 
 
 ## Prerequisites
 
-- **Node.js 18 or later** — check with `node --version`.
+- **Node.js 18 or later** — check with `node --version`. Not needed on a machine that only connects
+  to a server in [client mode](#client-mode-connect-to-the-server-over-http).
 - **Claude Code** — the CLI.
 
 > [!warning]
@@ -240,11 +241,28 @@ apply to every machine, including the one running the server.
    `install.ts --server off` in the same directory stops it and removes the file. To change the
    DB or port, re-run `--server on` with the new values: a plain `pm2 restart task-manager` keeps
    the env the app was first started with.
-2. To reach it from other machines, put an HTTPS reverse proxy in front of it (for example
-   `tailscale serve`). The app itself speaks plain HTTP. **Expose `/mcp` only**: the UI and its
-   `/api` have no login, and anyone who can open the UI can create keys.
+2. To reach it from other machines, put an HTTPS reverse proxy in front of it. The app itself
+   speaks plain HTTP. **Expose `/mcp` only**: the UI and its `/api` have no login, and anyone who
+   can open the UI can create keys. With [Tailscale](https://tailscale.com), which issues the
+   certificate for you, pick a port not already served (`tailscale serve status`) and run:
+
+   ```sh
+   sudo tailscale serve --bg --https=<port> --set-path=/mcp http://127.0.0.1:7374/mcp
+   ```
+
+   The URL for other machines is then `https://<tailnet-host>:<port>/mcp`, reachable from tailnet
+   peers only. Check it from another machine with `curl -i https://<tailnet-host>:<port>/mcp`:
+   `401 Unauthorized` means the proxy and server work, and `/` on that port should give `404`. Any
+   other reverse proxy works the same way, as long as it forwards only `/mcp`.
+
+   Plain `http://<host>:7374/mcp` on your LAN also works without a proxy, but it sends the key in
+   cleartext, so use it only on a network you trust.
 
 **For each repo you want connected (on any machine, the server machine included):**
+
+A machine that only connects needs Claude Code and the plugin ([Step 1](#step-1--install-the-plugin-once-per-machine)),
+but no clone, Node or build. This works on Windows too: the single-quoted line below works as-is in
+both bash and PowerShell.
 
 1. Open the UI and click **Connect a machine** in the footer. Enter a label (e.g.
    `laptop / my-repo`), the repo's default project and the server URL as that machine will reach it
@@ -428,6 +446,14 @@ Reconnect the MCP (`/mcp` in Claude Code) and watch the MCP's stderr for one of:
 - `TASK_UI_MODE=… is no longer supported` — the entry carries a removed mode; the message says how to switch to client mode or keep bundled.
 - `failed to spawn task-manager-ui: …` — usually means `node_modules/tsx` is missing in `task-manager-ui/`. Run `npm install` there.
 - Port already in use (the listening line never prints) — set `TASK_UI_PORT` to a free port in the MCP's `.mcp.json` env block.
+
+**Client mode: `task-manager` shows as failed in `/mcp`**  
+Run `curl -i <url>` with the URL from your `claude mcp add` line:
+
+- No answer or a TLS error: the client can't reach the proxy. Check that it's on the same tailnet/network and that the proxy is running (`tailscale serve status` on the server).
+- `401 Unauthorized` with no key is expected. If a session still fails, the key is wrong or revoked: create a new one in **Connect a machine**, then `claude mcp remove task-manager -s local` and run the new line.
+- `404` from the proxy: the proxy path doesn't map to the server's `/mcp`.
+- `502`/`503` from the proxy: the server isn't running. Run `pm2 status` on the server and `install.ts --server on` if the app is missing.
 
 
 &nbsp;
