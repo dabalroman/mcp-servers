@@ -57,7 +57,8 @@ export function spawnUi(): void {
   try {
     const child = spawn(process.execPath, ['--import', 'tsx', uiServerEntry], {
       cwd: uiPkgDir,
-      env: { ...process.env, TASKS_DB: _tasksDb },
+      // TASK_UI_BUNDLED tells the UI it is this MCP's child, not the server.
+      env: { ...process.env, TASKS_DB: _tasksDb, TASK_UI_BUNDLED: '1' },
       stdio: ['ignore', 'pipe', 'pipe'],
       detached: false,
     });

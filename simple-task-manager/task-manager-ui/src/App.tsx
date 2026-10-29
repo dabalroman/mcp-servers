@@ -5,7 +5,7 @@ import Footer from './components/Footer';
 import ModeExplainer from './components/ModeExplainer';
 import UpdateAvailableBadge from './components/UpdateAvailableBadge';
 
-type RunMode = 'bundled' | 'standalone' | 'disabled';
+type RunMode = 'bundled' | 'server';
 type UpdateState = 'available' | 'current' | 'unknown';
 type UpdateInfo = { state: UpdateState; remote: string | null };
 
@@ -27,7 +27,7 @@ export default function App() {
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: Partial<Record<string, unknown>>) => {
         if (cancelled) return;
-        const mode: RunMode = data?.mode === 'standalone' || data?.mode === 'disabled' ? data.mode : 'bundled';
+        const mode: RunMode = data?.mode === 'server' ? 'server' : 'bundled';
         const version = typeof data?.version === 'string' && data.version.length > 0 ? data.version : null;
         const packageDir = typeof data?.packageDir === 'string' && data.packageDir.length > 0 ? data.packageDir : null;
         const rawUpdate = data?.update as Partial<Record<string, unknown>> | undefined;

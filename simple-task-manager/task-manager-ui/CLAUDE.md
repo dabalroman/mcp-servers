@@ -1,6 +1,6 @@
 # task-manager-ui
 
-Standalone web UI for the `simple-task-manager` MCP. Sibling package to `simple-task-manager/`. Spawned as a child process by the MCP server on startup so Claude bringing up the MCP also brings up this UI.
+Web UI (and the HTTP `/mcp` endpoint) for the `simple-task-manager` MCP. Sibling package to `simple-task-manager/`. Runs either as a bundled stdio MCP's child process (the MCP sets `TASK_UI_BUNDLED=1`) or as **the server**, the long-lived pm2 app from `install.ts --server on`.
 
 ## Runtime
 
@@ -35,7 +35,7 @@ Standalone web UI for the `simple-task-manager` MCP. Sibling package to `simple-
 | `TASKS_DB` | `./tasks.db` from cwd | Path to the SQLite database. The MCP forwards its own value when spawning. |
 | `TASK_UI_PORT` | `7374` | HTTP port. |
 | `AUTO_OPEN_TASK_UI` | unset | When `"1"`, open the printed URL in the system browser on startup. |
-| `TASK_UI_DISABLE` | unset | Read by the **MCP**, not this server. When `"1"`, the MCP skips spawning this UI. Useful for tests and for running the UI manually. |
+| `TASK_UI_BUNDLED` | unset | Set to `"1"` by the MCP when it spawns this UI. `/api/config` reports `mode: 'bundled'` then, `'server'` otherwise. Never set it by hand. |
 
 ## Logging convention
 

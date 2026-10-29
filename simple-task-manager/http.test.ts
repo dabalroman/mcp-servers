@@ -160,6 +160,18 @@ describe('MCP over Streamable HTTP', () => {
     assert.ok(!report.includes('PROJECT_NAME ='));
   });
 
+  test('health reports ui: server, or bundled when this UI is a stdio MCP\'s child', async () => {
+    const client = await connect('a');
+    const ui = async () => (JSON.parse((await call(client, 'health')).content[0]!.text) as { ui: string }).ui;
+    assert.equal(await ui(), 'server');
+    process.env['TASK_UI_BUNDLED'] = '1';
+    try {
+      assert.equal(await ui(), 'bundled');
+    } finally {
+      delete process.env['TASK_UI_BUNDLED'];
+    }
+  });
+
   test('unknown X-Project → tool error naming the header', async () => {
     const client = await connect('nope');
     const res = await call(client, 'getNext');

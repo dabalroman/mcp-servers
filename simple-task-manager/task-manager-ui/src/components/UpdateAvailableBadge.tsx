@@ -9,7 +9,7 @@ import {
   DialogTitle,
 } from './ui/dialog';
 
-type RunMode = 'bundled' | 'standalone' | 'disabled';
+type RunMode = 'bundled' | 'server';
 
 type UpdateAvailableBadgeProps = {
   localVersion: string | null;
@@ -28,8 +28,8 @@ export default function UpdateAvailableBadge({ localVersion, remoteVersion, mode
     `Re-run npx tsx ${dir}/install.ts in each project (rebuilds dist/)`,
     `Restart Claude Code${restartNote}`,
   ];
-  if (mode === 'standalone') {
-    steps.push(`Standalone mode: pm2 restart ${pm2AppName()}`);
+  if (mode === 'server') {
+    steps.push(`Server: pm2 restart ${pm2AppName()}`);
   }
 
   return (

@@ -8,6 +8,7 @@ import {
   isStaleEntry, serializeMcpConfig, parseMcpConfig, parseInstallArgs, pm2AppName,
   type McpConfig, type McpEntry
 } from './mcpConfig.js';
+import { ecosystemFile } from './serverSetup.js';
 
 // ── serializeMcpConfig ────────────────────────────────────────────────────────
 
@@ -139,7 +140,43 @@ describe('parseInstallArgs', () => {
     assert.deepEqual(parseInstallArgs(['--force']), { error: 'Unknown option --force' });
   });
 
+  test('--server on with dir, --db and --port', () => {
+    assert.deepEqual(parseInstallArgs(['--server', 'on', '../srv', '--db', '/data/tasks.db', '--port', '7380']),
+      { server: 'on', projectDir: '../srv', db: '/data/tasks.db', port: '7380' });
+  });
+
+  test('--server off alone', () => {
+    assert.deepEqual(parseInstallArgs(['--server', 'off']), { server: 'off' });
+  });
+
+  test('--server rejects anything but on/off, and a missing value', () => {
+    assert.deepEqual(parseInstallArgs(['--server', 'maybe']), { error: '--server takes on or off, got: maybe' });
+    assert.deepEqual(parseInstallArgs(['--server']), { error: '--server needs a value' });
+    assert.deepEqual(parseInstallArgs(['--server', 'on', '--db']), { error: '--db needs a value' });
+  });
+
+  test('--port must be in range', () => {
+    const r = parseInstallArgs(['--server', 'on', '--port', '70000']);
+    assert.ok('error' in r);
+    assert.match(r.error, /--port must be an integer 1-65535/);
+  });
+
+  test('--db / --port without --server are rejected', () => {
+    assert.ok('error' in parseInstallArgs(['--db', 'x.db']));
+    assert.ok('error' in parseInstallArgs(['--port', '7380']));
+  });
+
   test('two positionals are rejected', () => {
     assert.ok('error' in parseInstallArgs(['a', 'b']));
+  });
+});
+
+describe('ecosystemFile', () => {
+  test('carries the app, db and port, and no mode key', () => {
+    const out = ecosystemFile({ appName: 'task-manager', uiCwd: '/pkg/task-manager-ui', db: '/data/tasks.db', port: '7374' });
+    assert.match(out, /name: "task-manager"/);
+    assert.match(out, /TASKS_DB: "\/data\/tasks.db"/);
+    assert.match(out, /TASK_UI_PORT: "7374"/);
+    assert.doesNotMatch(out, /TASK_UI_MODE/);
   });
 });

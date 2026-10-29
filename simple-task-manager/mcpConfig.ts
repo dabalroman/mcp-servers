@@ -6,11 +6,8 @@
  * the install console + README instead of inline comments. `ENV_DOCS` and
  * `ENV_ORDER` are exported so install.ts can print and order consistently.
  */
-import { resolve } from 'node:path';
-import { PACKAGE_DIR } from './packageDir.js';
-
 /**
- * The standalone UI's pm2 app. One UI serves every project on its DB, so the name
+ * The server's pm2 app. One server serves every project on its DB, so the name
  * follows the port (one UI per port), not the repo: `task-manager` on the default
  * port, `task-manager-<port>` otherwise.
  */
@@ -41,15 +38,6 @@ export const ENV_DOCS: Record<string, string[]> = {
   TASK_UI_PORT: [
     'HTTP port the UI binds to. Default 7374.',
   ],
-  TASK_UI_MODE: [
-    'How the task-manager UI runs. Allowed values:',
-    '  "bundled"    — MCP spawns the UI as a child process (default).',
-    '                 UI dies with the Claude session.',
-    '  "standalone" — UI runs as a long-lived pm2 process, set up via',
-    `                 \`npx tsx ${resolve(PACKAGE_DIR, 'setup-standalone.ts')} on\`.`,
-    '                 Survives MCP restarts and Claude session closes.',
-    '  "disabled"   — MCP does not start the UI at all (headless / tests).',
-  ],
   TASK_UI_AUTO_OPEN_IN_BROWSER: [
     'Set to "1" to open the UI in the system browser when it starts.',
     'Default "0" (no auto-open).',
@@ -61,7 +49,6 @@ export const ENV_ORDER = [
   'TASKS_DB',
   'PROJECT_NAME',
   'TASK_UI_PORT',
-  'TASK_UI_MODE',
   'TASK_UI_AUTO_OPEN_IN_BROWSER',
 ];
 
@@ -71,7 +58,8 @@ export const ENV_ORDER = [
  * when renaming a canonical env var.
  */
 export const LEGACY_ENV_KEYS: Record<string, string> = {
-  TASK_UI_DISABLE: 'renamed: set `TASK_UI_MODE=disabled` instead',
+  TASK_UI_MODE: 'removed: a stdio entry is always bundled. To share one DB, run the server (`install.ts --server on`) and connect repos in client mode (UI → Connect a machine)',
+  TASK_UI_DISABLE: 'removed: a stdio entry always runs its UI. For no per-repo UI, connect the repo in client mode (UI → Connect a machine)',
   AUTO_OPEN_TASK_UI: 'renamed to `TASK_UI_AUTO_OPEN_IN_BROWSER`',
 };
 
@@ -125,18 +113,56 @@ function orderEnv(env: Record<string, string>): string[] {
   return [...known, ...rest];
 }
 
-export const INSTALL_USAGE = 'Usage: npx tsx install.ts [project-dir]   (default: the current directory)';
+export const INSTALL_USAGE = [
+  'Usage: npx tsx install.ts [project-dir]                       bundled: write the stdio entry into <project-dir>/.mcp.json',
+  '       npx tsx install.ts --server on|off [dir] [--db <path>] [--port <n>]',
+  '                                                              server: run the UI + /mcp as a pm2 app (ecosystem file in <dir>)',
+  '  (dir defaults to the current directory, --db to <dir>/tasks.db, --port to 7374)',
+].join('\n');
 
 const PLUGIN_INSTALL = 'claude plugin marketplace add dabalroman/mcp-servers && claude plugin install task-manager@dabalroman --scope user';
 
+export type InstallArgs =
+  | { server?: undefined; projectDir?: string }
+  | { server: 'on' | 'off'; projectDir?: string; db?: string; port?: string };
+
 // Parsed before the build so a typo fails fast. --global was the pre-plugin
 // way to install the skills; without this check it would be taken as a dir.
-export function parseInstallArgs(argv: string[]): { projectDir?: string } | { error: string } {
+export function parseInstallArgs(argv: string[]): InstallArgs | { error: string } {
   if (argv.includes('--global')) {
     return { error: `--global is gone: skills and rules ship as a Claude Code plugin now. Run: ${PLUGIN_INSTALL}` };
   }
-  const flag = argv.find((a) => a.startsWith('-'));
-  if (flag) return { error: `Unknown option ${flag}` };
-  if (argv.length > 1) return { error: `Expected at most one project dir, got: ${argv.join(' ')}` };
-  return argv[0] === undefined ? {} : { projectDir: argv[0] };
+  let server: 'on' | 'off' | undefined;
+  let db: string | undefined;
+  let port: string | undefined;
+  const positional: string[] = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i]!;
+    if (a === '--server' || a === '--db' || a === '--port') {
+      const value = argv[++i];
+      if (value === undefined || value.startsWith('-')) return { error: `${a} needs a value` };
+      if (a === '--server') {
+        if (value !== 'on' && value !== 'off') return { error: `--server takes on or off, got: ${value}` };
+        server = value;
+      } else if (a === '--db') {
+        db = value;
+      } else {
+        const n = Number(value);
+        if (!Number.isInteger(n) || n < 1 || n > 65535) return { error: `--port must be an integer 1-65535, got: ${value}` };
+        port = value;
+      }
+    } else if (a.startsWith('-')) {
+      return { error: `Unknown option ${a}` };
+    } else {
+      positional.push(a);
+    }
+  }
+  if (positional.length > 1) return { error: `Expected at most one dir, got: ${positional.join(' ')}` };
+  const projectDir = positional[0];
+  if (!server) {
+    if (db !== undefined || port !== undefined) return { error: '--db and --port only apply with --server on' };
+    return projectDir === undefined ? {} : { projectDir };
+  }
+  if (server === 'off' && db !== undefined) return { error: '--db only applies with --server on' };
+  return { server, ...(projectDir !== undefined && { projectDir }), ...(db !== undefined && { db }), ...(port !== undefined && { port }) };
 }

@@ -42,8 +42,6 @@ import {
   handleSetStatus,
   handleDelete,
   handleCreateProject,
-  handleUiStart,
-  handleUiStop,
 } from './mcp/mutationHandlers.js';
 import { withSchemaCheck, type MCPContent } from './mcp/shared.js';
 import Database from 'better-sqlite3';
@@ -925,14 +923,10 @@ describe('getOverview handler — status filter', () => {
 describe('health handler — ui field', () => {
   let savedCwd: string;
   let savedMode: string | undefined;
-  let savedProjectName: string | undefined;
 
   beforeEach(() => {
     savedCwd = process.cwd();
     savedMode = process.env['TASK_UI_MODE'];
-    savedProjectName = process.env['PROJECT_NAME'];
-    // chdir into the fresh tmp dir (no .mcp.json there) so handleHealth takes
-    // the early-return branch and `ui` comes from process.env.
     process.chdir(dir);
   });
 
@@ -940,36 +934,16 @@ describe('health handler — ui field', () => {
     process.chdir(savedCwd);
     if (savedMode === undefined) delete process.env['TASK_UI_MODE'];
     else process.env['TASK_UI_MODE'] = savedMode;
-    if (savedProjectName === undefined) delete process.env['PROJECT_NAME'];
-    else process.env['PROJECT_NAME'] = savedProjectName;
   });
 
-  test('reports ui: standalone when TASK_UI_MODE=standalone', async () => {
-    process.env['TASK_UI_MODE'] = 'standalone';
-    const resp = await handleHealth();
-    assert.equal((decode(resp) as { ui: string }).ui, 'standalone');
-  });
-
-  test('reports ui: disabled when TASK_UI_MODE=disabled', async () => {
-    process.env['TASK_UI_MODE'] = 'disabled';
-    const resp = await handleHealth();
-    assert.equal((decode(resp) as { ui: string }).ui, 'disabled');
-  });
-
-  test('reports ui: bundled when TASK_UI_MODE=bundled', async () => {
-    process.env['TASK_UI_MODE'] = 'bundled';
-    const resp = await handleHealth();
-    assert.equal((decode(resp) as { ui: string }).ui, 'bundled');
-  });
-
-  test('reports ui: bundled when TASK_UI_MODE is unset', async () => {
+  test('reports ui: bundled over stdio', async () => {
     delete process.env['TASK_UI_MODE'];
     const resp = await handleHealth();
     assert.equal((decode(resp) as { ui: string }).ui, 'bundled');
   });
 
-  test('reports ui: bundled for an unrecognised TASK_UI_MODE value', async () => {
-    process.env['TASK_UI_MODE'] = 'garbage';
+  test('a leftover TASK_UI_MODE value doesn\'t change it', async () => {
+    process.env['TASK_UI_MODE'] = 'standalone';
     const resp = await handleHealth();
     assert.equal((decode(resp) as { ui: string }).ui, 'bundled');
   });
@@ -1020,35 +994,51 @@ describe('health handler — config section env validation', () => {
     return (decode(resp) as { report: string }).report;
   }
 
-  test('flags legacy TASK_UI_DISABLE and AUTO_OPEN_TASK_UI as ✗ with rename hints', async () => {
+  test('flags legacy TASK_UI_DISABLE and AUTO_OPEN_TASK_UI as ✗ with hints', async () => {
     writeMcpJson({
       TASKS_DB: dbPath,
       PROJECT_NAME: 'demo',
       TASK_UI_PORT: '7374',
-      TASK_UI_MODE: 'bundled',
       TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
       TASK_UI_DISABLE: '0',
       AUTO_OPEN_TASK_UI: '0',
     });
     const report = getReport(await handleHealth());
-    assert.match(report, /✗ TASK_UI_DISABLE — renamed: set `TASK_UI_MODE=disabled` instead/);
+    assert.match(report, /✗ TASK_UI_DISABLE — removed: .*client mode/);
     assert.match(report, /✗ AUTO_OPEN_TASK_UI — renamed to `TASK_UI_AUTO_OPEN_IN_BROWSER`/);
   });
 
-  test('canonical env produces ✓ for all five canonical vars', async () => {
+  test('canonical env produces ✓ for all four canonical vars and no TASK_UI_MODE line', async () => {
     writeMcpJson({
       TASKS_DB: dbPath,
       PROJECT_NAME: 'demo',
       TASK_UI_PORT: '7374',
-      TASK_UI_MODE: 'bundled',
       TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
     });
     const report = getReport(await handleHealth());
     assert.match(report, /✓ TASKS_DB = /);
     assert.match(report, /✓ PROJECT_NAME = demo/);
     assert.match(report, /✓ TASK_UI_PORT = 7374/);
-    assert.match(report, /✓ TASK_UI_MODE = bundled/);
     assert.match(report, /✓ TASK_UI_AUTO_OPEN_IN_BROWSER = 0/);
+    assert.doesNotMatch(report, /TASK_UI_MODE/);
+  });
+
+  test('TASK_UI_MODE=bundled (written by every older install) is ⚠ obsolete, not ✗', async () => {
+    writeMcpJson({ TASKS_DB: dbPath, PROJECT_NAME: 'demo', TASK_UI_PORT: '7374', TASK_UI_AUTO_OPEN_IN_BROWSER: '0', TASK_UI_MODE: 'bundled' });
+    process.env['TASK_UI_MODE'] = 'bundled';
+    try {
+      const report = getReport(await handleHealth());
+      assert.match(report, /⚠ TASK_UI_MODE = bundled — obsolete/);
+      assert.doesNotMatch(report, /✗ TASK_UI_MODE/);
+    } finally {
+      delete process.env['TASK_UI_MODE'];
+    }
+  });
+
+  test('any other TASK_UI_MODE in .mcp.json is ✗ with the client-mode hint', async () => {
+    writeMcpJson({ TASKS_DB: dbPath, PROJECT_NAME: 'demo', TASK_UI_PORT: '7374', TASK_UI_AUTO_OPEN_IN_BROWSER: '0', TASK_UI_MODE: 'standalone' });
+    const report = getReport(await handleHealth());
+    assert.match(report, /✗ TASK_UI_MODE — removed: .*install\.ts --server on.*Connect a machine/);
   });
 
   test('unknown key produces ⚠ "unknown — not consumed by MCP"', async () => {
@@ -1056,7 +1046,6 @@ describe('health handler — config section env validation', () => {
       TASKS_DB: dbPath,
       PROJECT_NAME: 'demo',
       TASK_UI_PORT: '7374',
-      TASK_UI_MODE: 'bundled',
       TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
       FOO_BAR: '1',
     });
@@ -1064,43 +1053,19 @@ describe('health handler — config section env validation', () => {
     assert.match(report, /⚠ FOO_BAR — unknown, not consumed by MCP/);
   });
 
-  test('missing TASK_UI_MODE produces ⚠ "defaults to bundled"', async () => {
-    writeMcpJson({
-      TASKS_DB: dbPath,
-      PROJECT_NAME: 'demo',
-      TASK_UI_PORT: '7374',
-      TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
-    });
-    const report = getReport(await handleHealth());
-    assert.match(report, /⚠ TASK_UI_MODE not set — defaults to "bundled"/);
-  });
-
   test('non-integer TASK_UI_PORT produces ✗', async () => {
     writeMcpJson({
       TASKS_DB: dbPath,
       PROJECT_NAME: 'demo',
       TASK_UI_PORT: 'abc',
-      TASK_UI_MODE: 'bundled',
       TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
     });
     const report = getReport(await handleHealth());
     assert.match(report, /✗ TASK_UI_PORT = abc/);
   });
 
-  test('health.ui structured field resolves from the process env', async () => {
-    writeMcpJson({
-      TASKS_DB: dbPath,
-      PROJECT_NAME: 'demo',
-      TASK_UI_PORT: '7374',
-      TASK_UI_MODE: 'standalone',
-      TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
-    });
-    const resp = await handleHealth();
-    assert.equal((decode(resp) as { ui: string }).ui, 'standalone');
-  });
-
   test('without any .mcp.json (user/local-scope binding) the env still validates and nothing is ✗', async () => {
-    setEnv({ TASKS_DB: dbPath, PROJECT_NAME: 'demo', TASK_UI_PORT: '7374', TASK_UI_MODE: 'disabled', TASK_UI_AUTO_OPEN_IN_BROWSER: '0' });
+    setEnv({ TASKS_DB: dbPath, PROJECT_NAME: 'demo', TASK_UI_PORT: '7374', TASK_UI_AUTO_OPEN_IN_BROWSER: '0' });
     const report = getReport(await handleHealth());
     const config = report.split('\n\n').find((sec) => sec.includes('Config (env)\n'))!;
     assert.match(config, /✓ PROJECT_NAME = demo/);
@@ -1109,7 +1074,7 @@ describe('health handler — config section env validation', () => {
   });
 
   test('a DB migrated past this build shows ✗ with the rebuild/restart hint; a current one names the last migration', async () => {
-    setEnv({ TASKS_DB: dbPath, PROJECT_NAME: 'demo', TASK_UI_PORT: '7374', TASK_UI_MODE: 'disabled', TASK_UI_AUTO_OPEN_IN_BROWSER: '0' });
+    setEnv({ TASKS_DB: dbPath, PROJECT_NAME: 'demo', TASK_UI_PORT: '7374', TASK_UI_AUTO_OPEN_IN_BROWSER: '0' });
     assert.match(getReport(await handleHealth()), /✓ DB schema up to date \(\d+ migrations, last \d+_[\w-]+ applied .+ UTC\)/);
     const other = new Database(dbPath);
     other.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(99, 'future-migration');
@@ -1153,7 +1118,6 @@ describe('health handler — version section', () => {
       TASKS_DB: dbPath,
       PROJECT_NAME: 'demo',
       TASK_UI_PORT: '7374',
-      TASK_UI_MODE: 'bundled',
       TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
     });
     globalThis.fetch = (async () => ({
@@ -1170,7 +1134,6 @@ describe('health handler — version section', () => {
       TASKS_DB: dbPath,
       PROJECT_NAME: 'demo',
       TASK_UI_PORT: '7374',
-      TASK_UI_MODE: 'bundled',
       TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
     });
     globalThis.fetch = (async () => { throw new Error('network down'); }) as unknown as typeof fetch;
@@ -1180,49 +1143,21 @@ describe('health handler — version section', () => {
   });
 });
 
-describe('ui-start / ui-stop — TASK_UI_MODE', () => {
-  let savedMode: string | undefined;
-  let savedProjectName: string | undefined;
-
-  beforeEach(() => {
-    savedMode = process.env['TASK_UI_MODE'];
-    savedProjectName = process.env['PROJECT_NAME'];
-  });
-
-  afterEach(() => {
-    if (savedMode === undefined) delete process.env['TASK_UI_MODE'];
-    else process.env['TASK_UI_MODE'] = savedMode;
-    if (savedProjectName === undefined) delete process.env['PROJECT_NAME'];
-    else process.env['PROJECT_NAME'] = savedProjectName;
-  });
-
-  test('ui-start returns an error pointing to pm2 when mode=standalone', async () => {
-    process.env['TASK_UI_MODE'] = 'standalone';
-    process.env['PROJECT_NAME'] = 'my-project';
-    const resp = await handleUiStart();
-    assert.ok(resp.isError, 'should be an error');
-    const msg = (decode(resp) as { error: string }).error;
-    assert.ok(msg.includes('standalone'), 'error should mention standalone mode');
-    assert.ok(msg.includes('pm2 restart task-manager'), 'the pm2 name is fixed, not PROJECT_NAME');
-  });
-
-  test('ui-start returns an error explaining disabled when mode=disabled', async () => {
-    process.env['TASK_UI_MODE'] = 'disabled';
-    const resp = await handleUiStart();
-    assert.ok(resp.isError, 'should be an error');
-    const msg = (decode(resp) as { error: string }).error;
-    assert.ok(msg.includes('disabled'));
-    assert.ok(msg.includes('bundled'), 'error should point at the bundled value as the fix');
-  });
-
-  test('ui-stop returns an error pointing to pm2 when mode=standalone', async () => {
-    process.env['TASK_UI_MODE'] = 'standalone';
-    process.env['PROJECT_NAME'] = 'my-project';
-    const resp = await handleUiStop();
-    assert.ok(resp.isError, 'should be an error');
-    const msg = (decode(resp) as { error: string }).error;
-    assert.ok(msg.includes('standalone'));
-    assert.ok(msg.includes('pm2 stop task-manager'));
+describe('stdio server — legacy TASK_UI_MODE', () => {
+  test('standalone/disabled refuse to start with the fix on stderr', () => {
+    for (const mode of ['standalone', 'disabled']) {
+      const r = spawnSync(process.execPath, ['--import', 'tsx', join(PACKAGE_DIR, 'server.ts')], {
+        env: { ...process.env, TASK_UI_MODE: mode, TASKS_DB: dbPath },
+        input: '',
+        encoding: 'utf8',
+        timeout: 20_000,
+      });
+      assert.equal(r.status, 1, r.stderr);
+      assert.match(r.stderr, new RegExp(`TASK_UI_MODE=${mode} is no longer supported`));
+      assert.match(r.stderr, /Connect a machine/);
+      assert.match(r.stderr, /install\.ts --server on/);
+      assert.match(r.stderr, /delete TASK_UI_MODE/);
+    }
   });
 });
 

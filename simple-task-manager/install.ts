@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 /**
- * tsx install.ts [dir]   Per-project setup: writes .mcp.json in the project root (default: cwd).
+ * tsx install.ts [dir]   Bundled mode: writes the stdio entry into <dir>/.mcp.json (default: cwd).
  *                        If a stale task-manager entry pointing at server.ts/server.js exists,
  *                        it is rewritten to point at dist/server.js.
+ * tsx install.ts --server on|off [dir] [--db <path>] [--port <n>]
+ *                        The server: the UI + /mcp as a pm2 app (see serverSetup.ts). Repos
+ *                        connect to it in client mode, from the UI's Connect a machine dialog.
  * Skills and the extended rules ship separately, as the `task-manager` Claude Code plugin.
  */
 import { readFileSync, writeFileSync, existsSync } from 'fs';
@@ -10,6 +13,7 @@ import { resolve, basename } from 'path';
 import { execFileSync } from 'node:child_process';
 import { ENV_DOCS, ENV_ORDER, INSTALL_USAGE, isStaleEntry, parseInstallArgs, parseMcpConfig, serializeMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
 import { PACKAGE_DIR } from './packageDir.js';
+import { runServerSetup } from './serverSetup.js';
 
 const serverEntry = resolve(PACKAGE_DIR, 'dist/server.js');
 
@@ -32,6 +36,11 @@ console.log('Building dist/ from current source...');
 execFileSync('npm', ['run', 'build'], { cwd: PACKAGE_DIR, stdio: 'inherit', shell: process.platform === 'win32' });
 console.log('Rebuilt dist/ from current source.');
 
+if (args.server) {
+  await runServerSetup({ action: args.server, dir: resolve(args.projectDir ?? process.cwd()), db: args.db, port: args.port });
+  process.exit(0);
+}
+
 // ── per-project: write .mcp.json ───────────────────────────────────────────────
 const projectDir = resolve(args.projectDir ?? process.cwd());
 const mcpFile = resolve(projectDir, '.mcp.json');
@@ -43,7 +52,6 @@ const entry: McpEntry = {
     TASKS_DB: resolve(projectDir, 'tasks.db'),
     PROJECT_NAME: basename(projectDir),
     TASK_UI_PORT: '7374',
-    TASK_UI_MODE: 'bundled',
     TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
   },
 };
@@ -87,5 +95,5 @@ if (existingEntry && !isStaleEntry(existingEntry)) {
   console.log('');
 }
 
-console.log('Restart open Claude sessions and any standalone UI (pm2 restart task-manager) so they run the new build.');
+console.log('Restart open Claude sessions and the server, if one runs (pm2 restart task-manager), so they run the new build.');
 console.log(`Skills and extended rules: /plugin marketplace add dabalroman/mcp-servers, then /plugin install task-manager@dabalroman`);

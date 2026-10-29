@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Github, Plug, Tag } from 'lucide-react';
 import { ConnectDialog } from '@/client/ConnectDialog';
 
-type RunMode = 'bundled' | 'standalone' | 'disabled';
+type RunMode = 'bundled' | 'server';
 
 type FooterProps = {
   version: string | null;

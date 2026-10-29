@@ -206,52 +206,16 @@ All of these are written to `.mcp.json` by `install.ts` with the defaults below 
 | `TASKS_DB` | `<project>/tasks.db` | Path to the SQLite database. Forwarded to the UI so both processes open the same file. |
 | `PROJECT_NAME` | project dir name | The [project](#projects--one-database-many-repos) this repo's sessions work in; unset means `default`. |
 | `TASK_UI_PORT` | `7374` | HTTP port the UI binds to. |
-| `TASK_UI_MODE` | `bundled` | How the UI runs. One of `bundled`, `standalone`, `disabled` — see below. |
 | `TASK_UI_AUTO_OPEN_IN_BROWSER` | `0` | Set to `1` to open the UI in the system browser on startup. |
 
-#### `TASK_UI_MODE` — the single switch for UI lifecycle
+### Two modes: bundled and client
 
-| Value | Meaning |
-|---|---|
-| `bundled` (default) | The MCP spawns the UI as a child process. UI dies with the Claude session. Best for casual / single-session use. |
-| `standalone` | The UI runs as a long-lived [pm2](https://pm2.keymetrics.io/) process. Survives MCP restarts and Claude session closes. Set up via `setup-standalone.ts on` (below) — don't edit this value by hand. |
-| `disabled` | The MCP doesn't start the UI at all. Useful for headless / CI / tests, or when you want to run the UI manually from a separate terminal. |
+| Mode | What runs | Set up with |
+|---|---|---|
+| **bundled** (default) | Each repo's stdio MCP owns its DB and spawns its own UI as a child process; the UI dies with the session. | `install.ts` in the repo |
+| **client** | One long-running **server** (a pm2 app serving the UI and `/mcp`) holds the DB. Repos connect to it over HTTP and run no task-manager process of their own. | `install.ts --server on` once, then **Connect a machine** per repo ([below](#client-mode-connect-to-the-server-over-http)) |
 
-In `standalone` and `disabled` modes the `ui-start` / `ui-stop` MCP tools return a clear error explaining what to do instead — they never silently no-op.
-
-### Standalone UI mode
-
-By default the UI is a child of the MCP — it dies whenever Claude restarts the MCP or you close the session. If you want the UI to persist across sessions (handy when you keep a project open for a long time), opt that project in:
-
-```sh
-# from the project directory (where .mcp.json lives)
-npx tsx <dir>/simple-task-manager/setup-standalone.ts on
-```
-
-The script will:
-
-1. Set `TASK_UI_MODE=standalone` in `.mcp.json` and ensure `PROJECT_NAME` + `TASK_UI_PORT` are populated (defaults: project dir name, `7374`).
-2. If another repo already runs a task-manager UI on that port, join it and stop here (see [Sharing one UI](#sharing-one-ui-across-repos)).
-3. Otherwise generate `<project>/ecosystem.task-ui.config.cjs` (a pm2 config file). The filename must include `.config.` — that's how pm2 recognises it as a config file rather than a script.
-4. Run `pm2 start ./ecosystem.task-ui.config.cjs && pm2 save` so the UI process restarts on boot (assuming `pm2 startup` is configured). The pm2 app is called `task-manager` (`task-manager-<port>` on a port other than `7374`).
-
-Restart Claude Code afterwards. The MCP sees `TASK_UI_MODE=standalone` and skips spawning its own UI child; the `ui-start` / `ui-stop` MCP tools point you at `pm2 restart task-manager` instead.
-
-**Changing the env.** `pm2 restart task-manager` keeps the env the app was first started with, so an edited ecosystem file is silently ignored. After any env change run `pm2 restart ./ecosystem.task-ui.config.cjs --update-env` (or `pm2 delete task-manager` and `pm2 start ./ecosystem.task-ui.config.cjs`). Re-running `setup-standalone.ts on` does this for you.
-
-To turn it off:
-
-```sh
-npx tsx <dir>/simple-task-manager/setup-standalone.ts off
-```
-
-That sets `TASK_UI_MODE=bundled`. In the repo that owns the UI (the one holding the ecosystem file) it also deletes the pm2 app and the file; in a repo that joined, the shared UI keeps running.
-
-#### Sharing one UI across repos
-
-One UI serves every project in its database, and its project tabs show which one you're on. So repos that share a `TASKS_DB` share one standalone UI too: give them the same `TASK_UI_PORT` and run `setup-standalone.ts on` in each. The first repo owns the UI; the others find it on the port and only update their own `.mcp.json`.
-
-Repos with separate databases need separate UIs: give them distinct `TASK_UI_PORT` values, and each gets its own pm2 app (`task-manager-<port>`).
+A stdio entry is always bundled. The old `TASK_UI_MODE` values `standalone` and `disabled` are gone: an entry that still sets one refuses to start and prints how to switch (see [UPGRADING.md](UPGRADING.md)).
 
 ### Client mode: connect to the server over HTTP
 
@@ -262,9 +226,20 @@ apply to every machine, including the one running the server.
 
 **On the server machine, once:**
 
-1. Install as in [Step 2](#step-2--bind-a-repo) in one repo, then run
-   `npx tsx <dir>/simple-task-manager/setup-standalone.ts on` there. That starts the pm2 app
-   `task-manager` on port 7374, which keeps running across sessions and reboots.
+1. From the directory that should own the server (it gets the pm2 config file and, by default,
+   `tasks.db`), run:
+
+   ```sh
+   npx tsx <dir>/simple-task-manager/install.ts --server on [dir] [--db <path>] [--port <n>]
+   ```
+
+   That writes `ecosystem.task-ui.config.cjs` there and starts the pm2 app `task-manager` on port
+   7374 (`task-manager-<port>` on another port), which keeps running across sessions and reboots
+   (assuming `pm2 startup` is configured). If a server already answers on the port and this
+   directory doesn't own it, the command leaves it alone. It never touches `.mcp.json`.
+   `install.ts --server off` in the same directory stops it and removes the file. To change the
+   DB or port, re-run `--server on` with the new values: a plain `pm2 restart task-manager` keeps
+   the env the app was first started with.
 2. To reach it from other machines, put an HTTPS reverse proxy in front of it (for example
    `tailscale serve`). The app itself speaks plain HTTP. **Expose `/mcp` only**: the UI and its
    `/api` have no login, and anyone who can open the UI can create keys.
@@ -416,7 +391,7 @@ Every task belongs to exactly one project, so several repos can share one `tasks
 - Projects are created explicitly (`createProject`, or `+ Project` in the UI). An unknown name is an error that says how to create it; nothing is auto-created. Names are case-insensitive.
 - **Zero setup for a single repo:** a database created before projects existed puts every task in a project called `default`. While `default` is the only project, the first MCP start renames it to that repo's `PROJECT_NAME`.
 - `health` shows the bound project and whether it exists.
-- **Several repos, one DB:** give each repo's `.mcp.json` the same absolute `TASKS_DB` and its own `PROJECT_NAME`, then create those projects. In `standalone` mode, also give them the same `TASK_UI_PORT`; one pm2 UI then serves them all.
+- **Several repos, one DB:** run the server and connect each repo in [client mode](#client-mode-connect-to-the-server-over-http), with a key whose default project is that repo's project.
 
 ### Scope — tagging tasks to an area
 
@@ -450,7 +425,7 @@ Check that the `TASKS_DB` path in `.mcp.json` is absolute and points to a real l
 Reconnect the MCP (`/mcp` in Claude Code) and watch the MCP's stderr for one of:
 
 - `task-manager-ui not found at … — UI will not be available` — the sub-package is missing or wasn't built. Run `npm install` in the package directory to rebuild, then reconnect the MCP.
-- `task-manager-ui spawn disabled via TASK_UI_DISABLE=1` — unset the env var.
+- `TASK_UI_MODE=… is no longer supported` — the entry carries a removed mode; the message says how to switch to client mode or keep bundled.
 - `failed to spawn task-manager-ui: …` — usually means `node_modules/tsx` is missing in `task-manager-ui/`. Run `npm install` there.
 - Port already in use (the listening line never prints) — set `TASK_UI_PORT` to a free port in the MCP's `.mcp.json` env block.
 

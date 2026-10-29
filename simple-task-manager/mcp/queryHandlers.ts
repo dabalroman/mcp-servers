@@ -80,6 +80,8 @@ export async function handleGetProjects(store: Store, ctx: SessionContext): Prom
 
 // ── health ─────────────────────────────────────────────────────────────────────
 
+type UiMode = 'bundled' | 'server';
+
 type CheckResult = { symbol: '✓' | '⚠' | '✗' | '–'; line: string };
 
 function check(symbol: CheckResult['symbol'], line: string): CheckResult {
@@ -102,13 +104,6 @@ function validateCanonicalEnv(key: string, raw: string): CheckResult {
       return check('✗', raw
         ? `TASK_UI_PORT = ${raw} (must be an integer in [1, 65535])`
         : 'TASK_UI_PORT missing (must be an integer in [1, 65535])');
-    }
-    case 'TASK_UI_MODE': {
-      if (!raw) return check('⚠', 'TASK_UI_MODE not set — defaults to "bundled"');
-      if (raw === 'bundled' || raw === 'standalone' || raw === 'disabled') {
-        return check('✓', `TASK_UI_MODE = ${raw}`);
-      }
-      return check('✗', `TASK_UI_MODE = ${raw} (must be one of: bundled, standalone, disabled)`);
     }
     case 'TASK_UI_AUTO_OPEN_IN_BROWSER':
       if (raw === '0' || raw === '1') {
@@ -235,6 +230,10 @@ function configChecksFromEnv(envValue: (key: string) => string): CheckResult[] {
   for (const key of ENV_ORDER) {
     configChecks.push(validateCanonicalEnv(key, envValue(key)));
   }
+  // Every pre-#376 install.ts wrote it; any other value refuses to start.
+  if (envValue('TASK_UI_MODE') === 'bundled') {
+    configChecks.push(check('⚠', 'TASK_UI_MODE = bundled — obsolete (stdio is always bundled), remove it from the entry\'s env'));
+  }
 
   const mcpJsonPath = findMcpJson(process.cwd());
   if (mcpJsonPath) {
@@ -254,6 +253,7 @@ function configChecksFromEnv(envValue: (key: string) => string): CheckResult[] {
     }
     for (const key of Object.keys(fileEnv)) {
       if (ENV_ORDER.includes(key)) continue;
+      if (key === 'TASK_UI_MODE' && fileEnv[key] === 'bundled') continue;
       const legacyHint = LEGACY_ENV_KEYS[key];
       if (legacyHint) {
         configChecks.push(check('✗', `${key} — ${legacyHint}`));
@@ -291,14 +291,11 @@ export async function handleHealth(binding?: { store: Store; ctx: SessionContext
     sections.push(renderSection('Plugin', pluginChecks(opts.homeDir ?? homedir())));
   }
 
-  const uiModeRaw = envValue('TASK_UI_MODE');
   const uiPort = envValue('TASK_UI_PORT');
   const tasksDb = envValue('TASKS_DB');
 
-  const uiMode: 'standalone' | 'disabled' | 'bundled' =
-    uiModeRaw === 'standalone' ? 'standalone'
-    : uiModeRaw === 'disabled' ? 'disabled'
-    : 'bundled';
+  // Over HTTP this process is the UI: the server, or a bundled MCP's child.
+  const uiMode: UiMode = http && process.env['TASK_UI_BUNDLED'] !== '1' ? 'server' : 'bundled';
 
   // ── Runtime section ──────────────────────────────────────────────────────────
   const runtimeChecks: CheckResult[] = [];
@@ -306,10 +303,8 @@ export async function handleHealth(binding?: { store: Store; ctx: SessionContext
   const probeUrl = `http://localhost:${resolvedPort}/`;
   const displayUrl = `http://${getLanIp()}:${resolvedPort}/`;
 
-  const notReachableHint = uiMode === 'standalone'
-    ? `is the standalone pm2 process running? Try \`pm2 status ${pm2AppName(uiPort)}\``
-    : uiMode === 'disabled'
-    ? 'TASK_UI_MODE=disabled — set it to "bundled" and restart the MCP'
+  const notReachableHint = uiMode === 'server'
+    ? `is the server's pm2 process running? Try \`pm2 status ${pm2AppName(uiPort)}\``
     : 'is the MCP running?';
 
   try {
@@ -382,7 +377,7 @@ export async function handleHealth(binding?: { store: Store; ctx: SessionContext
   return buildOutput(sections, uiMode);
 }
 
-async function buildVersionCheck(uiMode: 'standalone' | 'disabled' | 'bundled', uiPort: string): Promise<CheckResult> {
+async function buildVersionCheck(uiMode: UiMode, uiPort: string): Promise<CheckResult> {
   const update = await checkForUpdate();
   if (update.state === 'current') {
     return check('✓', `Version v${update.local} is up to date`);
@@ -395,24 +390,17 @@ async function buildVersionCheck(uiMode: 'standalone' | 'disabled' | 'bundled', 
     `npx tsx ${resolve(PACKAGE_DIR, 'install.ts')} in each project`,
     'restart Claude Code',
   ];
-  if (uiMode === 'standalone') steps.push(`pm2 restart ${pm2AppName(uiPort)}`);
+  if (uiMode === 'server') steps.push(`pm2 restart ${pm2AppName(uiPort)}`);
   return check('⚠', `Update available: v${update.remote} (local v${update.local}) — ${steps.join('; ')}`);
 }
 
-function resolveUiModeFromProcess(): 'standalone' | 'disabled' | 'bundled' {
-  const m = process.env['TASK_UI_MODE'];
-  if (m === 'standalone') return 'standalone';
-  if (m === 'disabled') return 'disabled';
-  return 'bundled';
-}
-
-function buildOutput(sections: string[], ui?: 'standalone' | 'disabled' | 'bundled'): MCPContent {
+function buildOutput(sections: string[], ui: UiMode): MCPContent {
   const divider = '─'.repeat(9);
   const body = sections.join('\n\n');
   const report = `health\n${divider}\n${body}`;
   return text({
     report,
-    ui: ui ?? resolveUiModeFromProcess(),
+    ui,
     displayInstruction: 'Present this health report to the user as a markdown table with three columns: Status (✓/⚠/✗/–), Category (Project / Config / Plugin / Runtime / Version), and Message. Each indented check line is one table row.',
   });
 }

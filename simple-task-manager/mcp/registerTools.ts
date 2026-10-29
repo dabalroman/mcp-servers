@@ -311,7 +311,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   // ── ui-start ──────────────────────────────────────────────────────────────────
   server.tool(
     'ui-start',
-    'Start the task-manager-ui if not already running. Idempotent — returns alreadyRunning if the port is already in use. Respects TASK_UI_DISABLE.',
+    'Start the task-manager-ui if not already running. Idempotent — returns alreadyRunning if the port is already in use.',
     {},
     withSchemaCheck(store, async (): Promise<MCPContent> => handleUiStart())
   );

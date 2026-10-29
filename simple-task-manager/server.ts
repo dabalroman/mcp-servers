@@ -27,6 +27,22 @@ function logToClient(level: LogLevel, data: string): void {
   void server.server.sendLoggingMessage({ level, data: trimmed }).catch(() => { /* ignore */ });
 }
 
+// A stdio entry is always bundled (#376). The shared-DB modes it once had,
+// standalone and disabled, are client mode now: refuse with the fix rather than
+// run a mode the user didn't ask for. Stderr, because the transport isn't up.
+const legacyUiMode = process.env.TASK_UI_MODE;
+if (legacyUiMode && legacyUiMode !== 'bundled') {
+  process.stderr.write([
+    `[simple-task-manager] TASK_UI_MODE=${legacyUiMode} is no longer supported; a stdio entry always runs bundled.`,
+    'To share one DB and server: delete the task-manager entry from .mcp.json, open the server\'s UI,',
+    'click Connect a machine and run the line it prints in this repo (client mode).',
+    `To start a server first: npx tsx ${resolve(PACKAGE_DIR, 'install.ts')} --server on`,
+    'To keep a per-repo bundled setup: delete TASK_UI_MODE from the entry\'s env.',
+    '',
+  ].join('\n'));
+  process.exit(1);
+}
+
 if (!process.env.TASKS_DB) {
   throw new Error('TASKS_DB env var is required (absolute path to the SQLite tasks database).');
 }
@@ -52,22 +68,10 @@ registerTools(server, store, { project, transport: 'stdio' });
 // initUiChild wires in the DB path and log function before spawnUi() is called.
 initUiChild(resolvedTasksDb, logToClient);
 
-// TASK_UI_MODE is the single source of truth for whether/how the UI runs.
-// Values: "bundled" (default) | "standalone" (pm2 owns it) | "disabled" (no UI).
-// Missing or unrecognised values fall back to "bundled" so existing setups keep
-// working until install/setup-standalone updates the file.
-const uiMode = process.env.TASK_UI_MODE ?? 'bundled';
-if (uiMode === 'standalone') {
-  logToClient('info', '[simple-task-manager] TASK_UI_MODE=standalone — UI is pm2-managed, not spawning a child');
-} else if (uiMode === 'disabled') {
-  logToClient('info', '[simple-task-manager] TASK_UI_MODE=disabled — UI will not run');
-} else {
-  // bundled mode: fail loudly if the UI sub-package is missing
-  if (uiPkgDir === null) {
-    throw new Error('[simple-task-manager] task-manager-ui not found at any expected location. Re-run the installer or set TASK_UI_MODE=disabled.');
-  }
-  spawnUi();
+if (uiPkgDir === null) {
+  throw new Error('[simple-task-manager] task-manager-ui not found at any expected location. Re-run the installer.');
 }
+spawnUi();
 
 function killUi() {
   const child = getUiChild();

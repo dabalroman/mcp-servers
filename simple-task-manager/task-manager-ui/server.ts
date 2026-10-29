@@ -15,12 +15,8 @@ const port = parseInt(process.env.TASK_UI_PORT ?? '7374', 10);
 const TASKS_DB = process.env.TASKS_DB
   ? path.resolve(process.env.TASKS_DB)
   : path.join(process.cwd(), 'tasks.db');
-// Validate TASK_UI_MODE so the client gets a clean three-state value.
-const RAW_MODE = process.env.TASK_UI_MODE ?? 'bundled';
-const TASK_UI_MODE: 'bundled' | 'standalone' | 'disabled' =
-  RAW_MODE === 'standalone' ? 'standalone' :
-  RAW_MODE === 'disabled' ? 'disabled' :
-  'bundled';
+// A bundled MCP marks its child; anything else (pm2, a manual start) is the server.
+const MODE: 'bundled' | 'server' = process.env.TASK_UI_BUNDLED === '1' ? 'bundled' : 'server';
 
 const app = express();
 
@@ -51,7 +47,7 @@ void checkForUpdate();
 
 app.get('/api/config', async (_req, res) => {
   const { state, remote } = await checkForUpdate();
-  res.json({ mode: TASK_UI_MODE, version: VERSION, packageDir: PACKAGE_DIR, update: { state, remote } });
+  res.json({ mode: MODE, version: VERSION, packageDir: PACKAGE_DIR, update: { state, remote } });
 });
 
 app.use(express.static(dist, { index: 'index.html', maxAge: '1h' }));

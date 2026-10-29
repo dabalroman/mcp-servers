@@ -4,10 +4,10 @@ How to move a local clone to a newer version without losing data or quietly losi
 
 ## Every upgrade
 
-1. **Stop the standalone UIs** (`pm2 stop task-manager`). A running UI applies new migrations as soon as it restarts on the new code.
+1. **Stop the server**, if you run one (`pm2 stop task-manager`). A running UI applies new migrations as soon as it restarts on the new code.
 2. `git -C <dir> pull`
 3. Run `npx tsx <dir>/simple-task-manager/install.ts` in each bound repo. It rebuilds `dist/`, which is what the MCP runs. An already-registered `.mcp.json` is left as it is.
-4. Start the UIs again (`pm2 restart task-manager`), and restart every open Claude Code session. If the ecosystem file's env changed, add `--update-env` (see below).
+4. Start the server again (`pm2 restart task-manager`), and restart every open Claude Code session. If the ecosystem file's env changed, add `--update-env` (see below).
 5. Run the `health` tool. Every line should be ✓.
 
 **Backups are automatic.** Whichever process applies a migration first (an MCP or a UI) copies the database next to itself as `<db>.backup-<YYYYMMDD-HHMMSS>-pre-<migration>` and logs the path to stderr. Backups are never deleted automatically. If you want an extra copy before pulling, run `sqlite3 <db> ".backup <db>.bak-<date>"`.
@@ -19,6 +19,15 @@ How to move a local clone to a newer version without losing data or quietly losi
 **pm2 keeps the old env.** `pm2 restart <name>` reuses the env from the first start, so a changed key in `ecosystem.task-ui.config.cjs` (e.g. `TASKS_DB`) is silently ignored. Use `pm2 restart <file> --update-env`, or `pm2 delete <name>` and `pm2 start <file>`.
 
 ## Version notes
+
+### Two modes: bundled and client (2026-10-032)
+
+- A stdio entry is always bundled. `TASK_UI_MODE=standalone` or `disabled` in an entry now makes the MCP **refuse to start**; it prints the fix on stderr (`node <dir>/simple-task-manager/dist/server.js` with that env shows it). Pick one:
+  - **Client mode** (to share one DB/UI): delete the `task-manager` entry from `.mcp.json`, open the server's UI, click **Connect a machine** and run the line it prints in the repo.
+  - **Bundled**: delete `TASK_UI_MODE` from the entry's env.
+- `TASK_UI_MODE=bundled`, which older `install.ts` runs wrote, still works; `health` flags it ⚠ obsolete. Delete it when convenient.
+- `setup-standalone.ts` is gone. The server is now `npx tsx <dir>/simple-task-manager/install.ts --server on|off` (run in the directory holding `ecosystem.task-ui.config.cjs`). It no longer edits `.mcp.json`.
+- An existing ecosystem file keeps working. Re-running `--server on` there is optional; it regenerates the file without the obsolete `TASK_UI_MODE` key.
 
 ### API keys on /mcp (2026-10-031)
 

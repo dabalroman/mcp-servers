@@ -10,7 +10,7 @@ import {
 import { pm2AppName } from '../lib/pm2';
 import { CodeBlock } from './CodeBlock';
 
-type RunMode = 'bundled' | 'standalone' | 'disabled';
+type RunMode = 'bundled' | 'server';
 
 type ModeBlock = {
   mode: RunMode;
@@ -25,36 +25,26 @@ const modes = (packageDir: string | null): ModeBlock[] => [
   {
     mode: 'bundled',
     label: 'Bundled',
-    description: 'Default. The MCP spawns the UI as a child process; the UI dies with the MCP. Leaving standalone: the repo that started the shared UI also deletes its pm2 app; any other repo just stops using it.',
-    switchLabel: 'Switch to this mode:',
+    description: 'Default. Each repo runs its own stdio MCP, which spawns its own UI as a child process; the UI dies with the session.',
+    switchLabel: 'Set up a repo (run in it, then restart Claude Code):',
     commands: [
       {
-        text: `npx tsx ${packageDir ?? '<package dir>'}/setup-standalone.ts off`,
+        text: `npx tsx ${packageDir ?? '<package dir>'}/install.ts`,
         copyable: true,
       },
     ],
   },
   {
-    mode: 'standalone',
-    label: 'Standalone',
-    description: `The UI runs as the long-lived pm2 app "${pm2AppName()}", independent of the MCP, and survives MCP restarts. One UI serves every repo on the same database and port: the first repo to switch starts it, later repos join it.`,
-    switchLabel: 'Switch to this mode:',
+    mode: 'server',
+    label: 'Server + clients',
+    description: `One long-lived pm2 app, "${pm2AppName()}", serves this UI and the MCP over HTTP for every project on its database. Repos connect in client mode and run no task-manager process of their own.`,
+    switchLabel: 'Start the server (run in the dir that should own it):',
     commands: [
       {
-        text: `npx tsx ${packageDir ?? '<package dir>'}/setup-standalone.ts on`,
+        text: `npx tsx ${packageDir ?? '<package dir>'}/install.ts --server on`,
         copyable: true,
       },
-    ],
-  },
-  {
-    mode: 'disabled',
-    label: 'Disabled',
-    description: 'The MCP runs without spawning a UI.',
-    switchLabel: 'Switch to this mode:',
-    commands: [
-      { text: '1. Set TASK_UI_MODE to "disabled" in .mcp.json:', copyable: false },
-      { text: '"TASK_UI_MODE": "disabled"', copyable: true },
-      { text: '2. Restart Claude Code.', copyable: false },
+      { text: 'Then, per repo: click Connect a machine in the footer and run the line it prints in that repo.', copyable: false },
     ],
   },
 ];
@@ -78,7 +68,7 @@ export default function ModeExplainer({ currentMode, packageDir }: { currentMode
           <DialogHeader>
             <DialogTitle className="text-sm tracking-widest uppercase">UI run mode</DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              Three modes control how the task-manager UI process is managed. Run the commands in the repo directory (where .mcp.json lives), then restart Claude Code.
+              Two modes control how the task-manager runs: per repo, or as one shared server.
             </DialogDescription>
           </DialogHeader>
 
