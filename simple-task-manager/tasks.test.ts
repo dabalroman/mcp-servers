@@ -14,6 +14,7 @@ import {
   type Store,
   type Task,
   StaleSchemaError,
+  hashApiKey,
 } from './tasks.js';
 
 const MIGRATION_NAMES = [
@@ -27,6 +28,8 @@ const MIGRATION_NAMES = [
   '20261020120000_add-epic-type-and-parent',
   '20261027120000_add-external-id',
   '20261027130000_add-projects',
+  '20261028120000_add-api-keys',
+  '20261029120000_add-api-key-project',
 ];
 
 let dir: string;
@@ -1226,5 +1229,78 @@ describe('projects', () => {
     assert.equal(store.adoptDefaultProject('example-project'), false);
     assert.equal(store.adoptDefaultProject('another'), false);
     assert.deepEqual(store.getProjects().map((p) => p.name), ['default', 'example-project']);
+  });
+});
+
+describe('API keys', () => {
+  test('create returns a prefixed key once and stores only its SHA-256', () => {
+    const { id, key } = store.createApiKey('  laptop  ', 'Default');
+    assert.match(key, /^stm_[A-Za-z0-9_-]{43}$/);
+    const row = store.db.prepare('SELECT * FROM api_keys WHERE id = ?').get(id) as Record<string, unknown>;
+    assert.equal(row.label, 'laptop');
+    assert.equal(row.project, 'default', 'stored in canonical case');
+    assert.equal(row.hash, hashApiKey(key));
+    assert.ok(!Object.values(row).includes(key));
+    assert.notEqual(store.createApiKey('laptop', 'default').key, key);
+  });
+
+  test('project must exist', () => {
+    assert.throws(() => store.createApiKey('laptop', 'nope'), /Validation failed/);
+    assert.throws(() => store.createApiKey('laptop', ''), /Validation failed/);
+  });
+
+  test('label must be 1–64 chars', () => {
+    assert.throws(() => store.createApiKey('   ', 'default'), /Validation failed/);
+    assert.throws(() => store.createApiKey('x'.repeat(65), 'default'), /Validation failed/);
+  });
+
+  test('verify accepts the key, rejects wrong/malformed/revoked ones', () => {
+    const { id, key } = store.createApiKey('laptop', 'default');
+    assert.deepEqual(store.verifyApiKey(key), { id, project: 'default' });
+    assert.equal(store.verifyApiKey(key + 'x'), null);
+    assert.equal(store.verifyApiKey(key.slice(4)), null);
+    assert.equal(store.verifyApiKey(''), null);
+    assert.equal(store.verifyApiKey('stm_' + 'a'.repeat(1000)), null);
+    const revoked = store.revokeApiKey(id);
+    assert.ok(revoked?.revokedAt);
+    assert.equal(store.verifyApiKey(key), null);
+    assert.deepEqual(store.listApiKeys(), [], 'revoked keys are not listed');
+  });
+
+  test('revoke is idempotent and null for an unknown id', () => {
+    const { id } = store.createApiKey('laptop', 'default');
+    store.db.prepare(`UPDATE api_keys SET revoked_at = '2000-01-01 00:00:00' WHERE id = ?`).run(id);
+    assert.equal(store.revokeApiKey(id)?.revokedAt, '2000-01-01 00:00:00');
+    assert.equal(store.revokeApiKey(999), null);
+  });
+
+  test('list has no hash; last_used_at is set on verify and throttled to once a minute', () => {
+    const { id, key } = store.createApiKey('laptop', 'default');
+    assert.deepEqual(Object.keys(store.listApiKeys()[0]!).sort(), ['createdAt', 'id', 'label', 'lastUsedAt', 'project', 'revokedAt']);
+    assert.equal(store.listApiKeys()[0]!.lastUsedAt, null);
+
+    store.verifyApiKey(key);
+    const first = store.listApiKeys()[0]!.lastUsedAt;
+    assert.ok(first);
+
+    store.db.prepare(`UPDATE api_keys SET last_used_at = datetime('now', '-30 seconds') WHERE id = ?`).run(id);
+    const recent = store.listApiKeys()[0]!.lastUsedAt;
+    store.verifyApiKey(key);
+    assert.equal(store.listApiKeys()[0]!.lastUsedAt, recent, 'within a minute: no write');
+
+    store.db.prepare(`UPDATE api_keys SET last_used_at = '2000-01-01 00:00:00' WHERE id = ?`).run(id);
+    store.verifyApiKey(key);
+    assert.notEqual(store.listApiKeys()[0]!.lastUsedAt, '2000-01-01 00:00:00');
+  });
+
+  test('stale schema: create/revoke refuse, verify still authenticates without touching', () => {
+    const { id, key } = store.createApiKey('laptop', 'default');
+    const other = new Database(dbPath);
+    other.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(99, 'future-migration');
+    other.close();
+    assert.throws(() => store.createApiKey('x', 'default'), StaleSchemaError);
+    assert.throws(() => store.revokeApiKey(id), StaleSchemaError);
+    assert.ok(store.verifyApiKey(key));
+    assert.equal(store.listApiKeys()[0]!.lastUsedAt, null);
   });
 });

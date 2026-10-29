@@ -80,6 +80,19 @@ export function createTaskApi({ dbPath }: TaskApiOptions) {
       return project;
     },
 
+    // No broadcast: keys aren't task data.
+    keys() {
+      return store.listApiKeys();
+    },
+
+    async createKey(body: { label?: unknown; project?: unknown }) {
+      return store.createApiKey(String(body?.label ?? ''), String(body?.project ?? ''));
+    },
+
+    async revokeKey(id: number) {
+      return store.revokeApiKey(id);
+    },
+
     async remove(id: number) {
       const ok = await store.deleteTask(id);
       broadcast();

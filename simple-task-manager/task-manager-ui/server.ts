@@ -24,12 +24,12 @@ const TASK_UI_MODE: 'bundled' | 'standalone' | 'disabled' =
 
 const app = express();
 
-// MCP over Streamable HTTP, loopback-only. Mounted before the global parser,
+// MCP over Streamable HTTP, API key required (mcp/http.ts). Mounted before the global parser,
 // whose 100 kB limit a long plan exceeds; the handler reads the body itself.
 // Its own store connection, so the UI's data_version poll sees MCP writes as
 // foreign and pushes SSE.
 const mcpStore = createStore(TASKS_DB);
-const handleMcp = createMcpHttpHandler({ store: mcpStore, port });
+const handleMcp = createMcpHttpHandler({ store: mcpStore });
 app.all('/mcp', (req, res) => { void handleMcp(req, res); });
 
 app.use(express.json());

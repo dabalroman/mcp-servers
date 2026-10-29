@@ -18,7 +18,9 @@ Standalone web UI for the `simple-task-manager` MCP. Sibling package to `simple-
 | `src/server/taskApi.ts` | REST + SSE handlers. Self-write broadcast on every mutation + 1s `data_version` poll for external writes. The 20s SSE heartbeat must stay a named `event: ping`, not a `: ping` comment — `EventSource` never exposes comments, and the `useTasks` watchdog reopens the stream after 45s without one. |
 | `src/server/taskRouter.ts` | connect/express middleware that fronts the API. Used by both `server.ts` and the Vite dev plugin. |
 | `src/client/*` | The React SPA (TaskManager, TaskCard, TaskForm, useTasks, helpers). Copied from random-tools and stripped of the tool-registry coupling. |
-| `src/components/*` | Shared UI: ToolHeader + shadcn primitives (Button, Dialog, Sonner). |
+| `src/client/ConnectDialog.tsx` | Connect a machine dialog (opened from `Footer`): creates a per-repo API key, shows the `claude mcp add` line and the agent setup prompt once, lists/revokes active keys. |
+| `src/lib/connectSetup.ts` | Pure builders for that add line and prompt (tested). |
+| `src/components/*` | Shared UI: ToolHeader, Footer, `CodeBlock` (click-to-copy + `copyText`, execCommand fallback for plain HTTP) + shadcn primitives (Button, Dialog, Sonner). |
 | `src/types/task.ts` | Shared client types — independent of the MCP's tasks.ts to keep the client compile-time clean. Shape must stay aligned. |
 | `vite.config.ts` | Vite plugin mounts the task API on the dev middleware stack so `vite` is enough for full-stack dev. |
 
@@ -55,6 +57,6 @@ The MCP spawns this server with `stdio: ['ignore', 'pipe', 'pipe']` and pipes bo
 
 ## When the public store surface changes
 
-`taskStore.ts` wraps the MCP store. If the MCP's `Store` interface gains or loses a method that this package uses (today: `load`, `loadWithNotes`, `add`, `update`, `setStatus`, `delete`, `dataVersion`, `close`), update the wrapper in the same commit.
+`taskStore.ts` wraps the MCP store. If the MCP's `Store` interface gains or loses a method that this package uses (today: `load`, `loadWithNotes`, `add`, `update`, `setStatus`, `delete`, `getProjects`, `createProject`, `listApiKeys`, `createApiKey`, `revokeApiKey`, `dataVersion`, `close`), update the wrapper in the same commit.
 
 `taskApi.list()` uses `loadWithNotes()` — same as `load()` plus note bodies (oldest first) via one bulk query. MCP list tools keep `load()` (noteCount only); don't switch them, or every list call ships every note body to the model.

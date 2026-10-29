@@ -20,6 +20,12 @@ How to move a local clone to a newer version without losing data or quietly losi
 
 ## Version notes
 
+### API keys on /mcp (2026-10-031)
+
+- `/mcp` now needs `Authorization: Bearer <key>` on every request, from the same machine too, and no longer checks the `Host` header. HTTP entries added before this get `401` until they send a key.
+- Create one key per repo from **Connect a machine** in the UI (footer). In each repo run `claude mcp remove task-manager -s local`, then the dialog's `claude mcp add` line. The key carries the repo's default project, so the `X-Project` header is no longer needed.
+- stdio entries (bundled mode) need no key and are unaffected. The migrations add an `api_keys` table; the pre-migration backup runs as usual.
+
 ### Shared standalone UI (2026-10-028)
 
 - The standalone UI's pm2 app is now `task-manager` (`task-manager-<port>` on a non-default port), not the repo's `PROJECT_NAME`, and the UI no longer shows a project label: its tabs do that.

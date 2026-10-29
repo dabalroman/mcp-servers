@@ -1,4 +1,6 @@
-import { Github, Tag } from 'lucide-react';
+import { useState } from 'react';
+import { Github, Plug, Tag } from 'lucide-react';
+import { ConnectDialog } from '@/client/ConnectDialog';
 
 type RunMode = 'bundled' | 'standalone' | 'disabled';
 
@@ -9,6 +11,8 @@ type FooterProps = {
 };
 
 export default function Footer({ version, repoUrl, mode }: FooterProps) {
+  const [connectOpen, setConnectOpen] = useState(false);
+
   return (
     <footer className="mt-8 border-t border-border bg-card">
       <div className="max-w-[1080px] mx-auto px-8 py-5 flex items-center justify-between gap-6">
@@ -35,7 +39,14 @@ export default function Footer({ version, repoUrl, mode }: FooterProps) {
             GitHub
           </a>
         </div>
+        <button type="button" onClick={() => setConnectOpen(true)}
+                className="flex items-center gap-1 uppercase tracking-widest hover:text-foreground transition-colors">
+          <Plug className="w-4 h-4 shrink-0" strokeWidth={1.5} />
+          Connect a machine
+        </button>
       </div>
+      {/* Remounted per open so a created key leaves memory on close. */}
+      <ConnectDialog key={String(connectOpen)} open={connectOpen} onOpenChange={setConnectOpen} />
     </footer>
   );
 }

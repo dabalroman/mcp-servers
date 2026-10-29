@@ -272,9 +272,9 @@ export async function handleHealth(binding?: { store: Store; ctx: SessionContext
   const http = binding?.ctx.transport === 'http';
   if (binding) {
     const { project } = binding.ctx;
-    const fix = http ? 'the X-Project header' : 'PROJECT_NAME';
+    const fix = http ? 'the X-Project header or the API key\'s default project' : 'PROJECT_NAME';
     sections.push(renderSection('Project', [
-      check('✓', http ? 'Transport = http (project from X-Project header)' : 'Transport = stdio'),
+      check('✓', http ? 'Transport = http (project from the API key, or the X-Project header if sent)' : 'Transport = stdio'),
       binding.store.hasProject(project)
         ? check('✓', `Bound project = ${project} (exists)`)
         : check('✗', `Bound project = ${project} — does not exist; create it with createProject or in the task-manager UI, or fix ${fix}`),
@@ -365,6 +365,13 @@ export async function handleHealth(binding?: { store: Store; ctx: SessionContext
       const msg = err instanceof Error ? err.message : String(err);
       runtimeChecks.push(check('✗', `DB migration check failed — ${msg}`));
     }
+  }
+
+  if (binding) {
+    const active = binding.store.listApiKeys().length;
+    runtimeChecks.push(active > 0
+      ? check('✓', `API keys for /mcp: ${active} active`)
+      : check('–', 'API keys for /mcp: none active — HTTP clients get 401; stdio needs none. Create one in the UI: Connect a machine'));
   }
 
   sections.push(renderSection('Runtime', runtimeChecks));

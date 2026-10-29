@@ -18,6 +18,7 @@ export function mountTaskApi(middlewareStack: MiddlewareStack, opts: MountOption
 
   middlewareStack.use('/api/tasks', withBody(api, dispatch, { stream: true }));
   middlewareStack.use('/api/projects', withBody(api, dispatchProjects, { stream: false }));
+  middlewareStack.use('/api/keys', withBody(api, dispatchKeys, { stream: false }));
   return { dispose: () => api.dispose() };
 }
 
@@ -64,6 +65,46 @@ async function dispatchProjects(
       result = api.projects();
     } else if (method === 'POST' && pathname === '/') {
       result = await api.createProject(req.body as { name?: unknown });
+    } else {
+      if (next) return next();
+      res.statusCode = 404;
+      res.end('Not found');
+      return;
+    }
+  } catch (err: unknown) {
+    return sendError(res, err);
+  }
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader('Cache-Control', 'no-store');
+  res.end(JSON.stringify(result));
+}
+
+// Keys for /mcp. The plaintext key is only in the POST response; list rows
+// carry no hash. The UI is unauthenticated on the LAN by decision, so anyone
+// who can open it can mint a key.
+async function dispatchKeys(
+  req: IncomingMessage & { body?: unknown },
+  res: ServerResponse,
+  next: Next | undefined,
+  pathname: string,
+  method: string,
+  api: TaskApi,
+): Promise<void> {
+  const revokeMatch = pathname.match(/^\/(\d+)\/revoke$/);
+  let result: unknown;
+  try {
+    if (method === 'GET' && pathname === '/') {
+      result = api.keys();
+    } else if (method === 'POST' && pathname === '/') {
+      result = await api.createKey(req.body as { label?: unknown; project?: unknown });
+    } else if (method === 'POST' && revokeMatch) {
+      result = await api.revokeKey(parseInt(revokeMatch[1]!, 10));
+      if (result === null) {
+        res.statusCode = 404;
+        res.setHeader('Content-Type', 'application/json');
+        res.end(JSON.stringify({ error: 'key not found' }));
+        return;
+      }
     } else {
       if (next) return next();
       res.statusCode = 404;

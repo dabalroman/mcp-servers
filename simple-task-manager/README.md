@@ -63,8 +63,8 @@ cd <your repo> && npx tsx <dir>/simple-task-manager/install.ts
 
 The installer builds `dist/` and writes `.mcp.json` with the correct paths.
 
-**network** (a central server on another host): add an HTTP entry with
-`claude mcp add --transport http … --scope project` in the repo.
+**client mode** (repos connect over HTTP to one long-running server, on this machine or another):
+see [Client mode: connect to the server over HTTP](#client-mode-connect-to-the-server-over-http).
 
 
 ### Step 3 — Approve and go
@@ -253,20 +253,58 @@ One UI serves every project in its database, and its project tabs show which one
 
 Repos with separate databases need separate UIs: give them distinct `TASK_UI_PORT` values, and each gets its own pm2 app (`task-manager-<port>`).
 
-### Shared server over HTTP (local)
+### Client mode: connect to the server over HTTP
 
-Every UI process, bundled or standalone, also serves the MCP itself at `/mcp` (Streamable HTTP). With a standalone UI running, sessions can connect to it instead of each starting their own stdio server:
+The out-of-the-box setup is bundled: one repo, a stdio MCP, its own UI and DB, and no key. To share
+one database across repos and machines instead, run one long-running **server** (the pm2 process that
+serves the UI and the MCP at `/mcp`) and connect each repo to it in **client mode**. The same steps
+apply to every machine, including the one running the server.
 
-```sh
-# from the repo, once per repo
-claude mcp add --transport http task-manager http://localhost:7374/mcp --header "X-Project: <project>" --scope local
-```
+**On the server machine, once:**
 
-- The `X-Project` header binds the connection to a project, just as `PROJECT_NAME` does over stdio. Without it, every request is rejected with an error naming the header. An unknown project gives the same error as an unknown `PROJECT_NAME`.
-- `/mcp` only accepts connections from the same machine (loopback) until API keys are supported.
-- The server is stateless, so `pm2 restart task-manager` doesn't break connected sessions; the next tool call just works.
+1. Install as in [Step 2](#step-2--bind-a-repo) in one repo, then run
+   `npx tsx <dir>/simple-task-manager/setup-standalone.ts on` there. That starts the pm2 app
+   `task-manager` on port 7374, which keeps running across sessions and reboots.
+2. To reach it from other machines, put an HTTPS reverse proxy in front of it (for example
+   `tailscale serve`). The app itself speaks plain HTTP. **Expose `/mcp` only**: the UI and its
+   `/api` have no login, and anyone who can open the UI can create keys.
+
+**For each repo you want connected (on any machine, the server machine included):**
+
+1. Open the UI and click **Connect a machine** in the footer. Enter a label (e.g.
+   `laptop / my-repo`), the repo's default project and the server URL as that machine will reach it
+   (the HTTPS proxy URL for a remote machine; the default is the address you opened the UI at).
+   Click **Create key**.
+2. The dialog shows the key **once**, inside one line to run in the repo:
+
+   ```sh
+   claude mcp add --transport http task-manager '<url>' --header 'Authorization: Bearer <key>' --scope local
+   ```
+
+   Local scope stores the entry in your user config (`~/.claude.json`), not in the repo's
+   `.mcp.json`, so the key is never committed. If the repo already has a `task-manager` entry, run
+   `claude mcp remove task-manager -s local` first. Or click **Copy setup prompt for agent** and
+   paste it into Claude Code in that repo; it contains the key, so treat it like one.
+3. Restart Claude Code in the repo and run the `health` tool. It should report `Transport = http`
+   and the default project you picked.
+
+**Managing keys.** The same dialog lists the active keys with their default project, creation time
+and last use. **Revoke** cuts that repo off on its next request. Only a SHA-256 of each key is
+stored; a lost key can't be shown again, so create a new one and revoke the old.
+
+**How it behaves:**
+
+- Every `/mcp` request needs `Authorization: Bearer <key>`, from the same machine too: a reverse
+  proxy forwards from `127.0.0.1`, so a loopback exemption would let every proxied request
+  through. A missing, wrong or revoked key gets `401 Unauthorized`, with no detail on which.
+- The key's default project binds the connection, just as `PROJECT_NAME` does over stdio. It's a
+  default, not a boundary: tools still reach other projects through their `project` argument. An
+  `X-Project` header, if sent, overrides the key's default.
+- The server is stateless, so `pm2 restart task-manager` doesn't break connected sessions; the
+  next tool call just works.
 - `ui-start` / `ui-stop` aren't offered over HTTP: the server is the UI.
-- `health` over HTTP reports `Transport = http` and skips the Config and Plugin sections, which describe a stdio server's env and the client machine. Run it from a stdio session to check those.
+- `health` over HTTP reports `Transport = http` and the number of active keys, and skips the
+  Config and Plugin sections, which describe a stdio server's env and the client machine.
 
 
 &nbsp;

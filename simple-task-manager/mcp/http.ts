@@ -4,14 +4,13 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { VERSION } from '../version.js';
 import { INSTRUCTIONS } from '../instructions.js';
 import { registerTools } from './registerTools.js';
-import type { Store } from '../tasks.js';
+import type { Store, VerifiedKey } from '../tasks.js';
 
 // Plain node:http types (no express) so node:test can drive the handler.
 
-const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
-
-export function isLoopback(addr?: string): boolean {
-  return addr !== undefined && LOOPBACK.has(addr);
+function bearerToken(header: string | undefined): string | undefined {
+  const m = header?.match(/^Bearer +(\S+) *$/i);
+  return m?.[1];
 }
 
 function sendError(res: ServerResponse, status: number, code: number, message: string, headers: Record<string, string> = {}): void {
@@ -21,16 +20,30 @@ function sendError(res: ServerResponse, status: number, code: number, message: s
 
 export type McpHttpHandler = (req: IncomingMessage, res: ServerResponse) => Promise<void>;
 
-// Stateless: a fresh server + transport per POST, X-Project read every time, so
+// Stateless: a fresh server + transport per POST, project resolved every time, so
 // there is no session map to leak and a process restart strands no client.
 // The transport reads the body itself, so nothing is parsed before the guards
 // and bad JSON gets a JSON-RPC parse error.
-export function createMcpHttpHandler({ store, port }: { store: Store; port: number }): McpHttpHandler {
-  const allowedHosts = [`localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`];
-
+// The key is checked on every request, loopback included: a TLS reverse proxy
+// (e.g. `tailscale serve`) forwards from 127.0.0.1. There is no Host check
+// either: DNS rebinding can't supply the bearer key, and a loopback-only Host
+// list would block LAN and proxied clients.
+export function createMcpHttpHandler({ store }: { store: Store }): McpHttpHandler {
   return async (req, res) => {
-    if (!isLoopback(req.socket.remoteAddress)) {
-      sendError(res, 403, -32000, '/mcp accepts loopback connections only (API keys are not supported yet)');
+    const key = bearerToken(req.headers.authorization);
+    let verified: VerifiedKey | null = null;
+    try {
+      verified = key === undefined ? null : store.verifyApiKey(key);
+    } catch (err) {
+      // No detail before auth: the caller may be anyone.
+      console.error('[mcp/http] key check failed:', err);
+      sendError(res, 500, -32603, 'Internal error');
+      return;
+    }
+    if (!verified) {
+      // Same body for missing, wrong and revoked keys. No OAuth resource_metadata:
+      // Claude Code would start an OAuth flow.
+      sendError(res, 401, -32001, 'Unauthorized', { 'WWW-Authenticate': 'Bearer' });
       return;
     }
     if (req.method !== 'POST') {
@@ -38,9 +51,11 @@ export function createMcpHttpHandler({ store, port }: { store: Store; port: numb
       return;
     }
     const raw = req.headers['x-project'];
-    const project = (Array.isArray(raw) ? raw[0] : raw)?.trim();
+    // The header overrides the key's default project; keys from before keys had
+    // a project rely on it.
+    const project = (Array.isArray(raw) ? raw[0] : raw)?.trim() || verified.project;
     if (!project) {
-      sendError(res, 400, -32600, 'Missing X-Project header — bind the connection to a project, e.g. claude mcp add --transport http task-manager <url> --header "X-Project: <project>"');
+      sendError(res, 400, -32600, 'This API key has no default project — send an X-Project header, or create a new key in the UI (Connect a machine)');
       return;
     }
 
@@ -50,10 +65,6 @@ export function createMcpHttpHandler({ store, port }: { store: Store; port: numb
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,
         enableJsonResponse: true,
-        // Blocks DNS-rebinding pages in a local browser. Deprecated in the SDK
-        // in favour of middleware, still supported.
-        enableDnsRebindingProtection: true,
-        allowedHosts,
       });
       res.on('close', () => {
         void transport.close();

@@ -3,6 +3,7 @@
 import { createRequire } from 'node:module';
 import { readdirSync, copyFileSync, constants as fsConstants } from 'node:fs';
 import { join, basename } from 'node:path';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import type { Database as DB } from 'better-sqlite3';
@@ -387,6 +388,10 @@ export type Store = {
   addNote(taskId: number, body: string): Note | null;
   updateNote(noteId: number, body: string): Note | null;
   deleteNote(noteId: number): boolean;
+  createApiKey(label: string, project: string): { id: number; label: string; project: string; key: string };
+  listApiKeys(): ApiKey[];
+  revokeApiKey(id: number): ApiKey | null;
+  verifyApiKey(presented: string): VerifiedKey | null;
   schemaStatus(): SchemaStatus;
   close(): void;
 };
@@ -394,6 +399,18 @@ export type Store = {
 export type SchemaStatus = { last: { name: string; appliedAt: string } | null; unknown: string[] };
 
 export const PROJECT_NAME_MAX = 64;
+
+export type ApiKey = { id: number; label: string; project: string | null; createdAt: string; lastUsedAt: string | null; revokedAt: string | null };
+export type VerifiedKey = { id: number; project: string | null };
+
+export const API_KEY_PREFIX = 'stm_';
+export const API_KEY_LABEL_MAX = 64;
+// Far above a real key (4 + 43 chars); stops hashing arbitrarily large headers.
+const API_KEY_MAX_LENGTH = 256;
+
+export function hashApiKey(key: string): string {
+  return createHash('sha256').update(key, 'utf8').digest('hex');
+}
 
 function isValidProjectName(trimmed: string): boolean {
   return trimmed.length >= 1 && trimmed.length <= PROJECT_NAME_MAX;
@@ -479,6 +496,13 @@ export function createStore(dbPath: string): Store {
   const stmtChildrenOf      = db.prepare('SELECT id, title, status, type, priority FROM tasks WHERE parent_id = ? ORDER BY id');
   const stmtHasChildren     = db.prepare('SELECT 1 FROM tasks WHERE parent_id = ? LIMIT 1');
   const stmtSelectProject   = db.prepare('SELECT name FROM projects WHERE name = ?');
+  const API_KEY_COLS = 'id, label, project, created_at AS createdAt, last_used_at AS lastUsedAt, revoked_at AS revokedAt';
+  const stmtSelectApiKey    = db.prepare(`SELECT ${API_KEY_COLS} FROM api_keys WHERE id = ?`);
+  const stmtApiKeyByHash    = db.prepare(`
+    SELECT id, hash, project, (last_used_at IS NULL OR last_used_at <= datetime('now', '-60 seconds')) AS stale
+    FROM api_keys WHERE hash = ? AND revoked_at IS NULL
+  `);
+  const stmtTouchApiKey     = db.prepare(`UPDATE api_keys SET last_used_at = datetime('now') WHERE id = ?`);
 
   function readRefsFor(id: number): Ref[] {
     return (stmtRefsFrom.all(id) as RefRow[]).map(refRowToObj);
@@ -1033,6 +1057,50 @@ export function createStore(dbPath: string): Store {
     })();
   }
 
+  function createApiKey(label: string, project: string): { id: number; label: string; project: string; key: string } {
+    assertSchemaCurrent();
+    const trimmed = String(label ?? '').trim();
+    if (trimmed.length < 1 || trimmed.length > API_KEY_LABEL_MAX) {
+      throw new Error(`Validation failed: key label must be 1–${API_KEY_LABEL_MAX} characters.`);
+    }
+    const canonical = canonicalProject(project);
+    const key = API_KEY_PREFIX + randomBytes(32).toString('base64url');
+    const info = db.prepare('INSERT INTO api_keys (label, project, hash) VALUES (?, ?, ?)').run(trimmed, canonical, hashApiKey(key));
+    return { id: Number(info.lastInsertRowid), label: trimmed, project: canonical, key };
+  }
+
+  // Active keys only: a revoked row stays for the audit trail but has nothing to manage.
+  function listApiKeys(): ApiKey[] {
+    return db.prepare(`SELECT ${API_KEY_COLS} FROM api_keys WHERE revoked_at IS NULL ORDER BY id`).all() as ApiKey[];
+  }
+
+  // Idempotent: an already-revoked key keeps its original revoked_at.
+  function revokeApiKey(id: number): ApiKey | null {
+    assertSchemaCurrent();
+    db.prepare(`UPDATE api_keys SET revoked_at = datetime('now') WHERE id = ? AND revoked_at IS NULL`).run(id);
+    return (stmtSelectApiKey.get(id) as ApiKey | undefined) ?? null;
+  }
+
+  // last_used_at is touched at most once a minute per key, so an active client
+  // doesn't take the write lock (and move the UI's data_version) on every request.
+  function verifyApiKey(presented: string): VerifiedKey | null {
+    if (typeof presented !== 'string' || presented.length > API_KEY_MAX_LENGTH || !presented.startsWith(API_KEY_PREFIX)) return null;
+    const hash = hashApiKey(presented);
+    const row = stmtApiKeyByHash.get(hash) as { id: number; hash: string; project: string | null; stale: number } | undefined;
+    if (!row || !timingSafeEqual(Buffer.from(row.hash, 'hex'), Buffer.from(hash, 'hex'))) return null;
+    if (row.stale) {
+      // Bookkeeping only: a stale schema (writes refused, reads served) or a
+      // busy DB must not turn a valid key into a failed request.
+      try {
+        assertSchemaCurrent();
+        stmtTouchApiKey.run(row.id);
+      } catch (err) {
+        if (!(err instanceof StaleSchemaError)) console.error(`[api-keys] last_used_at not updated: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    return { id: row.id, project: row.project };
+  }
+
   // Another process may migrate the DB while this one runs; the check at open
   // can't see that, so every write re-checks. Reads stay allowed.
   function schemaStatus(): SchemaStatus {
@@ -1079,6 +1147,10 @@ export function createStore(dbPath: string): Store {
     addNote,
     updateNote,
     deleteNote,
+    createApiKey,
+    listApiKeys,
+    revokeApiKey,
+    verifyApiKey,
     schemaStatus,
     close,
   };

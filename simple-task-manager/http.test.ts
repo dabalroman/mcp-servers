@@ -9,7 +9,7 @@ import Database from 'better-sqlite3';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createStore, type Store } from './tasks.js';
-import { createMcpHttpHandler, isLoopback } from './mcp/http.js';
+import { createMcpHttpHandler } from './mcp/http.js';
 
 type ToolResult = { content: { type: string; text: string }[]; isError?: boolean };
 
@@ -27,6 +27,8 @@ let dbPath: string;
 let store: Store;
 let server: Server;
 let port: number;
+let key: string;
+let keyId: number;
 const clients: Client[] = [];
 
 beforeEach(async () => {
@@ -35,11 +37,12 @@ beforeEach(async () => {
   store = createStore(dbPath);
   store.createProject('a');
   store.createProject('b');
+  ({ id: keyId, key } = store.createApiKey('test-machine', 'b'));
   let handler: ReturnType<typeof createMcpHttpHandler> | undefined;
   server = createServer((req, res) => { void handler!(req, res); });
+  handler = createMcpHttpHandler({ store });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   port = (server.address() as AddressInfo).port;
-  handler = createMcpHttpHandler({ store, port });
 });
 
 afterEach(async () => {
@@ -50,10 +53,10 @@ afterEach(async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-async function connect(project: string): Promise<Client> {
+async function connect(project: string | undefined, bearer: string = key): Promise<Client> {
   const client = new Client({ name: 'http-test', version: '0.0.0' });
   const transport = new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`), {
-    requestInit: { headers: { 'X-Project': project } },
+    requestInit: { headers: { ...(project === undefined ? {} : { 'X-Project': project }), Authorization: `Bearer ${bearer}` } },
     fetch: realFetch,
   });
   await client.connect(transport);
@@ -84,6 +87,7 @@ const INIT = JSON.stringify({
   params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'raw', version: '0' } },
 });
 const POST_HEADERS = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' };
+const authed = (): Record<string, string> => ({ ...POST_HEADERS, Authorization: `Bearer ${key}` });
 
 describe('MCP over Streamable HTTP', () => {
   test('lists the tools without ui-start / ui-stop', async () => {
@@ -107,31 +111,35 @@ describe('MCP over Streamable HTTP', () => {
     assert.ok(fromA.content[0]!.text.includes('only in a'));
   });
 
-  test('missing X-Project → 400 naming the header', async () => {
-    const res = await raw({ method: 'POST', headers: POST_HEADERS, body: INIT });
+  test('without X-Project the key\'s default project binds; the header overrides it', async () => {
+    const viaKey = await connect(undefined);
+    const viaHeader = await connect('a');
+    assert.ok(!(await call(viaHeader, 'add', { title: 'only in a', type: 'bug', priority: 'high', status: 'todo' })).isError);
+    assert.ok(!(await call(viaKey, 'getNext')).content[0]!.text.includes('only in a'));
+    const other = await call(viaKey, 'getNext', { project: 'a' });
+    assert.ok(other.content[0]!.text.includes('only in a'), 'other projects stay reachable');
+  });
+
+  test('a key with no default project and no X-Project → 400 naming the header', async () => {
+    store.db.prepare('UPDATE api_keys SET project = NULL').run();
+    const res = await raw({ method: 'POST', headers: authed(), body: INIT });
     assert.equal(res.status, 400);
     assert.match(res.body, /X-Project/);
   });
 
   test('GET → 405 with Allow: POST', async () => {
-    const res = await raw({ method: 'GET', headers: { 'X-Project': 'a' } });
+    const res = await raw({ method: 'GET', headers: { 'X-Project': 'a', Authorization: `Bearer ${key}` } });
     assert.equal(res.status, 405);
     assert.equal(res.headers['allow'], 'POST');
   });
 
-  test('a foreign Host header is rejected (DNS rebinding)', async () => {
-    const res = await raw({ method: 'POST', headers: { ...POST_HEADERS, 'X-Project': 'a', Host: `rebind.example:${port}` }, body: INIT });
-    assert.equal(res.status, 403);
-    assert.match(res.body, /Invalid Host header/);
-  });
-
-  test('an allowed Host header is accepted', async () => {
-    const res = await raw({ method: 'POST', headers: { ...POST_HEADERS, 'X-Project': 'a', Host: `localhost:${port}` }, body: INIT });
+  test('a valid key on a foreign Host is accepted (no Host check: LAN and proxied clients)', async () => {
+    const res = await raw({ method: 'POST', headers: { ...authed(), 'X-Project': 'a', Host: `nas.example:${port}` }, body: INIT });
     assert.equal(res.status, 200);
   });
 
   test('malformed JSON → JSON-RPC parse error', async () => {
-    const res = await raw({ method: 'POST', headers: { ...POST_HEADERS, 'X-Project': 'a' }, body: '{not json' });
+    const res = await raw({ method: 'POST', headers: { ...authed(), 'X-Project': 'a' }, body: '{not json' });
     assert.equal(res.status, 400);
     assert.match(res.body, /-32700/);
   });
@@ -172,9 +180,54 @@ describe('MCP over Streamable HTTP', () => {
   });
 });
 
-describe('isLoopback', () => {
-  test('truth table', () => {
-    for (const addr of ['127.0.0.1', '::1', '::ffff:127.0.0.1']) assert.equal(isLoopback(addr), true, addr);
-    for (const addr of [undefined, '', '10.0.0.2', '::ffff:10.0.0.2', '127.0.0.2', '0.0.0.0']) assert.equal(isLoopback(addr), false, String(addr));
+describe('API key on /mcp', () => {
+  async function rejected(headers: Record<string, string>): Promise<{ status: number; body: string; headers: Record<string, unknown> }> {
+    return await raw({ method: 'POST', headers: { ...POST_HEADERS, 'X-Project': 'a', ...headers }, body: INIT });
+  }
+
+  test('missing, wrong, malformed and revoked keys all get the same 401 — loopback included', async () => {
+    const other = store.createApiKey('other', 'a');
+    store.revokeApiKey(other.id);
+    const cases = {
+      missing: {},
+      wrong: { Authorization: `Bearer stm_${'A'.repeat(43)}` },
+      notBearer: { Authorization: `Basic ${key}` },
+      revoked: { Authorization: `Bearer ${other.key}` },
+    };
+    const results = await Promise.all(Object.values(cases).map(rejected));
+    for (const r of results) {
+      assert.equal(r.status, 401);
+      assert.equal(r.headers['www-authenticate'], 'Bearer');
+      assert.equal(r.body, results[0]!.body);
+    }
+    assert.deepEqual(JSON.parse(results[0]!.body), { jsonrpc: '2.0', error: { code: -32001, message: 'Unauthorized' }, id: null });
+  });
+
+  test('the key is checked before method and X-Project', async () => {
+    assert.equal((await raw({ method: 'GET' })).status, 401);
+    assert.equal((await raw({ method: 'POST', headers: POST_HEADERS, body: INIT })).status, 401);
+  });
+
+  test('a revoked key stops working on the next request', async () => {
+    const client = await connect('a');
+    assert.ok((await client.listTools()).tools.length > 0);
+    store.revokeApiKey(keyId);
+    await assert.rejects(client.listTools());
+  });
+
+  test('a successful request records last_used_at', async () => {
+    assert.equal(store.listApiKeys()[0]!.lastUsedAt, null);
+    const client = await connect('a');
+    await client.listTools();
+    assert.ok(store.listApiKeys()[0]!.lastUsedAt);
+  });
+
+  test('health shows the active key count and no key material', async () => {
+    const client = await connect('a');
+    const res = await call(client, 'health');
+    const report = (JSON.parse(res.content[0]!.text) as { report: string }).report;
+    assert.match(report, /API keys for \/mcp: 1 active/);
+    assert.ok(!report.includes(key));
+    assert.ok(!report.includes('test-machine'));
   });
 });

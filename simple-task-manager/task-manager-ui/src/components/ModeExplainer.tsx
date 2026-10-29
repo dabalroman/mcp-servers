@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { Info, Copy } from 'lucide-react';
-import { toast } from 'sonner';
+import { Info } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -9,6 +8,7 @@ import {
   DialogTitle,
 } from './ui/dialog';
 import { pm2AppName } from '../lib/pm2';
+import { CodeBlock } from './CodeBlock';
 
 type RunMode = 'bundled' | 'standalone' | 'disabled';
 
@@ -58,55 +58,6 @@ const modes = (packageDir: string | null): ModeBlock[] => [
     ],
   },
 ];
-
-function execCopy(text: string, container: HTMLElement) {
-  const el = document.createElement('textarea');
-  el.value = text;
-  el.style.cssText = 'position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none';
-  container.appendChild(el);
-  el.focus();
-  el.select();
-  try {
-    document.execCommand('copy');
-    toast.success('Copied');
-  } catch {
-    toast.error('Copy failed');
-  }
-  container.removeChild(el);
-}
-
-function CodeBlock({ text, copyable }: { text: string; copyable: boolean }) {
-  const [hovered, setHovered] = useState(false);
-
-  function handleClick(e: React.MouseEvent) {
-    if (!copyable) return;
-    const container = (e.currentTarget as HTMLElement).closest('[role="dialog"]') as HTMLElement ?? document.body;
-    if (navigator.clipboard) {
-      navigator.clipboard.writeText(text).then(() => toast.success('Copied')).catch(() => execCopy(text, container));
-    } else {
-      execCopy(text, container);
-    }
-  }
-
-  return (
-    <code
-      className={[
-        'relative block font-mono text-2xs bg-background border border-border rounded px-3 py-2 text-foreground break-all',
-        copyable ? 'cursor-pointer hover:bg-accent/20 hover:border-primary/50 transition-colors' : '',
-      ].join(' ')}
-      onClick={copyable ? handleClick : undefined as never}
-      onMouseEnter={() => copyable && setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-    >
-      {text}
-      {copyable && hovered && (
-        <span className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground">
-          <Copy className="w-3.5 h-3.5" strokeWidth={1.5} />
-        </span>
-      )}
-    </code>
-  );
-}
 
 export default function ModeExplainer({ currentMode, packageDir }: { currentMode: RunMode; packageDir: string | null }) {
   const [open, setOpen] = useState(false);

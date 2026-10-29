@@ -108,3 +108,52 @@ describe('DB migrated past this build mid-session', () => {
     expect(read.status).toBe(200);
   });
 });
+
+describe('/api/keys', () => {
+  it('POST returns the key once; GET lists rows without hash or key', async () => {
+    const created = await request(app).post('/api/keys/').send({ label: 'laptop', project: 'default' });
+    expect(created.status).toBe(200);
+    expect(created.headers['cache-control']).toBe('no-store');
+    expect(created.body).toEqual({ id: expect.any(Number), label: 'laptop', project: 'default', key: expect.stringMatching(/^stm_[A-Za-z0-9_-]{43}$/) });
+
+    const list = await request(app).get('/api/keys/');
+    expect(list.status).toBe(200);
+    expect(list.body).toHaveLength(1);
+    expect(Object.keys(list.body[0]).sort()).toEqual(['createdAt', 'id', 'label', 'lastUsedAt', 'project', 'revokedAt']);
+    expect(JSON.stringify(list.body)).not.toContain(created.body.key);
+  });
+
+  it('POST with an empty label → 400', async () => {
+    const res = await request(app).post('/api/keys/').send({ label: '  ' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/label/);
+  });
+
+  it('POST with an unknown project → 400', async () => {
+    const res = await request(app).post('/api/keys/').send({ label: 'laptop', project: 'nope' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/nope/);
+  });
+
+  it('revoke marks the key and stops it verifying; unknown id → 404', async () => {
+    const { body } = await request(app).post('/api/keys/').send({ label: 'laptop', project: 'default' });
+    const res = await request(app).post(`/api/keys/${body.id}/revoke`);
+    expect(res.status).toBe(200);
+    expect(res.body.revokedAt).toEqual(expect.any(String));
+
+    const store = createStore(dbPath);
+    try {
+      expect(store.verifyApiKey(body.key)).toBeNull();
+      expect(store.listApiKeys()).toEqual([]);
+    } finally {
+      store.close();
+    }
+    expect((await request(app).post('/api/keys/999/revoke')).status).toBe(404);
+  });
+
+  it('task list and SSE-backed routes never carry keys', async () => {
+    await request(app).post('/api/keys/').send({ label: 'laptop', project: 'default' });
+    const tasks = await request(app).get('/api/tasks/');
+    expect(JSON.stringify(tasks.body)).not.toMatch(/stm_|laptop/);
+  });
+});
