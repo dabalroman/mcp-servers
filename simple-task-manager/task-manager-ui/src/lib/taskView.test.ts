@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sortTasks, groupTasks, getSectionValue, nestEpicChildren, epicProgress, filterByProject, pickProject, projectFromPath, projectPath } from './taskView';
+import { sortTasks, groupTasks, getSectionValue, nestEpicChildren, epicProgress, filterByProject, matchesTaskQuery, pickProject, projectFromPath, projectPath } from './taskView';
 import type { SortDir } from './taskView';
 import type { Task } from '@/types/task';
 
@@ -230,6 +230,25 @@ describe('filterByProject', () => {
     const tasks = [makeTask({ id: 1, project: 'a-project' }), makeTask({ id: 2, project: 'b-project' }), makeTask({ id: 3, project: 'A-Project' })];
     expect(filterByProject(tasks, 'a-project').map((t) => t.id)).toEqual([1, 3]);
     expect(filterByProject(tasks, 'nope')).toEqual([]);
+  });
+});
+
+describe('matchesTaskQuery', () => {
+  const task = makeTask({ id: 371, title: 'Use the References picker' });
+
+  it('matches everything on an empty query', () => {
+    expect(matchesTaskQuery(task, '')).toBe(true);
+  });
+
+  it('matches by id with or without the hash', () => {
+    expect(matchesTaskQuery(task, '37')).toBe(true);
+    expect(matchesTaskQuery(task, '#371')).toBe(true);
+    expect(matchesTaskQuery(task, '#71')).toBe(false);
+  });
+
+  it('matches the title ignoring case', () => {
+    expect(matchesTaskQuery(task, 'references PICK')).toBe(true);
+    expect(matchesTaskQuery(task, 'epic')).toBe(false);
   });
 });
 

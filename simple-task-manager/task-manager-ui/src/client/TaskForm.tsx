@@ -6,6 +6,7 @@ import {
 } from '@/components/ui/dialog';
 import { TYPES, PRIORITIES, RELATIONS, STATUS_CLASSES, STATUS_LABELS } from './constants';
 import { cn } from '@/lib/utils';
+import { TaskPicker } from './TaskPicker';
 import { filterByProject } from '@/lib/taskView';
 import type { Task, TaskRef, TaskType, TaskPriority, TaskStatus } from '@/types/task';
 
@@ -81,16 +82,12 @@ function formsEqual(a: FormState, b: FormState): boolean {
 export function TaskForm({ open, onOpenChange, initial, allTasks, projects, project, onSubmit, onDelete }: TaskFormProps) {
   const [form, setForm] = useState<FormState>(() => deriveForm(initial, project));
   const [initialForm] = useState<FormState>(() => deriveForm(initial, project));
-  const [refSearch, setRefSearch] = useState('');
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [refHighlight, setRefHighlight] = useState(-1);
+  const [epicCleared, setEpicCleared] = useState(false);
   const [scopeOpen, setScopeOpen] = useState(false);
   const [scopeHighlight, setScopeHighlight] = useState(-1);
   const [scopePicked, setScopePicked] = useState<boolean>(() => (initial?.scope ?? '') !== '');
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scopeCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scopeInputRef = useRef<HTMLInputElement | null>(null);
-  const refInputRef = useRef<HTMLInputElement | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
 
   // Move focus to the title input after Radix finishes its own focus
@@ -207,67 +204,12 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, projects, proj
       setForm((f) => ({ ...f, [k]: e.target.value as FormState[K] }));
 
   function addRef(task: Task) {
-    if (form.refs.some((r) => r.id === task.id)) return;
-    setForm((f) => ({ ...f, refs: [...f.refs, { id: task.id, relation: 'relates to' }] }));
-    setRefSearch('');
-    setDropdownOpen(false);
-    setRefHighlight(-1);
+    setForm((f) => f.refs.some((r) => r.id === task.id) ? f : { ...f, refs: [...f.refs, { id: task.id, relation: 'relates to' }] });
   }
 
-  function clearRefSearch() {
-    setRefSearch('');
-    setRefHighlight(-1);
-    refInputRef.current?.focus();
-  }
-
-  function onRefSearchKeyDown(e: KeyboardEvent<HTMLInputElement>) {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      e.stopPropagation();
-      if (!dropdownOpen) {
-        if (candidates.length > 0) {
-          setDropdownOpen(true);
-          setRefHighlight(0);
-        }
-        return;
-      }
-      if (refHighlight >= 0 && refHighlight < candidates.length) {
-        const picked = candidates[refHighlight];
-        if (picked !== undefined) addRef(picked);
-        return;
-      }
-      setDropdownOpen(false);
-      setRefHighlight(-1);
-      return;
-    }
-    if (e.key === 'ArrowDown') {
-      e.preventDefault();
-      if (candidates.length === 0) return;
-      if (!dropdownOpen) {
-        setDropdownOpen(true);
-        setRefHighlight(0);
-      } else {
-        setRefHighlight((h) => (h + 1) % candidates.length);
-      }
-      return;
-    }
-    if (e.key === 'ArrowUp') {
-      e.preventDefault();
-      if (candidates.length === 0) return;
-      if (!dropdownOpen) {
-        setDropdownOpen(true);
-        setRefHighlight(candidates.length - 1);
-      } else {
-        setRefHighlight((h) => (h <= 0 ? candidates.length - 1 : h - 1));
-      }
-      return;
-    }
-    if (e.key === 'Escape' && dropdownOpen) {
-      e.preventDefault();
-      e.stopPropagation();
-      setDropdownOpen(false);
-      setRefHighlight(-1);
-    }
+  function clearParent() {
+    setForm((f) => ({ ...f, parentId: null }));
+    setEpicCleared(true);
   }
 
   function removeRef(id: number) {
@@ -283,16 +225,9 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, projects, proj
 
   const selectedIds = new Set(form.refs.map((r) => r.id));
   const editingId = initial?.id;
-  const epics = allTasks.filter((t) => t.type === 'epic' && t.id !== editingId);
-
-  const candidates = allTasks.filter((t) =>
-    t.id !== editingId &&
-    t.status !== 'done' &&
-    !selectedIds.has(t.id) &&
-    (refSearch === '' ||
-      `#${t.id}`.includes(refSearch) ||
-      t.title.toLowerCase().includes(refSearch.toLowerCase()))
-  );
+  const epicCandidates = allTasks.filter((t) => t.type === 'epic' && t.id !== editingId && t.status !== 'done');
+  const refCandidates = allTasks.filter((t) => t.id !== editingId && t.status !== 'done' && !selectedIds.has(t.id));
+  const parent = form.parentId === null ? undefined : allTasks.find((t) => t.id === form.parentId);
 
   const [submitting, setSubmitting] = useState(false);
 
@@ -440,17 +375,30 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, projects, proj
           </div>
 
           {form.type !== 'epic' && (
-            <label className="flex flex-col gap-1">
+            <div className="flex flex-col gap-1">
               <span className="text-xs tracking-widest text-muted-foreground uppercase">Parent epic</span>
-              <select
-                value={form.parentId ?? ''}
-                onChange={(e) => setForm((f) => ({ ...f, parentId: e.target.value === '' ? null : Number(e.target.value) }))}
-                className="bg-background border border-border px-2 h-9 text-base text-foreground focus:outline-none focus:border-primary min-w-0"
-              >
-                <option value="">none</option>
-                {epics.map((t) => <option key={t.id} value={t.id}>#{t.id} {t.title}</option>)}
-              </select>
-            </label>
+              {form.parentId !== null ? (
+                <div className="flex items-center gap-2 px-3 h-9 border border-border">
+                  <span className="text-xs text-muted-foreground/60 shrink-0 font-mono">#{form.parentId}</span>
+                  <span className="text-sm text-foreground flex-1 truncate min-w-0">{parent?.title ?? '—'}</span>
+                  <button
+                    type="button"
+                    aria-label="Clear parent epic"
+                    onClick={clearParent}
+                    className="text-muted-foreground/40 hover:text-destructive transition-colors shrink-0 text-sm leading-none"
+                  >
+                    ✕
+                  </button>
+                </div>
+              ) : (
+                <TaskPicker
+                  tasks={epicCandidates}
+                  onPick={(t) => setForm((f) => ({ ...f, parentId: t.id }))}
+                  placeholder="Search epics…"
+                  autoFocus={epicCleared}
+                />
+              )}
+            </div>
           )}
 
           <label className="flex flex-col gap-1">
@@ -513,56 +461,7 @@ export function TaskForm({ open, onOpenChange, initial, allTasks, projects, proj
               </div>
             )}
 
-            <div className="relative">
-              <input
-                ref={refInputRef}
-                value={refSearch}
-                onChange={(e) => { setRefSearch(e.target.value); setDropdownOpen(true); setRefHighlight(-1); }}
-                onFocus={() => setDropdownOpen(true)}
-                onBlur={() => { closeTimer.current = setTimeout(() => { setDropdownOpen(false); setRefHighlight(-1); }, 150); }}
-                onKeyDown={onRefSearchKeyDown}
-                placeholder="Search tasks to link…"
-                className="bg-background border border-border pl-3 pr-8 h-9 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-full"
-              />
-              {refSearch === '' ? (
-                <ChevronDown
-                  className="absolute right-2 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none"
-                  strokeWidth={1.5}
-                />
-              ) : (
-                <button
-                  type="button"
-                  aria-label="Clear search"
-                  onMouseDown={(e) => e.preventDefault()}
-                  onClick={clearRefSearch}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  <X className="w-4 h-4" strokeWidth={1.5} />
-                </button>
-              )}
-              {dropdownOpen && candidates.length > 0 && (
-                <div tabIndex={-1} className="absolute top-full left-0 right-0 border border-border border-t-0 bg-card z-10 max-h-48 overflow-y-auto">
-                  {candidates.map((t, i) => (
-                    <button
-                      key={t.id}
-                      type="button"
-                      tabIndex={-1}
-                      onMouseDown={() => { if (closeTimer.current) clearTimeout(closeTimer.current); }}
-                      onMouseEnter={() => setRefHighlight(i)}
-                      onClick={() => addRef(t)}
-                      className={cn(
-                        'w-full flex items-center gap-2 px-3 py-2 text-left transition-colors min-w-0',
-                        i === refHighlight ? 'bg-accent/30' : 'hover:bg-accent/20',
-                      )}
-                    >
-                      <span className="text-xs text-muted-foreground/60 shrink-0 font-mono">#{t.id}</span>
-                      <span className="text-sm text-foreground truncate min-w-0 flex-1">{t.title}</span>
-                      <span className="text-xs text-muted-foreground/50 shrink-0 ml-auto">{t.type}</span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+            <TaskPicker tasks={refCandidates} onPick={addRef} placeholder="Search tasks to link…" />
           </div>
 
           <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">

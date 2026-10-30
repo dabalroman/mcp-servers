@@ -147,6 +147,13 @@ export function filterByProject(tasks: Task[], project: string): Task[] {
   return tasks.filter((t) => t.project.toLowerCase() === key);
 }
 
+// Task-picker search: matches "#<id>" substrings or the title, ignoring case.
+export function matchesTaskQuery(task: Task, query: string): boolean {
+  return query === '' ||
+    `#${task.id}`.includes(query) ||
+    task.title.toLowerCase().includes(query.toLowerCase());
+}
+
 // The remembered selection if it still exists, otherwise the first project
 // alphabetically; null only when there are no projects at all.
 export function pickProject(names: string[], remembered: string | null): string | null {
