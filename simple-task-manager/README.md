@@ -86,7 +86,7 @@ If another command uses the same name, the namespaced form works too (`/tm:imple
 - **Refs** — links like `blocks` or `depends on`. The server writes the inverse on the other task.
 
 Claude calls the tools itself: `add`, `update`, `setStatus`, `getNext`, `getAll`, `getById`,
-`addNote`, `uploadPlan`, `health`, and more. Each describes itself to Claude when it connects.
+`addNote`, `health`, and more. Each describes itself to Claude when it connects.
 
 ## Web UI
 
@@ -123,16 +123,9 @@ npx tsx <dir>/simple-task-manager/install.ts --server on [dir] [--db <path>] [--
 This starts the pm2 app `task-manager` on port 7374 and keeps it running across sessions and
 reboots (with `pm2 startup` configured). Re-run it to change the DB or port; `--server off` stops it.
 
-**To reach it from other machines,** put an HTTPS proxy in front that exposes **`/mcp` only**: the
-UI has no login, and anyone who can open it can create keys. With [Tailscale](https://tailscale.com),
-pick a free port (`tailscale serve status`) and run:
-
-```sh
-sudo tailscale serve --bg --https=<port> --set-path=/mcp http://127.0.0.1:7374/mcp
-```
-
-Other machines then use `https://<tailnet-host>:<port>/mcp`. `curl -i` on that URL should answer
-`401`. Plain `http://<host>:7374/mcp` on the LAN works too, but sends the key in cleartext.
+**Other machines** connect to `http://<host>:7374/mcp`; `curl -i` on that URL should answer `401`.
+Keep the port on a network you trust: the key travels in cleartext, and the UI has no login, so
+anyone who can open it can create keys.
 
 **For each repo** (on any machine, the server's included). A machine that only connects needs Claude
 Code and the plugin; no clone or Node.
@@ -158,9 +151,9 @@ Only a hash of each key is stored, so a lost key is replaced, not recovered.
 - **The UI doesn't open** — reconnect with `/mcp` and read the MCP's stderr. `not found` or
   `failed to spawn` means a missing build: run `npm install` in the package. A port clash means
   setting `TASK_UI_PORT` to a free port. `TASK_UI_MODE=… is no longer supported` prints its own fix.
-- **Client mode shows `failed` in `/mcp`** — `curl -i <url>`: no answer or a TLS error means the
-  proxy is unreachable; `404` means the proxy path is wrong; `502`/`503` means the server is down
-  (`pm2 status`). `401` is expected without a key; if sessions still fail, the key is wrong or
+- **Client mode shows `failed` in `/mcp`** — `curl -i <url>`: no answer means the server is down
+  or unreachable (`pm2 status` on the server, then the host and port); `404` means the URL doesn't
+  end in `/mcp`. `401` is expected without a key; if sessions still fail, the key is wrong or
   revoked, so create a new one.
 
 ## Development

@@ -10,9 +10,9 @@
 
 import { test, describe, before, after, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { join, posix, win32 } from 'node:path';
+import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createStore, type AddInput, type Store } from './tasks.js';
 import { INSTRUCTIONS } from './instructions.js';
@@ -35,7 +35,6 @@ import {
   handleAdd,
   handleUpdate,
   handleReplace,
-  handleUploadPlan,
   handleAddNote,
   handleUpdateNote,
   handleDeleteNote,
@@ -45,7 +44,6 @@ import {
 } from './mcp/mutationHandlers.js';
 import { withSchemaCheck, type MCPContent } from './mcp/shared.js';
 import Database from 'better-sqlite3';
-import { isWithin } from './mcp/planPath.js';
 import { resetUpdateCheckCache } from './updateCheck.js';
 import { VERSION } from './version.js';
 
@@ -205,6 +203,28 @@ describe('getById handler', () => {
     const resp = await handleGetById(store, { id: 9999 });
     const errMsg = decode(resp).error as string;
     assert.ok(errMsg.includes('1'), 'error should list id 1 as a valid ID');
+  });
+});
+
+describe('plan text check on add/update', () => {
+  test('add normalises CRLF and rejects control characters', () => {
+    const ok = handleAdd(store, { type: 'bug', priority: 'low', title: 't', description: '', status: 'refinement', plan: 'a\r\nb' }, CTX);
+    assert.ok(!ok.isError);
+    assert.equal(store.getById(decode(ok).id as number)?.plan, 'a\nb');
+    const bad = handleAdd(store, { type: 'bug', priority: 'low', title: 't', description: '', status: 'refinement', plan: 'a\u0000b' }, CTX);
+    assert.ok(bad.isError);
+    assert.match(decode(bad).error as string, /U\+0000/);
+  });
+
+  test('update rejects control characters and leaves the plan; empty still clears', () => {
+    const { id } = addTask({ plan: 'keep me' });
+    const bad = handleUpdate(store, { id, plan: 'x\u001b[0m' });
+    assert.ok(bad.isError);
+    assert.equal(store.getById(id)?.plan, 'keep me');
+    assert.ok(!handleUpdate(store, { id, plan: 'a\rb' }).isError);
+    assert.equal(store.getById(id)?.plan, 'a\nb');
+    assert.ok(!handleUpdate(store, { id, plan: '' }).isError);
+    assert.equal(store.getById(id)?.plan, undefined);
   });
 });
 
@@ -410,151 +430,6 @@ describe('replace handler', () => {
     const { id } = addTask({ description: 'price: X' });
     handleReplace(store, { id, field: 'description', anchor: 'X', replace_with: '$& $1' });
     assert.equal(store.getById(id)!.description, 'price: $& $1');
-  });
-});
-
-describe('uploadPlan handler', () => {
-  function planFile(name: string, body: string): string {
-    const p = join(dir, name);
-    writeFileSync(p, body);
-    return p;
-  }
-
-  test('stores file content as plan; ack has no plan/task; source file kept', () => {
-    const { id } = addTask();
-    const path = planFile('plan.md', '# Plan\n\nstep é');
-    const resp = handleUploadPlan(store, { id, path });
-    assert.ok(!resp.isError);
-    assert.deepEqual(decode(resp), { success: true, id, bytes: Buffer.byteLength('# Plan\n\nstep é', 'utf8') });
-    assert.equal(store.getById(id)?.plan, '# Plan\n\nstep é');
-    assert.ok(existsSync(path));
-  });
-
-  test('re-upload replaces the plan', () => {
-    const { id } = addTask();
-    handleUploadPlan(store, { id, path: planFile('a.md', 'first') });
-    handleUploadPlan(store, { id, path: planFile('b.md', 'second') });
-    assert.equal(store.getById(id)?.plan, 'second');
-  });
-
-  test('relative path errors', () => {
-    const { id } = addTask();
-    const resp = handleUploadPlan(store, { id, path: 'plan.md' });
-    assert.ok(resp.isError);
-    assert.match(decode(resp).error as string, /absolute/);
-  });
-
-  test('non-.md errors; .MD accepted', () => {
-    const { id } = addTask();
-    const bad = handleUploadPlan(store, { id, path: planFile('plan.txt', 'x') });
-    assert.ok(bad.isError);
-    assert.match(decode(bad).error as string, /\.md/);
-    const ok = handleUploadPlan(store, { id, path: planFile('PLAN.MD', 'x') });
-    assert.ok(!ok.isError);
-  });
-
-  test('missing file errors and names the path', () => {
-    const { id } = addTask();
-    const path = join(dir, 'nope.md');
-    const resp = handleUploadPlan(store, { id, path });
-    assert.ok(resp.isError);
-    assert.ok((decode(resp).error as string).includes(path));
-  });
-
-  test('whitespace-only file errors and leaves existing plan', () => {
-    const { id } = addTask({ plan: 'keep me' });
-    const resp = handleUploadPlan(store, { id, path: planFile('empty.md', ' \n\t') });
-    assert.ok(resp.isError);
-    assert.equal(store.getById(id)?.plan, 'keep me');
-  });
-
-  test('unknown id returns not-found error', () => {
-    const resp = handleUploadPlan(store, { id: 9999, path: planFile('p.md', 'x') });
-    assert.ok(resp.isError);
-    assert.match(decode(resp).error as string, /not found/i);
-  });
-});
-
-describe('uploadPlan path guard', () => {
-  let outside: string;
-  beforeEach(() => { outside = mkdtempSync(join(tmpdir(), 'stm-outside-')); });
-  afterEach(() => { rmSync(outside, { recursive: true, force: true }); });
-
-  test('file outside every allowed root is rejected', () => {
-    const { id } = addTask();
-    const path = join(outside, 'plan.md');
-    writeFileSync(path, 'x');
-    const resp = handleUploadPlan(store, { id, path }, [dir]);
-    assert.ok(resp.isError);
-    assert.match(decode(resp).error as string, /outside the allowed plan directories/);
-    assert.equal(store.getById(id)?.plan, undefined);
-  });
-
-  test('.. segments that escape the root are rejected', () => {
-    const { id } = addTask();
-    writeFileSync(join(outside, 'plan.md'), 'x');
-    const path = join(dir, '..', outside.split(/[\\/]/).pop()!, 'plan.md');
-    const resp = handleUploadPlan(store, { id, path }, [dir]);
-    assert.ok(resp.isError);
-    assert.match(decode(resp).error as string, /outside/);
-  });
-
-  test('symlink inside a root pointing outside is rejected', (t) => {
-    const { id } = addTask();
-    const target = join(outside, 'secret.md');
-    writeFileSync(target, 'x');
-    const link = join(dir, 'link.md');
-    try {
-      symlinkSync(target, link);
-    } catch {
-      t.skip('symlinks need extra privileges on this platform');
-      return;
-    }
-    const resp = handleUploadPlan(store, { id, path: link }, [dir]);
-    assert.ok(resp.isError);
-    assert.match(decode(resp).error as string, /outside/);
-  });
-
-  test('directory named *.md is rejected', () => {
-    const { id } = addTask();
-    const path = join(dir, 'folder.md');
-    mkdirSync(path);
-    const resp = handleUploadPlan(store, { id, path }, [dir]);
-    assert.ok(resp.isError);
-    assert.match(decode(resp).error as string, /not a regular file/);
-  });
-
-  test('file in a nested folder of a root is accepted', () => {
-    const { id } = addTask();
-    mkdirSync(join(dir, 'sub'));
-    const path = join(dir, 'sub', 'plan.md');
-    writeFileSync(path, 'nested');
-    assert.ok(!handleUploadPlan(store, { id, path }, [dir]).isError);
-    assert.equal(store.getById(id)?.plan, 'nested');
-  });
-
-  test('missing root is ignored, not an error', () => {
-    const { id } = addTask();
-    const path = join(dir, 'plan.md');
-    writeFileSync(path, 'x');
-    assert.ok(!handleUploadPlan(store, { id, path }, [join(outside, 'nope'), dir]).isError);
-  });
-});
-
-describe('isWithin', () => {
-  test('posix', () => {
-    assert.equal(isWithin('/a/b', '/a/b/c.md', posix), true);
-    assert.equal(isWithin('/a/b', '/a/b/..x.md', posix), true);
-    assert.equal(isWithin('/a/b', '/a/bc/c.md', posix), false);
-    assert.equal(isWithin('/a/b', '/a/c.md', posix), false);
-    assert.equal(isWithin('/a/b', '/a/b', posix), false);
-  });
-
-  test('win32: case-insensitive, other drives and prefix siblings rejected', () => {
-    assert.equal(isWithin('C:\\Users\\Me\\proj', 'c:\\users\\me\\PROJ\\plan.md', win32), true);
-    assert.equal(isWithin('C:\\proj', 'D:\\proj\\plan.md', win32), false);
-    assert.equal(isWithin('C:\\proj', 'C:\\projx\\plan.md', win32), false);
-    assert.equal(isWithin('C:\\proj', 'C:\\proj\\..\\other\\plan.md', win32), false);
   });
 });
 

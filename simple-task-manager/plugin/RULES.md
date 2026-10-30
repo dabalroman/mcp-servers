@@ -23,7 +23,7 @@ bug > tool > feature > idea > other > epic (epics are never returned by getNext)
 ## Development pipeline (mandatory, never skip steps)
 1. Schedule  — out-of-scope requests go to add(), do not implement inline. New tasks default to 'refinement'.
 2. Refine    — /refine: ask PM questions, update() description + summary, promote to 'plan' or 'todo' on user confirmation.
-3. Plan      — opt-in: enter plan mode, write plan to a .md file, upload via uploadPlan({ id, path }) (DB copy is canonical; re-upload to revise), promote to 'todo' on user approval. The task then waits for the implement step.
+3. Plan      — opt-in: enter plan mode, store the plan via update({ id, plan }) (revise with replace), promote to 'todo' on user approval. The task then waits for the implement step.
 4. Implement — setStatus('in_progress') FIRST, then read files, code, test. The 'in_progress' transition belongs to this step, made right before writing code.
 5. Build     — must succeed with zero errors
 6. Test      — verify end-to-end; wait for user confirmation ("lgtm") before proceeding

@@ -24,10 +24,9 @@ export type McpHttpHandler = (req: IncomingMessage, res: ServerResponse) => Prom
 // there is no session map to leak and a process restart strands no client.
 // The transport reads the body itself, so nothing is parsed before the guards
 // and bad JSON gets a JSON-RPC parse error.
-// The key is checked on every request, loopback included: a TLS reverse proxy
-// (e.g. `tailscale serve`) forwards from 127.0.0.1. There is no Host check
-// either: DNS rebinding can't supply the bearer key, and a loopback-only Host
-// list would block LAN and proxied clients.
+// The key is checked on every request, loopback included. There is no Host
+// check: DNS rebinding can't supply the bearer key, and a loopback-only Host
+// list would block LAN clients.
 export function createMcpHttpHandler({ store }: { store: Store }): McpHttpHandler {
   return async (req, res) => {
     const key = bearerToken(req.headers.authorization);

@@ -1,7 +1,6 @@
-import { readFileSync } from 'node:fs';
 import { text, errorText, notFoundError, probeTcp, resolveProject, type MCPContent, type SessionContext } from './shared.js';
 import type { AddInput, Store, TaskStatus, UpdatePatch } from '../tasks.js';
-import { checkPlanPath, defaultPlanRoots } from './planPath.js';
+import { checkPlanText } from './planText.js';
 import { uiPkgDir, uiServerEntry, getUiChild, setUiChild, spawnUi } from './uiChild.js';
 
 const UI_PORT = parseInt(process.env['TASK_UI_PORT'] ?? '7374', 10);
@@ -9,6 +8,11 @@ const UI_PORT = parseInt(process.env['TASK_UI_PORT'] ?? '7374', 10);
 export function handleAdd(store: Store, { project, ...args }: Omit<AddInput, 'project'> & { project?: string }, ctx: SessionContext): MCPContent {
   const p = resolveProject(store, ctx, project);
   if (typeof p !== 'string') return p;
+  if (args.plan !== undefined) {
+    const checked = checkPlanText(args.plan, { allowEmpty: true });
+    if (!checked.ok) return errorText({ error: checked.error });
+    args = { ...args, plan: checked.text };
+  }
   try {
     const { id } = store.add({ ...args, project: p });
     return text({ id });
@@ -18,6 +22,11 @@ export function handleAdd(store: Store, { project, ...args }: Omit<AddInput, 'pr
 }
 
 export function handleUpdate(store: Store, { id, ...patch }: UpdatePatch & { id: number }): MCPContent {
+  if (typeof patch.plan === 'string') {
+    const checked = checkPlanText(patch.plan, { allowEmpty: true });
+    if (!checked.ok) return errorText({ error: checked.error });
+    patch = { ...patch, plan: checked.text };
+  }
   let result: ReturnType<Store['update']>;
   try {
     result = store.update(id, patch);
@@ -54,25 +63,6 @@ export function handleReplace(
   // slice-splice rather than String.replace to avoid $-pattern substitution in replace_with
   store.update(id, { [field]: current.slice(0, first) + replace_with + current.slice(first + anchor.length) });
   return text({ success: true, id, field });
-}
-
-export function handleUploadPlan(
-  store: Store,
-  { id, path }: { id: number; path: string },
-  roots: string[] = defaultPlanRoots(),
-): MCPContent {
-  const checked = checkPlanPath(path, roots);
-  if (!checked.ok) return errorText({ error: checked.error });
-  let content: string;
-  try {
-    content = readFileSync(checked.path, 'utf8');
-  } catch (err) {
-    return errorText({ error: `cannot read ${path}: ${err instanceof Error ? err.message : String(err)}` });
-  }
-  // store.update trims plan and stores whitespace-only as null, which would silently clear it
-  if (content.trim() === '') return errorText({ error: `${path} is empty — refusing to clear the plan` });
-  if (!store.update(id, { plan: content })) return notFoundError(id, store, { withAre: true });
-  return text({ success: true, id, bytes: Buffer.byteLength(content, 'utf8') });
 }
 
 export function handleAddNote(store: Store, { taskId, body }: { taskId: number; body: string }): MCPContent {

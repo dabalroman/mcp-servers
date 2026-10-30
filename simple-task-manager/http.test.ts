@@ -133,7 +133,7 @@ describe('MCP over Streamable HTTP', () => {
     assert.equal(res.headers['allow'], 'POST');
   });
 
-  test('a valid key on a foreign Host is accepted (no Host check: LAN and proxied clients)', async () => {
+  test('a valid key on a foreign Host is accepted (no Host check: LAN clients)', async () => {
     const res = await raw({ method: 'POST', headers: { ...authed(), 'X-Project': 'a', Host: `nas.example:${port}` }, body: INIT });
     assert.equal(res.status, 200);
   });
