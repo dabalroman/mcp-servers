@@ -80,7 +80,7 @@ If another command uses the same name, the namespaced form works too (`/tm:imple
   global.
 - **Scopes** — free-text tags for an area within a project (`"auth"`, `"api"`).
 - **Epics** — an umbrella task holding the goal, order and rules for its children. Its status
-  follows them.
+  follows them, and Claude ends any epic work by suggesting the next step from its order.
 - **Notes** — decisions made after refinement. The newest statement wins over older notes and the
   description.
 - **Refs** — links like `blocks` or `depends on`. The server writes the inverse on the other task.
