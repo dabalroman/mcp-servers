@@ -6,7 +6,7 @@
  * tsx install.ts --server on|off [dir] [--db <path>] [--port <n>]
  *                        The server: the UI + /mcp as a pm2 app (see serverSetup.ts). Repos
  *                        connect to it in client mode, from the UI's Connect a machine dialog.
- * Skills and the extended rules ship separately, as the `task-manager` Claude Code plugin.
+ * Skills and the extended rules ship separately, as the `tm` Claude Code plugin.
  */
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, basename } from 'path';
@@ -96,4 +96,4 @@ if (existingEntry && !isStaleEntry(existingEntry)) {
 }
 
 console.log('Restart open Claude sessions and the server, if one runs (pm2 restart task-manager), so they run the new build.');
-console.log(`Skills and extended rules: /plugin marketplace add dabalroman/mcp-servers, then /plugin install task-manager@dabalroman`);
+console.log(`Skills and extended rules: /plugin marketplace add dabalroman/mcp-servers, then /plugin install tm@dabalroman`);

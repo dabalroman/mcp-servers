@@ -1708,26 +1708,36 @@ describe('health handler — plugin section', () => {
 
   function install(enabled?: boolean, version: string = VERSION): void {
     writeFileSync(join(home, '.claude', 'plugins', 'installed_plugins.json'),
-      JSON.stringify({ version: 2, plugins: { 'task-manager@dabalroman': [{ scope: 'user', version }] } }));
+      JSON.stringify({ version: 2, plugins: { 'tm@dabalroman': [{ scope: 'user', version }] } }));
     if (enabled !== undefined) {
-      writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'task-manager@dabalroman': enabled } }));
+      writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'tm@dabalroman': enabled } }));
     }
   }
 
   test('a clean plugin install is all ✓', async () => {
     install(true);
     const section = await pluginSection();
-    assert.match(section, /✓ task-manager@dabalroman installed/);
+    assert.match(section, /✓ tm@dabalroman installed/);
     assert.doesNotMatch(section, /✗/);
   });
 
   test('a missing plugin is ✗ with the install command', async () => {
-    assert.match(await pluginSection(), /✗ task-manager plugin not installed — run: claude plugin marketplace add/);
+    assert.match(await pluginSection(), /✗ tm plugin not installed — run: claude plugin marketplace add/);
   });
 
   test('a disabled plugin is ✗ with the enable command', async () => {
     install(false);
-    assert.match(await pluginSection(), /✗ task-manager@dabalroman installed but disabled — run: claude plugin enable task-manager@dabalroman/);
+    assert.match(await pluginSection(), /✗ tm@dabalroman installed but disabled — run: claude plugin enable tm@dabalroman/);
+  });
+
+  test('a plugin left installed under its old name is ✗ with the uninstall command', async () => {
+    writeFileSync(join(home, '.claude', 'plugins', 'installed_plugins.json'), JSON.stringify({ version: 2, plugins: {
+      'tm@dabalroman': [{ scope: 'user', version: VERSION }],
+      'task-manager@dabalroman': [{ scope: 'user', version: VERSION }],
+    } }));
+    const section = await pluginSection();
+    assert.match(section, /✓ tm@dabalroman installed/);
+    assert.match(section, /✗ task-manager@dabalroman is the plugin's old name — run: claude plugin uninstall task-manager@dabalroman/);
   });
 
   test('old skill copies in ~/.claude/commands are ✗, each named', async () => {
@@ -1748,12 +1758,12 @@ describe('health handler — plugin section', () => {
 
   test('an older plugin is ⚠ with the plugin update command', async () => {
     install(true, '2000-01-001');
-    assert.match(await pluginSection(), /⚠ Plugin v2000-01-001 differs from the server v.* — run: claude plugin marketplace update dabalroman && claude plugin update task-manager@dabalroman, then \/reload-plugins/);
+    assert.match(await pluginSection(), /⚠ Plugin v2000-01-001 differs from the server v.* — run: claude plugin marketplace update dabalroman && claude plugin update tm@dabalroman, then \/reload-plugins/);
   });
 
   test('a sha-versioned install is ⚠ with the plugin update command', async () => {
     install(true, 'b99d82bac17f');
-    assert.match(await pluginSection(), /⚠ Plugin vb99d82bac17f differs from the server .* claude plugin update task-manager@dabalroman/);
+    assert.match(await pluginSection(), /⚠ Plugin vb99d82bac17f differs from the server .* claude plugin update tm@dabalroman/);
   });
 
   test('a newer plugin is ⚠ with the server update steps', async () => {

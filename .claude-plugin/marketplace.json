@@ -8,7 +8,7 @@
   },
   "plugins": [
     {
-      "name": "task-manager",
+      "name": "tm",
       "source": "./simple-task-manager/plugin",
       "description": "Skills and full usage rules for the simple-task-manager MCP"
     }

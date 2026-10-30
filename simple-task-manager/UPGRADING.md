@@ -20,6 +20,17 @@ How to move a local clone to a newer version without losing data or quietly losi
 
 ## Version notes
 
+### Plugin renamed to `tm` (3.0.0, 2026-10-039)
+
+- The plugin is now `tm@dabalroman`, so the namespaced skills are `/tm:refine`, `/tm:implement` and so on. Bare `/refine` is unchanged. The MCP server and its tools keep the name `task-manager`.
+- An install under the old name keeps running at its last version but no longer updates. Replace it once per machine, then restart Claude Code:
+  ```sh
+  claude plugin uninstall task-manager@dabalroman
+  claude plugin marketplace update dabalroman
+  claude plugin install tm@dabalroman --scope user
+  ```
+- `health` flags a leftover `task-manager@…` install ✗. Left next to `tm`, its skills register twice and its rules are injected twice.
+
 ### Two modes: bundled and client (2026-10-032)
 
 - A stdio entry is always bundled. `TASK_UI_MODE=standalone` or `disabled` in an entry now makes the MCP **refuse to start**; it prints the fix on stderr (`node <dir>/simple-task-manager/dist/server.js` with that env shows it). Pick one:
@@ -55,7 +66,7 @@ Skills and the full rules moved from `~/.claude/commands` and `SETUP.md` into a 
 1. Install the plugin once per machine:
    ```sh
    claude plugin marketplace add dabalroman/mcp-servers
-   claude plugin install task-manager@dabalroman --scope user
+   claude plugin install tm@dabalroman --scope user
    ```
 2. Delete `refine.md`, `implement.md`, `implement-as-coordinator.md` and `assess.md` from `~/.claude/commands/`. Left in place, they shadow the plugin's skills.
 3. Remove the `@…/simple-task-manager/SETUP.md` line from `~/.claude/CLAUDE.md`. The file no longer exists, and Claude Code ignores a missing import without a warning.
@@ -68,11 +79,11 @@ Skills and the full rules moved from `~/.claude/commands` and `SETUP.md` into a 
 1. Stop the UIs and close the Claude sessions.
 2. Restore the backup: copy `<db>.backup-…-pre-<migration>` over `<db>`.
 3. `git -C <dir> checkout <old sha>`, then run `npm run build` in `simple-task-manager`.
-4. If you go back before the plugin version, restore the old `~/.claude/commands` copies and disable the plugin (`claude plugin disable task-manager@dabalroman`).
+4. If you go back before the plugin version, restore the old `~/.claude/commands` copies and disable the plugin (`claude plugin disable tm@dabalroman`).
 
 ## FAQ
 
-**`/implement` behaves like an old version.** An old copy in `~/.claude/commands` shadows the plugin skill. Delete it, or call `/task-manager:implement`.
+**`/implement` behaves like an old version.** An old copy in `~/.claude/commands` shadows the plugin skill. Delete it, or call `/tm:implement`.
 
 **The agent ignores the extended rules (epics, getNext order, prefixes).** The plugin's SessionStart hook only injects them when the session's project dir binds `task-manager`: in its `.mcp.json`, or in `~/.claude.json` at user or local scope. Launch Claude inside the bound repo, not from a parent folder.
 

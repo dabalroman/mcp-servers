@@ -120,7 +120,7 @@ export const INSTALL_USAGE = [
   '  (dir defaults to the current directory, --db to <dir>/tasks.db, --port to 7374)',
 ].join('\n');
 
-const PLUGIN_INSTALL = 'claude plugin marketplace add dabalroman/mcp-servers && claude plugin install task-manager@dabalroman --scope user';
+const PLUGIN_INSTALL = 'claude plugin marketplace add dabalroman/mcp-servers && claude plugin install tm@dabalroman --scope user';
 
 export type InstallArgs =
   | { server?: undefined; projectDir?: string }

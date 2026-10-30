@@ -133,7 +133,7 @@ describe('parseInstallArgs', () => {
   test('--global points at the plugin install', () => {
     const r = parseInstallArgs(['--global']);
     assert.ok('error' in r);
-    assert.match(r.error, /claude plugin install task-manager@dabalroman/);
+    assert.match(r.error, /claude plugin install tm@dabalroman/);
   });
 
   test('an unknown flag is rejected', () => {

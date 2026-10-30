@@ -196,17 +196,23 @@ function pluginChecks(homeDir: string): CheckResult[] {
   const results: CheckResult[] = [];
 
   const installed = readJson(join(claudeDir, 'plugins', 'installed_plugins.json'))?.['plugins'];
-  const installedId = installed && typeof installed === 'object'
-    ? Object.keys(installed).find((k) => k.startsWith('task-manager@'))
-    : undefined;
+  const installedIds = installed && typeof installed === 'object' ? Object.keys(installed) : [];
+  const installedId = installedIds.find((k) => k.startsWith('tm@'));
   const enabled = readJson(join(claudeDir, 'settings.json'))?.['enabledPlugins'] as Record<string, unknown> | undefined;
   if (!installedId) {
-    results.push(check('✗', 'task-manager plugin not installed — run: claude plugin marketplace add dabalroman/mcp-servers && claude plugin install task-manager@dabalroman --scope user'));
+    results.push(check('✗', 'tm plugin not installed — run: claude plugin marketplace add dabalroman/mcp-servers && claude plugin install tm@dabalroman --scope user'));
   } else if (enabled?.[installedId] === false) {
     results.push(check('✗', `${installedId} installed but disabled — run: claude plugin enable ${installedId}`));
   } else {
     results.push(check('✓', `${installedId} installed`));
     results.push(pluginVersionCheck(claudeDir, installedId, (installed as Record<string, unknown>)[installedId]));
+  }
+
+  // The plugin was named task-manager before 3.0.0. Left installed next to tm,
+  // its skills register twice and its hook injects the rules twice.
+  const legacyId = installedIds.find((k) => k.startsWith('task-manager@'));
+  if (legacyId) {
+    results.push(check('✗', `${legacyId} is the plugin's old name — run: claude plugin uninstall ${legacyId}`));
   }
 
   const shadowing = SHADOWING_COMMANDS.map((n) => join(claudeDir, 'commands', `${n}.md`)).filter((p) => existsSync(p));

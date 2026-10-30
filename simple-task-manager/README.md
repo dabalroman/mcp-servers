@@ -21,12 +21,12 @@ You need **Claude Code**, and **Node.js 18+** on any machine that runs the serve
 
 ```
 /plugin marketplace add dabalroman/mcp-servers
-/plugin install task-manager@dabalroman
+/plugin install tm@dabalroman
 ```
 
 Auto-update is off for third-party marketplaces: enable it under `/plugin` → Marketplaces, or
 update by hand with `claude plugin marketplace update dabalroman`,
-`claude plugin update task-manager@dabalroman` and `/reload-plugins`. The plugin
+`claude plugin update tm@dabalroman` and `/reload-plugins`. The plugin
 follows GitHub `main`, so pull on the server machine too, or skills may call tools it lacks. `health`
 warns when the plugin and server versions differ.
 
@@ -71,7 +71,7 @@ Every task moves through `refinement` → `plan` (optional) → `todo` → `in_p
 | `/implement-as-coordinator` | Supervises a queue or an epic: one subagent per task, independent checks and review, then one commit per task after you approve. |
 | `/assess` | Judges a scope as a product: real-usage evidence, an advocate/skeptic debate, ranked suggestions. |
 
-If another command uses the same name, the namespaced form works too (`/task-manager:implement`).
+If another command uses the same name, the namespaced form works too (`/tm:implement`).
 
 ### Organising tasks
 
