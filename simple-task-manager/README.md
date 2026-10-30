@@ -25,8 +25,10 @@ You need **Claude Code**, and **Node.js 18+** on any machine that runs the serve
 ```
 
 Auto-update is off for third-party marketplaces: enable it under `/plugin` → Marketplaces, or
-update by hand with `claude plugin marketplace update dabalroman` and `/reload-plugins`. The plugin
-follows GitHub `main`, so pull on the server machine too, or skills may call tools it lacks.
+update by hand with `claude plugin marketplace update dabalroman`,
+`claude plugin update task-manager@dabalroman` and `/reload-plugins`. The plugin
+follows GitHub `main`, so pull on the server machine too, or skills may call tools it lacks. `health`
+warns when the plugin and server versions differ.
 
 **2. Bind a repo.** Clone the package once, anywhere, then run the installer from each repo:
 

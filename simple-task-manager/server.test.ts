@@ -47,6 +47,7 @@ import { withSchemaCheck, type MCPContent } from './mcp/shared.js';
 import Database from 'better-sqlite3';
 import { isWithin } from './mcp/planPath.js';
 import { resetUpdateCheckCache } from './updateCheck.js';
+import { VERSION } from './version.js';
 
 let dir: string;
 let dbPath: string;
@@ -1705,9 +1706,9 @@ describe('health handler — plugin section', () => {
     return report.split('\n\n').find((sec) => sec.includes('Plugin\n'))!;
   }
 
-  function install(enabled?: boolean): void {
+  function install(enabled?: boolean, version: string = VERSION): void {
     writeFileSync(join(home, '.claude', 'plugins', 'installed_plugins.json'),
-      JSON.stringify({ version: 2, plugins: { 'task-manager@dabalroman': [{ scope: 'user' }] } }));
+      JSON.stringify({ version: 2, plugins: { 'task-manager@dabalroman': [{ scope: 'user', version }] } }));
     if (enabled !== undefined) {
       writeFileSync(join(home, '.claude', 'settings.json'), JSON.stringify({ enabledPlugins: { 'task-manager@dabalroman': enabled } }));
     }
@@ -1738,6 +1739,35 @@ describe('health handler — plugin section', () => {
     const section = await pluginSection();
     assert.match(section, /✗ Old skill copies shadow the plugin: .*refine\.md, .*implement\.md — delete them/);
     assert.doesNotMatch(section, /unrelated/);
+  });
+
+  test('a plugin at the server version is ✓', async () => {
+    install(true);
+    assert.match(await pluginSection(), new RegExp(`✓ Plugin v${VERSION} matches the server`));
+  });
+
+  test('an older plugin is ⚠ with the plugin update command', async () => {
+    install(true, '2000-01-001');
+    assert.match(await pluginSection(), /⚠ Plugin v2000-01-001 differs from the server v.* — run: claude plugin marketplace update dabalroman && claude plugin update task-manager@dabalroman, then \/reload-plugins/);
+  });
+
+  test('a sha-versioned install is ⚠ with the plugin update command', async () => {
+    install(true, 'b99d82bac17f');
+    assert.match(await pluginSection(), /⚠ Plugin vb99d82bac17f differs from the server .* claude plugin update task-manager@dabalroman/);
+  });
+
+  test('a newer plugin is ⚠ with the server update steps', async () => {
+    install(true, '9999-12-999');
+    assert.match(await pluginSection(), /⚠ Plugin v9999-12-999 is newer than the server .* git -C .* pull/);
+  });
+
+  test('a directory marketplace skips the version comparison', async () => {
+    install(true, 'b99d82bac17f');
+    writeFileSync(join(home, '.claude', 'plugins', 'known_marketplaces.json'),
+      JSON.stringify({ dabalroman: { source: { source: 'directory', path: '/x' } } }));
+    const section = await pluginSection();
+    assert.match(section, /– Plugin version not compared: a directory marketplace/);
+    assert.doesNotMatch(section, /⚠/);
   });
 
   test('a dangling SETUP.md import in ~/.claude/CLAUDE.md is ✗', async () => {

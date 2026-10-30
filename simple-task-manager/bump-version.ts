@@ -4,7 +4,9 @@ import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
 
-const versionFile = join(dirname(fileURLToPath(import.meta.url)), 'version.ts');
+const pkgDir = dirname(fileURLToPath(import.meta.url));
+const versionFile = join(pkgDir, 'version.ts');
+const pluginFile = join(pkgDir, 'plugin', '.claude-plugin', 'plugin.json');
 
 let seq: string;
 const now = new Date();
@@ -26,5 +28,8 @@ try {
 
 const version = `${curYear}-${curMonth}-${seq}`;
 writeFileSync(versionFile, `export const VERSION = '${version}';\n`);
-execSync(`git add "${versionFile}"`);
+// A git-installed plugin only updates when this changes, so it moves with every commit.
+const { name, version: _old, ...rest } = JSON.parse(readFileSync(pluginFile, 'utf8')) as Record<string, unknown>;
+writeFileSync(pluginFile, `${JSON.stringify({ name, version, ...rest }, null, 2)}\n`);
+execSync(`git add "${versionFile}" "${pluginFile}"`);
 console.log(`version → ${version}`);

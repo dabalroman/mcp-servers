@@ -9,6 +9,7 @@ import { ALL_TYPES, staleSchemaMessage } from '../tasks.js';
 import { ENV_ORDER, LEGACY_ENV_KEYS, pm2AppName } from '../mcpConfig.js';
 import { PACKAGE_DIR } from '../packageDir.js';
 import { checkForUpdate } from '../updateCheck.js';
+import { VERSION } from '../version.js';
 import type { Store, Task, TaskType, StatusFilter } from '../tasks.js';
 
 export async function handleGetByType(store: Store, { type, status, project }: { type: TaskType; status?: StatusFilter; project?: string }, ctx: SessionContext): Promise<MCPContent> {
@@ -205,6 +206,7 @@ function pluginChecks(homeDir: string): CheckResult[] {
     results.push(check('✗', `${installedId} installed but disabled — run: claude plugin enable ${installedId}`));
   } else {
     results.push(check('✓', `${installedId} installed`));
+    results.push(pluginVersionCheck(claudeDir, installedId, (installed as Record<string, unknown>)[installedId]));
   }
 
   const shadowing = SHADOWING_COMMANDS.map((n) => join(claudeDir, 'commands', `${n}.md`)).filter((p) => existsSync(p));
@@ -220,6 +222,27 @@ function pluginChecks(homeDir: string): CheckResult[] {
     : check('✓', 'No SETUP.md import in ~/.claude/CLAUDE.md'));
 
   return results;
+}
+
+// plugin.json's version is VERSION (bump-version.ts), so a git install that
+// differs from this server lags one side. A directory marketplace loads the
+// plugin in place, so the version it recorded at install time means nothing.
+function pluginVersionCheck(claudeDir: string, installedId: string, entries: unknown): CheckResult {
+  const marketplace = installedId.slice(installedId.indexOf('@') + 1);
+  const source = (readJson(join(claudeDir, 'plugins', 'known_marketplaces.json'))?.[marketplace] as { source?: { source?: unknown } } | undefined)?.source?.source;
+  if (source === 'directory') {
+    return check('–', 'Plugin version not compared: a directory marketplace loads the plugin in place');
+  }
+  const first: unknown = Array.isArray(entries) ? entries[0] : undefined;
+  const version = first && typeof first === 'object' ? (first as { version?: unknown }).version : undefined;
+  if (version === VERSION) {
+    return check('✓', `Plugin v${VERSION} matches the server`);
+  }
+  const shown = typeof version === 'string' ? version : 'unknown';
+  if (typeof version === 'string' && /^\d{4}-\d{2}-\d{3}$/.test(version) && version > VERSION) {
+    return check('⚠', `Plugin v${shown} is newer than the server v${VERSION} — skills may call tools it lacks: git -C ${PACKAGE_DIR} pull; npx tsx ${resolve(PACKAGE_DIR, 'install.ts')} in each project; restart Claude Code`);
+  }
+  return check('⚠', `Plugin v${shown} differs from the server v${VERSION} — run: claude plugin marketplace update ${marketplace} && claude plugin update ${installedId}, then /reload-plugins`);
 }
 
 // Values come from the env this process actually got, so user/local-scope
