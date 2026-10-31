@@ -35,7 +35,7 @@ export function withSchemaCheck<A extends unknown[]>(
 // Token-saving for list responses: when a task has a summary, the full description
 // adds noise without value. Agents that need the body call getById.
 // plan is always stripped from list responses regardless of summary — plans can be
-// long markdown documents and are only needed during /implement (use getById).
+// long markdown documents and are only needed during /tm:implement (use getById).
 // notes, epic and children are stripped too (lists carry noteCount and
 // parentId/epicTitle); the store never attaches them to list reads, this is a
 // guard against leaking bodies.

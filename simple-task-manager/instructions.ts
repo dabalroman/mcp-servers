@@ -18,9 +18,9 @@ If neither (a) nor (b) holds, omit the status field (or pass 'refinement') and l
 ## Task lifecycle — always follow this order
 The strict sequence is: refinement → plan (optional) → todo → in_progress → done. Never skip statuses.
 
-1. **refinement**: Use /refine. Ask PM-style clarifying questions, enrich the description and summary via update(), then ask the user whether to promote to 'plan' or 'todo'. Do not implement.
-2. **plan** (optional): Enter Claude's plan mode. Write the implementation plan and store it with update({ id, plan }); revise it with replace({ id, field: 'plan', … }). After the user approves the plan, ask to promote to 'todo' via setStatus(id, 'todo'). The task then waits for /implement to pick it up.
-3. **todo**: Ready for implementation. /implement sets setStatus(id, 'in_progress') and then starts the code changes — this transition belongs to the implement step, made right before the code changes begin.
+1. **refinement**: Use /tm:refine. Ask PM-style clarifying questions, enrich the description and summary via update(), then ask the user whether to promote to 'plan' or 'todo'. Do not implement.
+2. **plan** (optional): Enter Claude's plan mode. Write the implementation plan and store it with update({ id, plan }); revise it with replace({ id, field: 'plan', … }). After the user approves the plan, ask to promote to 'todo' via setStatus(id, 'todo'). The task then waits for /tm:implement to pick it up.
+3. **todo**: Ready for implementation. /tm:implement sets setStatus(id, 'in_progress') and then starts the code changes — this transition belongs to the implement step, made right before the code changes begin.
 4. **in_progress**: Implement, test, get user confirmation ("lgtm"). Only then commit and call setStatus(id, 'done').
 5. Use delete() only when the user explicitly asks to cancel or remove a task — not for completed work.
 
@@ -33,7 +33,7 @@ For small edits to a task's description or plan, use replace({ id, field, anchor
 - Purpose: decisions, findings, and spec changes made after refinement. Not a scratchpad or progress log.
 - Read notes via getById (alongside plan) before implementing a task.
 - For incremental additions prefer addNote({ taskId, body }) over rewriting the description with update(). Edit with updateNote, remove with deleteNote.
-- /refine folds existing notes into the description, then deletes the folded notes.
+- /tm:refine folds existing notes into the description, then deletes the folded notes.
 
 Extended rules (epics, getNext order, user prefixes, development pipeline, refs, status filtering, scope, knowledge capture) ship with the \`tm\` Claude Code plugin (this MCP server keeps the name task-manager); without it they are missing from this session.
 `.trim();

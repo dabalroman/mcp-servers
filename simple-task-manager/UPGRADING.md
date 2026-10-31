@@ -20,6 +20,11 @@ How to move a local clone to a newer version without losing data or quietly losi
 
 ## Version notes
 
+### Commands print as `/tm:<skill>` (2026-10-041)
+
+- The UI's copy button, the server instructions, the rules and the skills now name `/tm:refine`, `/tm:implement` and so on. Bare `/implement` doesn't resolve in every session ("Unknown command"); `/tm:implement` always does.
+- `/tm:implement` no longer asks "Start this task?" or "Commit after each phase?". It shows the task summary and starts; you still confirm with lgtm before it commits. Ask for per-phase commits if you want them.
+
 ### Plugin renamed to `tm` (3.0.0, 2026-10-039)
 
 - The plugin is now `tm@dabalroman`, so the namespaced skills are `/tm:refine`, `/tm:implement` and so on. Bare `/refine` is unchanged. The MCP server and its tools keep the name `task-manager`.
@@ -83,7 +88,7 @@ Skills and the full rules moved from `~/.claude/commands` and `SETUP.md` into a 
 
 ## FAQ
 
-**`/implement` behaves like an old version.** An old copy in `~/.claude/commands` shadows the plugin skill. Delete it, or call `/tm:implement`.
+**`/tm:implement` behaves like an old version.** An old copy in `~/.claude/commands` shadows the plugin skill. Delete it, or call `/tm:implement`.
 
 **The agent ignores the extended rules (epics, getNext order, prefixes).** The plugin's SessionStart hook only injects them when the session's project dir binds `task-manager`: in its `.mcp.json`, or in `~/.claude.json` at user or local scope. Launch Claude inside the bound repo, not from a parent folder.
 

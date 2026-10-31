@@ -1,6 +1,6 @@
 ---
 name: implement-as-coordinator
-description: Supervise a queue of todo tasks as coordinator — subagents (Sonnet or Opus, picked per task) implement via /implement, you verify, build, deploy, code-review and fix, then commit only once the user approves (or per child in Epic mode). Args: task ids ("#45 #50 43"), an epic id, a fuzzy scope, or empty for all todo.
+description: Supervise a queue of todo tasks as coordinator — subagents (Sonnet or Opus, picked per task) implement via /tm:implement, you verify, build, deploy, code-review and fix, then commit only once the user approves (or per child in Epic mode). Args: task ids ("#45 #50 43"), an epic id, a fuzzy scope, or empty for all todo.
 ---
 
 # Implement as coordinator
@@ -13,12 +13,12 @@ The user expects to be able to walk away. **Ask nothing mid-run** (exceptions: t
 
 ## Usage
 
-`/implement-as-coordinator [ids | scope]`
+`/tm:implement-as-coordinator [ids | scope]`
 
 - **ids** (`#45 #50`, `43, 44`) — exactly those tasks, in the order you decide (see Step 1).
-- **scope** — fuzzy-match against `mcp__task-manager__getScopes` the same way `/implement` does.
+- **scope** — fuzzy-match against `mcp__task-manager__getScopes` the same way `/tm:implement` does.
 - **empty** — every `todo` task, via `mcp__task-manager__getAll`.
-- **an epic id** (`#44`) — Epic mode: the epic's children are the queue (see below). `/implement` hands epics over to this skill.
+- **an epic id** (`#44`) — Epic mode: the epic's children are the queue (see below). `/tm:implement` hands epics over to this skill.
 
 Tasks named later in the conversation ("add 46 to your queue") join the live queue — re-plan the order, don't restart.
 
@@ -29,7 +29,7 @@ When the queue comes from an epic, the run manages the whole epic:
 - **Epic is authoritative.** Read its description and notes first. Its Order of execution replaces the file-overlap ordering of Step 1.3 (overlap still decides what may run in parallel), and its Rules win over this skill's defaults (branching, what waits on what).
 - **Epic status** follows the children automatically (`setStatus` syncs it); skipped children keep the epic open.
 - **Breakpoints** (see Standing rules) also include gates in the epic's Rules.
-- **Unready children.** A child in `refinement` or `plan` is skipped, not refined (this overrides Step 1.2). A ready child that the epic's order puts after a skipped one is skipped too. The final report lists them with "run `/refine #NN`" (or "plan #NN").
+- **Unready children.** A child in `refinement` or `plan` is skipped, not refined (this overrides Step 1.2). A ready child that the epic's order puts after a skipped one is skipped too. The final report lists them with "run `/tm:refine #NN`" (or "plan #NN").
 - **Commit mode.** Before the first dispatch, ask once: "Commit each child as it lands?". On yes, commit each child (each phase, if its plan has phases) right after it passes Step 3, the build-all of Step 4 and its own OCR review (Step 6 run on that child's diff only, before the commit). Review fixes and later feedback on a committed child become a new commit titled with that child's id, never mashed into another child's commit. A child parked at a breakpoint is committed only after the user's lgtm. Then `setStatus(child, 'done')` and the epic note from Step 9.6. On no, the normal approval flow at the end applies.
 - **Phased children in commit mode.** Dispatch one agent per phase ("implement only phase K of task NN"), so each phase lands, is reviewed and committed before the next starts.
 
@@ -70,17 +70,17 @@ One `Agent` per task, `run_in_background` by default. **You pick the model per t
 
 The brief must contain:
 
-- "Invoke the `tm:implement` skill for task **NN**" and — because `/implement` stops at *"Start this task? (yes/skip/stop)"* — the line: **"Treat this message as that confirmation: YES, proceed straight through to completion without stopping."** Without it the agent hands back after planning and you lose a round-trip.
+- "Invoke the `tm:implement` skill for task **NN**, and carry on through to completion without stopping."
 - "Work directly in the checkout; do NOT create or enter a git worktree."
 - The authoritative source: "the task's `plan` / locked Changes are the plan; follow them."
 - Every correction from Step 1.4, stated as "the plan predates commit X; do Y instead of Z".
 - **Lane boundaries** when another agent runs in parallel: name the other task's files and forbid them; allow shared files (e.g. an entry point) only as minimal Edit-tool changes, never rewrites.
 - Hazard guards for this task, phrased as stop conditions: "before removing X, confirm from code that Y still exists on every target; if not, stop and report". Name the project's unrecoverable failure (from CLAUDE.md) if the task is anywhere near it.
 - The verification the agent does itself: host-side checks/tests, with exact commands and expected output, plus "prove unchanged-by-contract outputs are unchanged" (diffs, checksums) rather than asserting it.
-- "If `/implement` asks whether to commit per phase, the answer is no; the coordinator commits."
+- "No per-phase commits; the coordinator commits."
 - Prohibitions: **no build tool run, no deploy/flash, no commit, no push, no CLAUDE.md edits** (report the proposed wording), no stray files (`__pycache__`, temp scripts).
 - Comment style: terse, non-obvious *why* only.
-- "Run `/implement`'s OCR code review step and fix its findings before handing back — it is not optional."
+- "Run `/tm:implement`'s OCR code review step and fix its findings before handing back — it is not optional."
 - The report you want back: files changed, check outputs, the proof diffs, the OCR review summary (coverage, findings fixed, findings left open with reasons — or "Skipping code review, OCR not installed"), proposed CLAUDE.md wording, a suggested commit message in the project's style, and "confirm you ran no build and no deploy".
 
 While agents run, do useful non-overlapping work (prepare the review rules, draft docs), never anything in their files.

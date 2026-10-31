@@ -63,9 +63,9 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
   const copyIdCommand = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     const cmd =
-      task.status === 'refinement' ? `/refine #${task.id}` :
+      task.status === 'refinement' ? `/tm:refine #${task.id}` :
       task.status === 'plan' ? `/plan #${task.id}` :
-      task.status === 'todo' || task.status === 'in_progress' ? `/implement #${task.id}` :
+      task.status === 'todo' || task.status === 'in_progress' ? `/tm:implement #${task.id}` :
       `#${task.id}`;
     const successMsg =
       task.status === 'refinement' ? 'Copied — paste into Claude Code to refine' :

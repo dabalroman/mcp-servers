@@ -14,10 +14,10 @@ Step back from the task queue and judge a scope as a **product**. Is it doing it
 
 ## Usage
 
-`/assess [scope]`:
+`/tm:assess [scope]`:
 
 - **`#NN`**: an existing evaluation task (e.g. "Judge the MVP after a week of real use"). Its description defines the checks, and its notes hold earlier trials.
-- **fuzzy scope** (e.g. `/assess vault ai`): match against `getScopes()`, the same way as `/refine`. If there's no evaluation task, propose one via `add()` before Step 3 so the trials have somewhere to live.
+- **fuzzy scope** (e.g. `/tm:assess vault ai`): match against `getScopes()`, the same way as `/tm:refine`. If there's no evaluation task, propose one via `add()` before Step 3 so the trials have somewhere to live.
 - **no argument**: ask which scope.
 
 ## Workflow
@@ -91,7 +91,7 @@ Then ask which suggestions to file.
 - One `add()` per accepted suggestion, at `refinement`, with `refs` to the evaluation task.
   - Type `idea` by default, `feature` when the user says it "should be done".
   - Priority as the user gives it.
-- The description holds the idea, the **user's own words**, and the open questions *they* raised (channel, timing, data source). Those are the first things the next `/refine` settles.
+- The description holds the idea, the **user's own words**, and the open questions *they* raised (channel, timing, data source). Those are the first things the next `/tm:refine` settles.
 - When the user adds a constraint later ("this needs a native tool, our code is slower"), check it against the code: measure, read, compare. Record the result as a note on the task. Agree or push back with numbers.
 - Dismissed items are dropped. Don't re-argue or file them anyway.
 

@@ -6,7 +6,7 @@ session restarts and context compaction. Claude files work as you mention it, re
 implements it, and suggests what to do next.
 
 - **Rules built in** — the server and the `task-manager` plugin teach Claude how to use it.
-- **Skills** — `/refine`, `/implement`, `/implement-as-coordinator` and `/assess`.
+- **Skills** — `/tm:refine`, `/tm:implement`, `/tm:implement-as-coordinator` and `/tm:assess`.
 - **Web UI** — browse and edit the same tasks at <http://localhost:7374>, with live updates.
 - **One DB or many** — one per repo by default, or one shared server for every repo and machine.
 
@@ -46,7 +46,7 @@ Then just talk:
 
 - `"BUG, high priority: unsaved text is lost when the window closes"`
 - `"What should I work on next?"`
-- `"/implement #15"`
+- `"/tm:implement #15"`
 
 Upgrading an existing clone? Follow [UPGRADING.md](UPGRADING.md).
 
@@ -66,10 +66,10 @@ Every task moves through `refinement` → `plan` (optional) → `todo` → `in_p
 
 | Skill | What it does |
 |---|---|
-| `/refine` | Claude acts as PM: clarifies the goal and scope, rewrites the task, and offers to group a split under an epic. |
-| `/implement` | Implements one task (or every `todo` in a scope), runs a code review, and commits after you confirm. |
-| `/implement-as-coordinator` | Supervises a queue or an epic: one subagent per task, independent checks and review, then one commit per task after you approve. |
-| `/assess` | Judges a scope as a product: real-usage evidence, an advocate/skeptic debate, ranked suggestions. |
+| `/tm:refine` | Claude acts as PM: clarifies the goal and scope, rewrites the task, and offers to group a split under an epic. |
+| `/tm:implement` | Implements one task (or every `todo` in a scope), runs a code review, and commits after you confirm. |
+| `/tm:implement-as-coordinator` | Supervises a queue or an epic: one subagent per task, independent checks and review, then one commit per task after you approve. |
+| `/tm:assess` | Judges a scope as a product: real-usage evidence, an advocate/skeptic debate, ranked suggestions. |
 
 If another command uses the same name, the namespaced form works too (`/tm:implement`).
 

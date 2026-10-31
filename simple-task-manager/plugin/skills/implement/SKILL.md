@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Implement todo tasks via subagents — one at a time, confirm before each, OCR code review before relay, commit on lgtm. Args: "#NN" | fuzzy scope (e.g. "svg joiner") | empty for all.
+description: Implement todo tasks via subagents — one at a time, summary then go, OCR code review before relay, commit on lgtm. Args: "#NN" | fuzzy scope (e.g. "svg joiner") | empty for all.
 ---
 
 # Implement
@@ -9,10 +9,10 @@ Work through `todo` tasks one at a time, implementing simple ones inline and del
 
 ## Usage
 
-`/implement [scope]` — `[scope]` is free-text and resolves as follows:
+`/tm:implement [scope]` — `[scope]` is free-text and resolves as follows:
 
-- **`#NN`** (e.g. `/implement #87`) — implement that single task by id.
-- **fuzzy scope match** (e.g. `/implement eink`, `/implement svg joiner`) — match the argument case-insensitively against scope tags returned by `mcp__task-manager__getAll`. Pick the scope whose tag contains every word in the argument (after lowercasing and stripping punctuation). If multiple scopes match, list them and ask the user to disambiguate. If none match, report and stop.
+- **`#NN`** (e.g. `/tm:implement #87`) — implement that single task by id.
+- **fuzzy scope match** (e.g. `/tm:implement eink`, `/tm:implement svg joiner`) — match the argument case-insensitively against scope tags returned by `mcp__task-manager__getAll`. Pick the scope whose tag contains every word in the argument (after lowercasing and stripping punctuation). If multiple scopes match, list them and ask the user to disambiguate. If none match, report and stop.
 - **no argument** — implement across all scopes in `getNext` priority order.
 
 ## Workflow (repeat until queue is empty or user stops)
@@ -21,15 +21,11 @@ Work through `todo` tasks one at a time, implementing simple ones inline and del
 
 - If `#NN` was passed: fetch that task. If it is an `epic`, invoke the `tm:implement-as-coordinator` skill with `#NN` and stop here; that skill runs the epic's children. If its status is not `todo`, report the actual status and stop.
 - Otherwise call `mcp__task-manager__getNext`, narrowed by the resolved scope. If nothing is returned, report "Queue empty" and stop.
-- **If the next task is in `refinement` or `plan`** (`getNext` returns both): do NOT refine or plan inline. Report "Task #NN is in <status> — run `/refine #NN` first" (or "finish and approve its plan first") and stop. Strict separation between the two commands.
+- **If the next task is in `refinement` or `plan`** (`getNext` returns both): do NOT refine or plan inline. Report "Task #NN is in <status> — run `/tm:refine #NN` first" (or "finish and approve its plan first") and stop. Strict separation between the two commands.
 
-### Step 2 — Confirm with user
+### Step 2 — Show summary, then go
 
-**Stop here.** Show the user the next task (id, title, type, description summary) and ask: "Start this task? (yes / skip / stop)". If the plan or description splits the task into phases, also ask: "Commit after each phase? (yes / no)".
-
-- **yes** — proceed to step 3.
-- **skip** — do NOT set the task `in_progress`; go back to step 1 to fetch the next one.
-- **stop** (or any other negative) — halt the queue.
+Show the user the next task (id, title, type, summary) and proceed straight to step 3. Don't ask whether to start, and don't ask about per-phase commits: a task is one commit unless the user asks for per-phase commits.
 
 ### Step 3 — Set in_progress
 
@@ -51,7 +47,7 @@ Rules:
 
 Work through the task list created in step 4, marking each step in_progress → completed as you go.
 
-**Phases with per-phase commits** (user said yes in step 2): run steps 5 and 6 for one phase at a time. When a phase passes verify and its OCR review, commit it in the project's message style, naming the phase, and if the task has an epic, add a note on it (`"#NN phase K/N done, commit <sha>. …"`); then start the next phase. No lgtm per phase. **Breakpoints — defer, don't stop**: a phase the user must test by hand (UI, device, their environment) or that waits on something only they do (a merge, a deploy) is parked (verified, reviewed, staged, uncommitted) while you continue with every phase that doesn't depend on it; a phase that shares files with a parked one or builds on it waits too. Name the breakpoints when you ask in step 2. Only when no phase can proceed, run steps 7–8 once for everything pending: per parked phase, exactly what to test or do. Commit each parked phase after the user's lgtm, then resume the waiting phases. Feedback fixes on a committed phase become their own commit. The task stays `in_progress` until step 9.
+**Phases with per-phase commits** (only when the user asked for them): run steps 5 and 6 for one phase at a time. When a phase passes verify and its OCR review, commit it in the project's message style, naming the phase, and if the task has an epic, add a note on it (`"#NN phase K/N done, commit <sha>. …"`); then start the next phase. No lgtm per phase. **Breakpoints — defer, don't stop**: a phase the user must test by hand (UI, device, their environment) or that waits on something only they do (a merge, a deploy) is parked (verified, reviewed, staged, uncommitted) while you continue with every phase that doesn't depend on it; a phase that shares files with a parked one or builds on it waits too. Name the breakpoints when you show the summary in step 2. Only when no phase can proceed, run steps 7–8 once for everything pending: per parked phase, exactly what to test or do. Commit each parked phase after the user's lgtm, then resume the waiting phases. Feedback fixes on a committed phase become their own commit. The task stays `in_progress` until step 9.
 
 **Classify the task first:**
 
@@ -109,7 +105,7 @@ Once the user confirms:
 1. Stage the changed files and commit in the project's message style. **No `Co-Authored-By` line.** With per-phase commits, this commits only what is left (the last phase or feedback fixes).
 2. Call `mcp__task-manager__setStatus(id, 'done')`. If the response carries `epicStatus` (the last child closed its epic), tell the user.
 3. If the task has an `epic` (from `getById`), call `mcp__task-manager__addNote` on the epic: `"#NN done, commit <sha>. <anything the next child needs to know>"`.
-4. Go back to step 1 (which will show the next task and ask for confirmation before starting it).
+4. Go back to step 1 (which shows the next task's summary and starts it).
 
 ## Why this pattern works
 

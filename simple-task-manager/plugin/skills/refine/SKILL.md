@@ -12,10 +12,10 @@ Act as project manager for tasks in `refinement` status: ask clarifying question
 
 ## Usage
 
-`/refine [scope]` — `[scope]` is free-text and resolves as follows:
+`/tm:refine [scope]` — `[scope]` is free-text and resolves as follows:
 
-- **`#NN`** (e.g. `/refine #87`) — refine that single task by id, regardless of its current status or scope.
-- **fuzzy scope match** (e.g. `/refine eink`, `/refine svg joiner`, `/refine task manager`) — match the argument case-insensitively against scope tags returned by `mcp__task-manager__getAll`. Pick the scope whose tag contains every word in the argument (after lowercasing and stripping punctuation). If multiple scopes match, list them and ask the user to disambiguate. If none match, report and stop.
+- **`#NN`** (e.g. `/tm:refine #87`) — refine that single task by id, regardless of its current status or scope.
+- **fuzzy scope match** (e.g. `/tm:refine eink`, `/tm:refine svg joiner`, `/tm:refine task manager`) — match the argument case-insensitively against scope tags returned by `mcp__task-manager__getAll`. Pick the scope whose tag contains every word in the argument (after lowercasing and stripping punctuation). If multiple scopes match, list them and ask the user to disambiguate. If none match, report and stop.
 - **no argument** — refine across all scopes.
 
 ## Workflow
@@ -117,4 +117,4 @@ After each task is promoted (or the user says skip/stop), continue to the next c
 - Convert relative dates in user answers to absolute dates (e.g. "next Tuesday" → `2026-05-13`).
 - If a task description is already specific enough on first read, say so, write the summary (step 3b), and ask the user whether to promote without further questioning.
 - Single-task mode (`#NN`) refines that task even if its status is already `todo` or `done` — useful for sharpening an existing spec.
-- For a whole scope rather than one task (is it working for the user, what's next), use `/assess`.
+- For a whole scope rather than one task (is it working for the user, what's next), use `/tm:assess`.
