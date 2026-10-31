@@ -1,21 +1,14 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { resolve, dirname } from 'node:path';
+import { resolve } from 'node:path';
+import { PACKAGE_DIR } from '../packageDir.js';
 
 type LogLevel = 'debug' | 'info' | 'notice' | 'warning' | 'error';
 type LogFn = (level: LogLevel, data: string) => void;
 
-const here = dirname(fileURLToPath(import.meta.url));
-// server.ts may run from source (simple-task-manager/mcp/) or from compiled dist
-// (simple-task-manager/dist/mcp/). Try both depths so the sibling lookup works.
-const uiCandidates = [
-  resolve(here, '../../task-manager-ui'),   // from mcp/ (dev)
-  resolve(here, '../../../task-manager-ui'), // from dist/mcp/ (prod)
-];
-
-export const uiPkgDir: string | null =
-  uiCandidates.find((p) => existsSync(resolve(p, 'server.ts'))) ?? null;
+// PACKAGE_DIR, not a path relative to this file: it differs between mcp/ (source) and dist/mcp/.
+const uiDir = resolve(PACKAGE_DIR, 'task-manager-ui');
+export const uiPkgDir: string | null = existsSync(resolve(uiDir, 'server.ts')) ? uiDir : null;
 export const uiServerEntry: string | null = uiPkgDir ? resolve(uiPkgDir, 'server.ts') : null;
 
 let uiChild: ChildProcess | null = null;
