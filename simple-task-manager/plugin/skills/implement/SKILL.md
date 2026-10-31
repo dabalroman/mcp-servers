@@ -5,7 +5,7 @@ description: Implement todo tasks via subagents — one at a time, summary then 
 
 # Implement
 
-Work through `todo` tasks one at a time, implementing simple ones inline and delegating complex ones to a focused subagent, keeping the main context lean. No `/clear` needed.
+Work through `todo` tasks one at a time: simple ones inline, complex ones via a focused subagent, so the main context holds only coordination (task id, diff summary, user confirmation). No `/clear` needed.
 
 ## Usage
 
@@ -19,94 +19,70 @@ Work through `todo` tasks one at a time, implementing simple ones inline and del
 
 ### Step 1 — Get next task
 
-- If `#NN` was passed: fetch that task. If it is an `epic`, invoke the `tm:implement-as-coordinator` skill with `#NN` and stop here; that skill runs the epic's children. If its status is not `todo`, report the actual status and stop.
-- Otherwise call `mcp__task-manager__getNext`, narrowed by the resolved scope. If nothing is returned, report "Queue empty" and stop.
-- **If the next task is in `refinement` or `plan`** (`getNext` returns both): do NOT refine or plan inline. Report "Task #NN is in <status> — run `/tm:refine #NN` first" (or "finish and approve its plan first") and stop. Strict separation between the two commands.
+- `#NN`: fetch it. An `epic` → invoke the `tm:implement-as-coordinator` skill with `#NN` and stop; that skill runs the epic's children. Status not `todo` → report the actual status and stop.
+- Otherwise call `mcp__task-manager__getNext`, narrowed by the resolved scope. Nothing returned → report "Queue empty" and stop.
+- **Next task in `refinement` or `plan`** (`getNext` returns both): don't refine or plan inline. Report "Task #NN is in <status> — run `/tm:refine #NN` first" (or "finish and approve its plan first") and stop.
 
 ### Step 2 — Show summary, then go
 
-Show the user the next task (id, title, type, summary) and proceed straight to step 3. Don't ask whether to start, and don't ask about per-phase commits: a task is one commit unless the user asks for per-phase commits.
+Show the task (id, title, type, summary) and go to step 3. Don't ask whether to start or about per-phase commits: a task is one commit unless the user asks for per-phase commits.
 
 ### Step 3 — Set in_progress
 
-Call `mcp__task-manager__setStatus(id, 'in_progress')` before doing anything else.
+`mcp__task-manager__setStatus(id, 'in_progress')` before anything else.
 
 ### Step 4 — Break into a task list
 
-**Always do this before writing any code.** Read the task's description, plan (if it has one) and notes (if any) from `getById` — notes are as authoritative as the description, and the newest statement wins on conflict (newer note > older note > description), then decompose the work into concrete steps using `TaskCreate`. Each step should be a single reviewable unit — e.g. "Add `priority` column migration", "Update `getAll` handler to accept filter", "Add tests for priority filtering".
+**Before writing any code**, read the task's description, plan and notes from `getById` (notes are as authoritative as the description; newest wins: newer note > older note > description) and decompose the work with `TaskCreate`, one reviewable unit per step (e.g. "Add `priority` column migration", "Add tests for priority filtering").
 
-Rules:
-- Create **all steps up front** before starting the first one. The user should see the full checklist immediately.
-- Each task gets a clear imperative `subject` and a short `description` saying what changes and where.
-- Set `activeForm` on each task (e.g. "Adding priority column migration") so the spinner is informative.
-- If the task-manager task has a `plan`, follow the plan's structure for the breakdown. If there is no plan, derive steps from the description.
-- Aim for 2–8 steps. A single-file typo fix still gets at least "Apply fix" + "Run verify" + "Run OCR review". A large feature should not exceed ~8 — group related changes.
-- Mark each step `in_progress` (via `TaskUpdate`) right before you start it and `completed` right after.
+- Create **all steps up front** so the user sees the full checklist.
+- Each step: imperative `subject`, short `description` (what changes, where), `activeForm` (e.g. "Adding priority column migration").
+- Follow the plan's structure if there is one; otherwise derive steps from the description.
+- 2–8 steps, always including "Run verify" and "Run OCR review" (a typo fix: "Apply fix" + those two); group a large feature to stay within ~8.
+- `TaskUpdate` each step `in_progress` right before it, `completed` right after.
 
 ### Step 5 — Implement
 
-Work through the task list created in step 4, marking each step in_progress → completed as you go.
+**Per-phase commits** (only when the user asked): run steps 5–6 one phase at a time. A phase that passes verify and OCR is committed in the project's message style, naming the phase; if the task has an epic, note on it `"#NN phase K/N done, commit <sha>. …"`. No lgtm per phase. **Breakpoints — defer, don't stop**: a phase the user must test by hand (UI, device, their environment) or that waits on something only they do (a merge, a deploy) is parked (verified, reviewed, staged, uncommitted) while you continue every phase that doesn't depend on it; a phase sharing files with a parked one or building on it waits too. Name the breakpoints in the step-2 summary. Only when no phase can proceed, run steps 7–8 once for everything pending, saying per parked phase exactly what to test or do. Commit each parked phase after the user's lgtm, then resume the waiting ones. Feedback fixes on a committed phase are their own commit. The task stays `in_progress` until step 9.
 
-**Phases with per-phase commits** (only when the user asked for them): run steps 5 and 6 for one phase at a time. When a phase passes verify and its OCR review, commit it in the project's message style, naming the phase, and if the task has an epic, add a note on it (`"#NN phase K/N done, commit <sha>. …"`); then start the next phase. No lgtm per phase. **Breakpoints — defer, don't stop**: a phase the user must test by hand (UI, device, their environment) or that waits on something only they do (a merge, a deploy) is parked (verified, reviewed, staged, uncommitted) while you continue with every phase that doesn't depend on it; a phase that shares files with a parked one or builds on it waits too. Name the breakpoints when you show the summary in step 2. Only when no phase can proceed, run steps 7–8 once for everything pending: per parked phase, exactly what to test or do. Commit each parked phase after the user's lgtm, then resume the waiting phases. Feedback fixes on a committed phase become their own commit. The task stays `in_progress` until step 9.
+**Classify the task.** **Simple** if ALL hold: ≤ 3 files; the fix is concrete (specific lines, specific change); no new architectural decisions; diff < ~50 lines. Otherwise **complex**.
 
-**Classify the task first:**
+**Simple → inline:** read the files, make the changes, add/update tests, run the project's verify command (from its CLAUDE.md, e.g. `npm run verify`; "verify" below means this).
 
-A task is **simple** if ALL of the following are true:
-- touches ≤ 3 files
-- the fix is described concretely (specific lines, specific change)
-- no new architectural decisions needed
-- estimated diff < ~50 lines
-
-A task is **complex** if it touches many files, requires design decisions, spans multiple subsystems, or has a large estimated diff.
-
-**Simple task → implement inline:**
-Read the relevant files, make the changes, add/update tests, run the project's verify command (from its CLAUDE.md, e.g. `npm run verify`; "verify" below means this command). Stay in the main conversation — no subagent needed.
-
-**Complex task → spawn a focused subagent:**
-Pick the most specific type from the project's `CLAUDE.md` agent table (e.g. `voltagent-lang:react-specialist`, `voltagent-lang:node-specialist`, `voltagent-core-dev:fullstack-developer`). Pass the agent: task id, title, full description, relevant file paths and line numbers, fix approach, the task list IDs for its steps, and these instructions: read files → implement → mark each TaskCreate step completed as you go → add/update tests → run verify → report back with diff summary and verify result.
+**Complex → focused subagent:** pick the most specific type in the project's `CLAUDE.md` agent table. Pass: task id, title, full description, relevant file paths and line numbers, fix approach, the step-4 task IDs, and the instructions: read files → implement → mark each step completed as you go → add/update tests → run verify → report the diff summary and verify result.
 
 ### Debugging during implementation
 
-When a verify run fails or behaviour is unexpected and the root cause isn't obvious from the error alone:
-- **Ask the user to add temporary debug logs** (e.g. `console.log` at key decision points) and re-run. This gives you live feedback from the actual code path and is faster than guessing. Frame the request concretely: which file, which line, what to log.
-- Remove all debug logs before marking the step completed.
+When verify fails or behaviour is unexpected and the cause isn't obvious, **ask the user to add temporary debug logs** (which file, which line, what to log) and re-run — faster than guessing. Remove them before completing the step.
 
 ### Step 6 — Code review (OCR)
 
-**Mandatory before relaying to the user — no code is committed without it.** Uses [open-code-review](https://github.com/alibaba/open-code-review) (`ocr` CLI, installed globally via npm) in **delegation mode**: OCR picks the files and resolves per-language review rules, you do the review yourself. No OCR LLM/API key is involved. The step-4 task list always includes a "Run OCR review" step.
+**Mandatory before relaying — no code is committed without it.** [open-code-review](https://github.com/alibaba/open-code-review) (`ocr`, global npm) in **delegation mode**: OCR picks files and per-language rules, you review. No OCR LLM/API key.
 
-**Always run it — assume `ocr` is installed.** Don't probe with `which`/`--version` first; just run step 1. Only if that command fails with `command not found` (exit 127), skip the rest of this step, tell the user verbatim **"Skipping code review, OCR not installed"**, carry that line into the step-7 summary, and continue. Any other `ocr` error is not a skip — report it and resolve it before relaying.
+**Assume `ocr` is installed** — don't probe with `which`/`--version`, just run step 1. Only on `command not found` (exit 127): skip the rest of this step, tell the user verbatim **"Skipping code review, OCR not installed"**, carry that line into step 7, continue. Any other `ocr` error is not a skip — report and resolve it before relaying.
 
-1. **Preview** — from the repo root: `ocr delegate preview --format json -b "<task #id title + one-line goal>"`. Workspace mode covers staged, unstaged and untracked changes. A `git ... older than the minimum supported version` warning is expected and harmless.
-2. **Scope** — keep only `reviewable_files` this task created or modified. Pre-existing dirty files unrelated to the task are recorded as `skipped: not part of this task`.
-3. **Rules** — `ocr delegate rule --format json <path...>` for the in-scope files. Rules are grouped; apply each group's checklist to its files.
-4. **Review every in-scope file** — tracked: `git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"`; untracked (`added`): read the whole file. Read surrounding code as needed. Don't stop at the first finding. Each file ends `reviewed` or `skipped` with a concrete reason.
-5. **Classify** each finding as `path:line`, category (bug, security, performance, maintainability, test, style, documentation), severity (critical, high, medium, low). Discard likely false positives.
-6. **Address the issues:**
-   - **critical / high / medium** — fix them, then re-run verify.
-   - **low** — fix if trivial, otherwise list them for the user.
-   - A finding you deliberately don't fix (out of scope, contradicts the task/plan, false positive on reflection) stays in the report with the reason.
-   - If fixes were non-trivial, re-run steps 1–5 on the changed files once.
+1. **Preview** — from the repo root: `ocr delegate preview --format json -b "<task #id title + one-line goal>"`. Workspace mode covers staged, unstaged and untracked changes. A `git ... older than the minimum supported version` warning is harmless.
+2. **Scope** — keep only `reviewable_files` this task created or modified; unrelated pre-existing dirty files are `skipped: not part of this task`.
+3. **Rules** — `ocr delegate rule --format json <path...>` for the in-scope files; apply each rule group's checklist to its files.
+4. **Review every in-scope file** — tracked: `git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"`; untracked (`added`): read the whole file. Read surrounding code as needed; don't stop at the first finding. Each file ends `reviewed` or `skipped` with a concrete reason.
+5. **Classify** each finding: `path:line`, category (bug, security, performance, maintainability, test, style, documentation), severity (critical, high, medium, low). Discard likely false positives.
+6. **Address:** critical / high / medium → fix, re-run verify. Low → fix if trivial, else list for the user. A finding you deliberately don't fix (out of scope, contradicts the task/plan, false positive on reflection) stays in the report with the reason. After non-trivial fixes, re-run steps 1–5 once on the changed files.
 
-For complex tasks the review runs in the main conversation after the subagent reports back, not inside the subagent — the reviewer shouldn't be the author.
+For complex tasks the review runs in the main conversation after the subagent reports, not inside it — the reviewer shouldn't be the author.
 
 ### Step 7 — Relay to user
 
-Summarise what changed and the verify result. Include the OCR review summary: files reviewed/skipped (coverage), findings fixed, and any findings left open with reasons. Tell the user exactly what to test (golden path + edge cases from the task description).
+Summarise the changes, verify result and OCR summary (files reviewed/skipped, findings fixed, findings left open with reasons). Tell the user exactly what to test: golden path + edge cases from the task description.
 
 ### Step 8 — Wait for confirmation
 
-**Stop here.** Do not commit (per-phase commits of step 5 excepted). Do not move to the next task. Wait for the user to confirm the change works (e.g. "lgtm", "looks good", "ship it"). If the user reports a problem, fix it inline (simple) or spawn a follow-up agent (complex).
+**Stop here.** No commit (step-5 per-phase commits excepted), no next task, until the user confirms ("lgtm", "looks good", "ship it"). If they report a problem, fix it inline (simple) or via a follow-up agent (complex).
 
 ### Step 9 — Commit and close
 
 Once the user confirms:
 
-1. Stage the changed files and commit in the project's message style. **No `Co-Authored-By` line.** With per-phase commits, this commits only what is left (the last phase or feedback fixes).
-2. Call `mcp__task-manager__setStatus(id, 'done')`. If the response carries `epicStatus` (the last child closed its epic), tell the user.
-3. If the task has an `epic` (from `getById`), call `mcp__task-manager__addNote` on the epic: `"#NN done, commit <sha>. <anything the next child needs to know>"`.
-4. Go back to step 1 (which shows the next task's summary and starts it).
-
-## Why this pattern works
-
-Simple tasks are handled inline — fast and cheap. Complex tasks are delegated to subagents so the main context stays lean. The main conversation only ever holds coordination: task id, diff summary, user confirmation.
+1. Stage and commit in the project's message style. **No `Co-Authored-By` line.** With per-phase commits, this commits only what is left (the last phase or feedback fixes).
+2. `mcp__task-manager__setStatus(id, 'done')`. If the response carries `epicStatus` (the last child closed its epic), tell the user.
+3. If the task has an `epic` (from `getById`), `mcp__task-manager__addNote` on it: `"#NN done, commit <sha>. <anything the next child needs to know>"`.
+4. Back to step 1 (next task's summary, then start).

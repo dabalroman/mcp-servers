@@ -6,116 +6,88 @@ model: opus
 
 # Assess
 
-Step back from the task queue and judge a scope as a **product**. Is it doing its job for the user, what's weak from their seat, and what should come next? It ends in a recorded verdict and a short list of user-approved follow-up tasks.
+Judge a scope as a **product**: is it doing its job for the user, what's weak from their seat, what comes next? Ends in a recorded verdict and a few user-approved follow-up tasks.
 
-**Model**: run on Opus. If you are not on Opus, tell the user to switch (`/model opus`) and stop.
+**Model**: Opus only; otherwise tell the user to `/model opus` and stop.
 
-**Do not implement.** The output is task-manager notes and new tasks. The only writes outside the task DB are copying evidence to the scratchpad and the memory update at the end.
+**Do not implement.** Output: task notes and new tasks; the only other writes are scratchpad evidence copies and the closing memory update.
 
 ## Usage
 
 `/tm:assess [scope]`:
 
-- **`#NN`**: an existing evaluation task (e.g. "Judge the MVP after a week of real use"). Its description defines the checks, and its notes hold earlier trials.
-- **fuzzy scope** (e.g. `/tm:assess vault ai`): match against `getScopes()`, the same way as `/tm:refine`. If there's no evaluation task, propose one via `add()` before Step 3 so the trials have somewhere to live.
+- **`#NN`**: an evaluation task (e.g. "Judge the MVP after a week of real use"): description = the checks, notes = earlier trials.
+- **fuzzy scope** (e.g. `/tm:assess vault ai`): match case-insensitively against `getScopes()` — the tag containing every word of the argument; several → ask, none → report and stop. No evaluation task → propose one via `add()` before Step 3 to hold the trials.
 - **no argument**: ask which scope.
 
 ## Workflow
 
 ### Step 1 — Gather the state
 
-- `getById` / `getRelated(id, 'open')` and `getAll({ scope })`: what shipped, what's open, what's parked behind a "gate on the verdict".
-- Read the scope's own CLAUDE.md and `git log --oneline` since the last assessment, or since the evaluation task was created.
-- Note which fixes landed *between* trials. A trial only tests the code that was live when it ran, so record the commit each trial ran on.
+- `getById` / `getRelated(id, 'open')`, `getAll({ scope })`: what shipped, is open, or is parked behind a "gate on the verdict".
+- The scope's CLAUDE.md; `git log --oneline` since the last assessment (or the evaluation task's creation).
+- A trial tests only the code live when it ran: note fixes landed *between* trials, record each trial's commit.
 
 ### Step 2 — Preserve the evidence first
 
-Usage artifacts include transcripts, run logs, output files, saved-vs-proposed diffs and UI history.
-- **Before reading anything, check the scope's retention/TTL rules.** Copy every artifact you'll need into the scratchpad. A prune job can delete the baseline while you work.
-- If the baseline is already gone, say so and drop the comparison. Don't fake one from memory.
-- If the scope has no usage data (a library, a tool used rarely), the evidence is the task history, git log, notes, and the user's own reports. Say so explicitly.
-- Respect privacy fences: if an artifact is private user content, read only what the evaluation needs, and never pass it to subagents.
+Artifacts: transcripts, run logs, output files, saved-vs-proposed diffs, UI history.
+- **Check retention/TTL rules before reading anything**; copy every needed artifact to the scratchpad — a prune job can delete the baseline mid-work.
+- Baseline gone → say so, drop the comparison; don't fake one from memory.
+- No usage data (a library, a rarely used tool) → evidence is task history, git log, notes, user reports; say so.
+- Privacy fence: read only what the evaluation needs of private user content; never pass it to subagents.
 
 ### Step 3 — Review each trial against fixed checks
 
-- Use the checks from the evaluation task. If it has none, derive 3–5 from the scope's core promise, for example:
-  - does the main promise hold
-  - wrong facts or output
-  - wasted user effort
-  - regressions of earlier fixes
-  - shipped features that never triggered
-- Log **one note per trial** in the same format each time: the date and commit, a line per check, and a short quote as evidence.
-- **Verify every finding against its primary source before writing it.** Open the note, file, prompt or log line the finding is about.
+- The evaluation task's checks, or 3–5 from the scope's core promise (main promise holds? wrong facts/output, wasted user effort, regressions of earlier fixes, features that never triggered).
+- **One note per trial**, fixed format: date and commit, a line per check, a short evidence quote.
+- **Verify every finding against its primary source before writing it** (the first run filed "facts the agent failed to save" already in the note, and "a rule violation" that was a deliberate earlier rule):
   - "X is missing from the note": read the note.
-  - "This breaks rule Y": grep for the rule *and* its origin in git history; it may be a deliberate rule that conflicts with another one.
-  - "The feature never fires": find the trigger condition, then check whether any trial actually met it.
+  - "Breaks rule Y": grep the rule *and* its git-history origin; it may be deliberate, conflicting with another.
+  - "Never fires": find the trigger condition, check whether any trial met it — unused may be a demand problem, not a bug.
   - "The code is too slow": measure it.
+- Wrong → correct task, notes and summary; tell the user plainly.
 
 ### Step 4 — Get the user's verdict
 
-- Ask for a one-line feel per batch of trials and an overall **continue / adjust / stop**. Put this in the trial notes in their words.
-- The user's verdict is the decision, and your evidence informs it. If they disagree with your read, record both.
+- Ask a one-line feel per trial batch and an overall **continue / adjust / stop**; record it in the trial notes, their words.
+- Their verdict decides; your evidence informs. If they disagree with your read, record both.
 
 ### Step 5 — The debate (two rounds, product altitude)
 
-Spawn two Sonnet agents **in parallel, in the background**: an advocate and a skeptic. Both prompts must contain:
-- **Altitude, stated up front:** "Argue about the product: what the user gets, why they'd stop using it, where trust breaks, what's missing. No code-structure points (god-files, refactors, test gaps) unless the user asked for a code review." If you leave this out, round 1 drifts into code review.
-- **Read-only access plus the privacy fence** (which dirs not to read).
-- **The facts:** what the scope is for, who uses it and how, the evaluation results with numbers (trial count, error counts, edit rates), and the open issues.
-- **A word cap** (~350) and a closing "top 3" list (bets for the advocate, demands for the skeptic).
+Spawn a Sonnet advocate and skeptic **in parallel, in the background**. Both prompts contain:
+- **Altitude, up front** (left out, round 1 drifts into code review): "Argue about the product: what the user gets, why they'd stop using it, where trust breaks, what's missing. No code-structure points (god-files, refactors, test gaps) unless the user asked for a code review."
+- **Read-only access plus the privacy fence** (dirs not to read).
+- **The facts:** the scope's purpose, who uses it and how, evaluation numbers (trial count, error counts, edit rates), open issues.
+- **A word cap** (~350) and a closing "top 3" (bets for the advocate, demands for the skeptic).
 
-Round 2, via `SendMessage` to each (it resumes them):
-- Give each agent the other's claims, labelled (a), (b), (c), to rebut or concede.
-- Correct factual errors from round 1 that you verified yourself, e.g. "the evaluation did not only test an older system: trial 4 ran on X".
+Round 2, `SendMessage` to each (resumes them):
+- Each gets the other's claims, labelled (a), (b), (c), to rebut or concede.
+- Correct verified round-1 factual errors ("the evaluation did not only test an older system: trial 4 ran on X").
 - Ask for a sharpened top 3.
 
-While they run, do your own measurements: sizes, counts, rates, and where rules come from. Don't duplicate their reading.
+Meanwhile measure (sizes, counts, rates, rule origins); don't duplicate their reading.
 
 ### Step 6 — Synthesise
 
-Write to the user:
+Keep the user on decisions (questions with options, tables), not agent transcripts.
 1. **Where they agree**: 2–4 bullets.
-2. **Where they disagree**: a table of `topic | advocate | skeptic | my call`, with a one-line reason per call. Side with whoever has the evidence, and split the call when both are half right.
-3. **Spot-check the agents' factual claims** before relying on them. A skeptic's aside can expose a mistake in your own earlier findings. When it does, correct the task or note right away and say so.
-4. **Ranked suggestions** in user-visible terms, including your own. Typical high-value shapes:
-   - read paths: the product gives something back, not just collects
-   - less effort per use
-   - choosing by value instead of recency or randomness
-   - closing the quality loop with the user's own corrections as the metric
-5. **What you're not adopting**, and why: duplicates of existing tools, premature tooling at small n, points at the wrong altitude.
+2. **Where they disagree**: a `topic | advocate | skeptic | my call` table, one-line reason each. Side with the evidence; split when both are half right.
+3. **Spot-check agents' factual claims** before relying on them. A skeptic's aside can expose your own mistake — correct the task or note at once, say so.
+4. **Ranked suggestions** in user-visible terms, yours included. High-value shapes: read paths (giving back, not just collecting), less effort per use, choosing by value over recency or randomness, closing the quality loop with the user's corrections as the metric.
+5. **Not adopting**, and why: duplicates of existing tools, wrong-altitude points, premature tooling at small n (six data points: "read them", not "build a pipeline").
 
-Then ask which suggestions to file.
+Then ask which to file.
 
 ### Step 7 — File only what the user picks
 
-- One `add()` per accepted suggestion, at `refinement`, with `refs` to the evaluation task.
-  - Type `idea` by default, `feature` when the user says it "should be done".
-  - Priority as the user gives it.
-- The description holds the idea, the **user's own words**, and the open questions *they* raised (channel, timing, data source). Those are the first things the next `/tm:refine` settles.
-- When the user adds a constraint later ("this needs a native tool, our code is slower"), check it against the code: measure, read, compare. Record the result as a note on the task. Agree or push back with numbers.
-- Dismissed items are dropped. Don't re-argue or file them anyway.
+- One `add()` per pick, at `refinement`, `refs` to the evaluation task; `idea` by default, `feature` if the user says it "should be done"; the user's priority.
+- Description: the idea, the **user's own words**, the open questions *they* raised (channel, timing, data source) — what the next `/tm:refine` settles first.
+- A constraint the user adds later ("needs a native tool, our code is slower"): check it (measure, read, compare), note the result on the task, agree or push back with numbers.
+- Dismissed items are dropped: don't re-argue or file them.
 
 ### Step 8 — Close
 
-- Write a **verdict note** on the evaluation task:
-  - verdict and evidence base (n, date range, any missing baseline)
-  - what worked
-  - recurring flaws with their new task ids
-  - what was deliberately not filed
-  - the fate of every task that was gated on this verdict
-- **Correct earlier notes in place** (`updateNote`) when later evidence overturns them. Don't append a contradicting note: a wrong trial note misleads every later reader.
-- `setStatus(id, 'done')` once the user has accepted the verdict.
-- Update the scope's memory/project note if the verdict changes how future sessions should treat the scope (e.g. "stays parked, don't propose without a concrete miss").
-
-## Pitfalls (learned the hard way)
-
-- **Confident findings that weren't true.** Both happened in the first run of this skill:
-  - "New facts the agent failed to save" turned out to be already in the note.
-  - "A rule violation" was a deliberate rule from an earlier commit.
-  
-  Open the source before filing. When you're wrong, correct the task, the notes and the summary, and tell the user plainly.
-- **Retention ate the baseline.** Check TTLs in Step 2, not after.
-- **The round-1 debate defaults to code review.** Set the altitude in the first prompt.
-- **Small n means read by hand.** Six data points don't justify a mining tool. Say "read them", not "build a pipeline".
-- **An unused feature isn't automatically a bug.** Check whether the trigger condition ever occurred before calling it broken. It may be a demand problem.
-- **Keep the user's attention on decisions**: questions with options, and tables for disagreements. Not long transcripts of agent output.
+- **Verdict note** on the evaluation task: verdict, evidence base (n, date range, missing baseline); what worked; recurring flaws with their new task ids; what was deliberately not filed; the fate of every task gated on this verdict.
+- **Correct overturned notes in place** (`updateNote`), don't append a contradiction — a wrong trial note misleads every later reader.
+- `setStatus(id, 'done')` once the user accepts the verdict.
+- Update the scope's memory/project note if the verdict changes how sessions treat it (e.g. "stays parked, don't propose without a concrete miss").
