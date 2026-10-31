@@ -72,7 +72,7 @@ Epics first (their children read them as context), then `getNext` order: bug > t
 
 3a. **Fold notes.** Fold each note from `getById` into Facts/Changes/Steps in the same update (notes are as authoritative as the description; newer note > older note > description), then remove it with `mcp__task-manager__deleteNote({ noteId })`.
 
-3b. **Summary**: 2–3 lines — (1) what the task does, (2) the key decision, (3) the user-visible outcome — saved with `update({ id, summary })`. Required before promoting: `setStatus` to `plan`/`todo` errors without it.
+3b. **Summary**: 2–3 lines — (1) what the task does, (2) the key decision, (3) the user-visible outcome — saved with `update({ id, summary })`. Required before promoting (the server rejects refinement → `todo` without it).
 
 3c. **Pros/Cons analysis (offer)**: once the description is solid, ask: "Want me to run a quick pros/cons analysis before promoting?" On yes, spawn two agents in parallel, both `model: "sonnet"`:
    - **Advocate** (label `advocate:#NN`, finds wins and what it unlocks): "You are an optimistic, product-minded senior engineer. Given this task description, argue FOR it. Cover the user first: what do they get, and why will they come back to it? Then cover what it unlocks next and what value it delivers. Be specific and concrete. Under 200 words. Task: {title + description}"
