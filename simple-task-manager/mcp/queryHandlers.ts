@@ -12,12 +12,6 @@ import { checkForUpdate } from '../updateCheck.js';
 import { VERSION } from '../version.js';
 import type { Store, Task, TaskType, StatusFilter } from '../tasks.js';
 
-export async function handleGetByType(store: Store, { type, status, project }: { type: TaskType; status?: StatusFilter; project?: string }, ctx: SessionContext): Promise<MCPContent> {
-  const p = resolveProject(store, ctx, project);
-  if (typeof p !== 'string') return p;
-  return text({ tasks: store.getByType(p, type, status).map(toListTask) });
-}
-
 export async function handleGetOverview(store: Store, { status, project }: { status?: StatusFilter; project?: string }, ctx: SessionContext): Promise<MCPContent> {
   const p = resolveProject(store, ctx, project);
   if (typeof p !== 'string') return p;
@@ -31,13 +25,14 @@ export async function handleGetNext(store: Store, { type, project }: { type?: Ta
   return text({ task: task ? toListTask(task) : null });
 }
 
-export async function handleGetAll(store: Store, { status, project }: { status?: StatusFilter; project?: string }, ctx: SessionContext): Promise<MCPContent> {
+export async function handleGetAll(store: Store, { status, type, scope, project }: { status?: StatusFilter; type?: TaskType; scope?: string; project?: string }, ctx: SessionContext): Promise<MCPContent> {
   const p = resolveProject(store, ctx, project);
   if (typeof p !== 'string') return p;
+  const tasks = store.getAll(p, { status, type, scope });
   const grouped: Partial<Record<TaskType, (Task | Omit<Task, 'description'>)[]>> = {};
-  for (const type of ALL_TYPES) {
-    const ofType = store.getByType(p, type, status).map(toListTask);
-    if (ofType.length > 0) grouped[type] = ofType;
+  for (const t of ALL_TYPES) {
+    const ofType = tasks.filter((task) => task.type === t).map(toListTask);
+    if (ofType.length > 0) grouped[t] = ofType;
   }
   return text({ tasks: grouped });
 }
@@ -46,12 +41,6 @@ export async function handleGetById(store: Store, { id }: { id: number }): Promi
   const task = store.getById(id);
   if (!task) return notFoundError(id, store);
   return text({ task });
-}
-
-export async function handleGetByScope(store: Store, { scope, status, project }: { scope: string; status?: StatusFilter; project?: string }, ctx: SessionContext): Promise<MCPContent> {
-  const p = resolveProject(store, ctx, project);
-  if (typeof p !== 'string') return p;
-  return text({ scope, tasks: store.getByScope(p, scope, status).map(toListTask) });
 }
 
 export async function handleGetByExternalId(store: Store, { externalId }: { externalId: string }): Promise<MCPContent> {

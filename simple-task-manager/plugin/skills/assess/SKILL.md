@@ -24,7 +24,7 @@ Step back from the task queue and judge a scope as a **product**. Is it doing it
 
 ### Step 1 — Gather the state
 
-- `getById` / `getRelated(id, 'open')` and `getByScope(scope)`: what shipped, what's open, what's parked behind a "gate on the verdict".
+- `getById` / `getRelated(id, 'open')` and `getAll({ scope })`: what shipped, what's open, what's parked behind a "gate on the verdict".
 - Read the scope's own CLAUDE.md and `git log --oneline` since the last assessment, or since the evaluation task was created.
 - Note which fixes landed *between* trials. A trial only tests the code that was live when it ran, so record the commit each trial ran on.
 

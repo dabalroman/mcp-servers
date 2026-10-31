@@ -352,6 +352,7 @@ export type ScopeEntry = { scope: string; total: number; open: number };
 export type ProjectEntry = { name: string; total: number; open: number };
 
 export type StatusFilter = TaskStatus | 'open';
+export type ListFilter = { status?: StatusFilter; type?: TaskType; scope?: string };
 
 // Expands 'open' or undefined to the list of non-done statuses.
 // 'open' and undefined both mean non-done; a specific TaskStatus means exact match.
@@ -372,15 +373,13 @@ export type Store = {
   setStatus(id: number, status: TaskStatus): boolean;
   delete(id: number): boolean;
   getByStatus(project: string, status: TaskStatus, scope?: string): Task[];
-  getByScope(project: string, scope: string, status?: StatusFilter): Task[];
   getByExternalId(externalId: string): Task[];
-  getByType(project: string, type: TaskType, status?: StatusFilter): Task[];
   getNext(project: string, type?: TaskType): Task | null;
   getOverview(project: string, status?: StatusFilter): OverviewEntry[];
   getRelated(id: number, status?: StatusFilter): RelatedResult | null;
   getScopes(project: string): ScopeEntry[];
   getById(id: number): Task | null;
-  getAll(project: string, status?: StatusFilter): Task[];
+  getAll(project: string, filter?: ListFilter): Task[];
   getProjects(): ProjectEntry[];
   createProject(name: string): { name: string };
   hasProject(name: string): boolean;
@@ -790,38 +789,12 @@ export function createStore(dbPath: string): Store {
     return sortByPriority(tasks);
   }
 
-  function getByScope(project: string, scope: string, status?: StatusFilter): Task[] {
-    const resolved = resolveStatusFilter(status);
-    let rows: TaskRow[];
-    if (Array.isArray(resolved)) {
-      const placeholders = resolved.map(() => '?').join(', ');
-      rows = db.prepare(`SELECT * FROM tasks WHERE project = ? AND scope = ? AND status IN (${placeholders})`).all(project, scope, ...resolved) as TaskRow[];
-    } else {
-      rows = db.prepare('SELECT * FROM tasks WHERE project = ? AND scope = ? AND status = ?').all(project, scope, resolved) as TaskRow[];
-    }
-    const tasks = attachRefs(rows);
-    return sortByPriority(tasks);
-  }
-
   // All statuses on purpose: a ticket lookup must also find closed work.
   function getByExternalId(externalId: string): Task[] {
     const value = externalId.trim();
     if (!value) return [];
     const rows = db.prepare('SELECT * FROM tasks WHERE lower(external_id) = lower(?) ORDER BY id').all(value) as TaskRow[];
     return attachRefs(rows);
-  }
-
-  function getByType(project: string, type: TaskType, status?: StatusFilter): Task[] {
-    const resolved = resolveStatusFilter(status);
-    let rows: TaskRow[];
-    if (Array.isArray(resolved)) {
-      const placeholders = resolved.map(() => '?').join(', ');
-      rows = db.prepare(`SELECT * FROM tasks WHERE project = ? AND type = ? AND status IN (${placeholders})`).all(project, type, ...resolved) as TaskRow[];
-    } else {
-      rows = db.prepare('SELECT * FROM tasks WHERE project = ? AND type = ? AND status = ?').all(project, type, resolved) as TaskRow[];
-    }
-    const tasks = attachRefs(rows);
-    return sortByPriority(tasks);
   }
 
   function getNext(project: string, type?: TaskType): Task | null {
@@ -902,17 +875,14 @@ export function createStore(dbPath: string): Store {
     return task;
   }
 
-  function getAll(project: string, status?: StatusFilter): Task[] {
+  function getAll(project: string, { status, type, scope }: ListFilter = {}): Task[] {
     const resolved = resolveStatusFilter(status);
-    let rows: TaskRow[];
-    if (Array.isArray(resolved)) {
-      const placeholders = resolved.map(() => '?').join(', ');
-      rows = db.prepare(`SELECT * FROM tasks WHERE project = ? AND status IN (${placeholders})`).all(project, ...resolved) as TaskRow[];
-    } else {
-      rows = db.prepare('SELECT * FROM tasks WHERE project = ? AND status = ?').all(project, resolved) as TaskRow[];
-    }
-    const tasks = attachRefs(rows);
-    return sortByPriority(tasks);
+    const statuses = Array.isArray(resolved) ? resolved : [resolved];
+    let sql = `SELECT * FROM tasks WHERE project = ? AND status IN (${statuses.map(() => '?').join(', ')})`;
+    const params: string[] = [project, ...statuses];
+    if (type !== undefined) { sql += ' AND type = ?'; params.push(type); }
+    if (scope !== undefined) { sql += ' AND scope = ?'; params.push(scope); }
+    return sortByPriority(attachRefs(db.prepare(sql).all(...params) as TaskRow[]));
   }
 
   function getRelated(id: number, status?: StatusFilter): RelatedResult | null {
@@ -1131,9 +1101,7 @@ export function createStore(dbPath: string): Store {
     setStatus,
     delete: deleteTask,
     getByStatus,
-    getByScope,
     getByExternalId,
-    getByType,
     getNext,
     getOverview,
     getRelated,

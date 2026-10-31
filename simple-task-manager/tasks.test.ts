@@ -452,26 +452,21 @@ describe('getByStatus', () => {
   });
 });
 
-describe('getByScope', () => {
-  test('returns tasks tagged with the scope', () => {
-    makeTask({ scope: 'web' });
-    makeTask({ scope: 'cli' });
-    assert.equal(store.getByScope('default', 'web').length, 1);
+describe('getAll filters', () => {
+  test('type and scope narrow the list, alone and combined', () => {
+    const webBug = makeTask({ type: 'bug', scope: 'web' }).id;
+    const cliBug = makeTask({ type: 'bug', scope: 'cli' }).id;
+    const webFeature = makeTask({ type: 'feature', scope: 'web' }).id;
+    const ids = (f: Parameters<typeof store.getAll>[1]) => store.getAll('default', f).map((t) => t.id).sort();
+    assert.deepEqual(ids({ type: 'bug' }), [webBug, cliBug].sort());
+    assert.deepEqual(ids({ scope: 'web' }), [webBug, webFeature].sort());
+    assert.deepEqual(ids({ type: 'bug', scope: 'web' }), [webBug]);
   });
 
-  test('returns empty for unknown scope', () => {
+  test('scope is exact and case-sensitive; unknown scope is empty', () => {
     makeTask({ scope: 'web' });
-    assert.deepEqual(store.getByScope('default', 'nope'), []);
-  });
-});
-
-describe('getByType', () => {
-  test('returns tasks of the given type', () => {
-    makeTask({ type: 'bug' });
-    makeTask({ type: 'feature' });
-    const r = store.getByType('default', 'bug');
-    assert.equal(r.length, 1);
-    assert.equal(r[0]?.type, 'bug');
+    assert.deepEqual(store.getAll('default', { scope: 'Web' }), []);
+    assert.deepEqual(store.getAll('default', { scope: 'nope' }), []);
   });
 });
 
@@ -694,7 +689,7 @@ describe('plan status', () => {
   test('getAll open includes plan-status tasks', () => {
     const { id } = makeTask({ title: 'plan-task' });
     store.setStatus(id, 'plan');
-    const all = store.getAll('default', 'open');
+    const all = store.getAll('default', { status: 'open' });
     assert.ok(all.some((t) => t.id === id));
   });
 
@@ -759,9 +754,9 @@ describe('summary — store always returns complete data', () => {
     const byId = store.getById(id);
     assert.equal(byId?.summary, 'Short gist.');
     assert.equal(byId?.description, 'Full description text.');
-    const byType = store.getByType('default', 'feature').find((t) => t.id === id);
-    assert.equal(byType?.summary, 'Short gist.');
-    assert.equal(byType?.description, 'Full description text.');
+    const listed = store.getAll('default', { type: 'feature' }).find((t) => t.id === id);
+    assert.equal(listed?.summary, 'Short gist.');
+    assert.equal(listed?.description, 'Full description text.');
     const { active } = store.load();
     const loaded = active.find((t) => t.id === id);
     assert.equal(loaded?.summary, 'Short gist.');
@@ -917,7 +912,7 @@ describe('notes', () => {
     const { id } = makeTask({ scope: 's' });
     store.addNote(id, 'x');
     store.addNote(id, 'y');
-    for (const t of [store.getAll('default')[0], store.getByScope('default', 's')[0], store.getNext('default'), store.load().active[0]]) {
+    for (const t of [store.getAll('default')[0], store.getAll('default', { scope: 's' })[0], store.getNext('default'), store.load().active[0]]) {
       assert.equal(t?.noteCount, 2);
       assert.equal(t?.notes, undefined);
     }
@@ -1049,8 +1044,7 @@ describe('epics', () => {
     const rel = store.getRelated(epic);
     const reads = [
       find(store.getAll('default')),
-      find(store.getByType('default', 'bug')),
-      find(store.getByScope('default', 's')),
+      find(store.getAll('default', { type: 'bug', scope: 's' })),
       find(store.load().active),
       find(rel!.inbound),
       store.getNext('default', 'bug')!,
@@ -1062,15 +1056,15 @@ describe('epics', () => {
       assert.equal(t.epic, undefined);
       assert.equal(t.children, undefined);
     }
-    const epicRead = store.getByType('default', 'epic')[0];
+    const epicRead = store.getAll('default', { type: 'epic' })[0];
     assert.equal(epicRead?.children, undefined);
     assert.equal(epicRead?.epic, undefined);
   });
 
-  test('getAll and getByType list epics; epic sorts after other', () => {
+  test('getAll lists epics, alone or by type; epic sorts after other', () => {
     const epic = makeEpic();
     makeTask({ type: 'other' });
-    assert.deepEqual(store.getByType('default', 'epic').map((t) => t.id), [epic]);
+    assert.deepEqual(store.getAll('default', { type: 'epic' }).map((t) => t.id), [epic]);
     const types = store.getAll('default').map((t) => t.type);
     assert.ok(types.lastIndexOf('other') < types.indexOf('epic'));
   });
@@ -1152,9 +1146,8 @@ describe('projects', () => {
     const theirs = makeTask({ project: 'example-project', title: 'theirs', scope: 'example-scope', status: 'todo' }).id;
     const ids = (tasks: Task[]) => tasks.map((t) => t.id);
     assert.deepEqual(ids(store.getAll('default')), [mine]);
-    assert.deepEqual(ids(store.getByType('default', 'bug')), [mine]);
+    assert.deepEqual(ids(store.getAll('default', { type: 'bug', scope: 'example-scope' })), [mine]);
     assert.deepEqual(ids(store.getByStatus('default', 'todo')), [mine]);
-    assert.deepEqual(ids(store.getByScope('default', 'example-scope')), [mine]);
     assert.equal(store.getNext('default')?.id, mine);
     assert.equal(store.getNext('example-project')?.id, theirs);
     assert.deepEqual(store.getScopes('example-project'), [{ scope: 'example-scope', total: 1, open: 1 }]);

@@ -14,16 +14,14 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createStore, type AddInput, type Store } from './tasks.js';
+import { createStore, type AddInput, type Store, type StatusFilter } from './tasks.js';
 import { INSTRUCTIONS } from './instructions.js';
 import { PACKAGE_DIR } from './packageDir.js';
 import { ENV_ORDER } from './mcpConfig.js';
 import {
-  handleGetByType,
   handleGetNext,
   handleGetAll,
   handleGetById,
-  handleGetByScope,
   handleGetByExternalId,
   handleGetRelated,
   handleGetOverview,
@@ -267,22 +265,6 @@ describe('list-mode stripping (server layer)', () => {
     assert.equal(t?.summary, undefined);
   });
 
-  test('getByScope strips description when summary present', async () => {
-    const { id } = addWithSummary({ scope: 'x' });
-    const { tasks } = decode(await handleGetByScope(store, { scope: 'x' }, CTX)) as { tasks: { id: number; summary?: string; description?: string }[] };
-    const t = tasks.find((x) => x.id === id);
-    assert.equal(t?.summary, 'Short gist.');
-    assert.equal(t?.description, undefined);
-  });
-
-  test('getByType strips description when summary present', async () => {
-    const { id } = addWithSummary({ type: 'feature' });
-    const { tasks } = decode(await handleGetByType(store, { type: 'feature' }, CTX)) as { tasks: { id: number; summary?: string; description?: string }[] };
-    const t = tasks.find((x) => x.id === id);
-    assert.equal(t?.summary, 'Short gist.');
-    assert.equal(t?.description, undefined);
-  });
-
   test('getNext strips description when summary present', async () => {
     addWithSummary({ type: 'bug', priority: 'high', status: 'todo' });
     const { task } = decode(await handleGetNext(store, {}, CTX)) as { task: { summary?: string; description?: string } };
@@ -520,18 +502,6 @@ describe('plan field — MCP layer', () => {
     assert.ok(all.every((t) => t.plan === undefined), 'plan must not appear in getAll results');
   });
 
-  test('getByScope strips plan from list responses', async () => {
-    store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'T', description: '', plan: 'secret plan', scope: 'myapp' });
-    const { tasks } = decode(await handleGetByScope(store, { scope: 'myapp' }, CTX)) as { tasks: { plan?: string }[] };
-    assert.ok(tasks.every((t) => t.plan === undefined), 'plan must not appear in getByScope results');
-  });
-
-  test('getByType strips plan from list responses', async () => {
-    store.add({ project: 'default', type: 'idea', priority: 'low', title: 'T', description: '', plan: 'secret plan' });
-    const { tasks } = decode(await handleGetByType(store, { type: 'idea' }, CTX)) as { tasks: { plan?: string }[] };
-    assert.ok(tasks.every((t) => t.plan === undefined), 'plan must not appear in getByType results');
-  });
-
   test('getNext strips plan from list response', async () => {
     store.add({ project: 'default', type: 'bug', priority: 'high', title: 'T', description: '', plan: 'secret plan', status: 'todo' });
     const { task } = decode(await handleGetNext(store, {}, CTX)) as { task: { plan?: string } };
@@ -597,146 +567,47 @@ describe('plan status — MCP layer', () => {
   });
 });
 
-describe('getByType handler — status filter', () => {
-  test('no status omits done tasks', async () => {
-    addTask({ type: 'feature', title: 'Active feature', status: 'refinement' });
-    const { id: doneId } = addTask({ type: 'feature', title: 'Done feature', status: 'refinement' });
-    store.setStatus(doneId, 'done');
+describe('list tools — status filter', () => {
+  type Listed = { id: number; status: string };
+  const flat = (resp: MCPContent) => Object.values((decode(resp) as { tasks: Record<string, Listed[]> }).tasks).flat();
+  const lists: [string, (anchor: number, status?: StatusFilter) => Promise<Listed[]>][] = [
+    ['getAll', async (_a, status) => flat(await handleGetAll(store, { status }, CTX))],
+    ['getAll { type }', async (_a, status) => flat(await handleGetAll(store, { status, type: 'feature' }, CTX))],
+    ['getAll { scope }', async (_a, status) => flat(await handleGetAll(store, { status, scope: 'myapp' }, CTX))],
+    ['getAll { type, scope }', async (_a, status) => flat(await handleGetAll(store, { status, type: 'feature', scope: 'myapp' }, CTX))],
+    ['getRelated', async (anchor, status) => (decode(await handleGetRelated(store, { id: anchor, status })) as { inbound: Listed[] }).inbound],
+  ];
+  const NON_DONE = ['in_progress', 'plan', 'refinement', 'todo'];
+  const cases: [StatusFilter | undefined, string[]][] = [
+    [undefined, NON_DONE],
+    ['open', NON_DONE],
+    ['refinement', ['refinement']],
+    ['plan', ['plan']],
+    ['todo', ['todo']],
+    ['in_progress', ['in_progress']],
+    ['done', ['done']],
+  ];
 
-    const resp = await handleGetByType(store, { type: 'feature' }, CTX);
-    const { tasks } = decode(resp) as { tasks: { status: string }[] };
-    assert.ok(tasks.every((t) => t.status !== 'done'), 'done must not appear by default');
-    assert.equal(tasks.length, 1);
-  });
+  // One fixture task per status, all inbound to the anchor so getRelated sees them too.
+  function seed(): { anchor: number; ids: Set<number> } {
+    const anchor = addTask({ type: 'other', title: 'Anchor' }).id;
+    const make = (status: 'refinement' | 'plan' | 'todo') =>
+      addTask({ type: 'feature', scope: 'myapp', summary: 'x', status, refs: [{ id: anchor, relation: 'blocks' }] }).id;
+    const ids = [make('refinement'), make('plan'), make('todo'), make('todo'), make('todo')];
+    store.setStatus(ids[3]!, 'in_progress');
+    store.setStatus(ids[4]!, 'done');
+    return { anchor, ids: new Set(ids) };
+  }
 
-  test('status: "done" returns only done tasks', async () => {
-    addTask({ type: 'feature', title: 'Active feature', status: 'refinement' });
-    const { id: doneId } = addTask({ type: 'feature', title: 'Done feature', status: 'refinement' });
-    store.setStatus(doneId, 'done');
-
-    const resp = await handleGetByType(store, { type: 'feature', status: 'done' }, CTX);
-    const { tasks } = decode(resp) as { tasks: { status: string; title: string }[] };
-    assert.ok(tasks.every((t) => t.status === 'done'));
-    assert.equal(tasks.length, 1);
-    assert.equal(tasks[0]?.title, 'Done feature');
-  });
-
-  test('status: "open" returns refinement+todo+in_progress, not done', async () => {
-    addTask({ type: 'feature', title: 'Active feature', status: 'refinement' });
-    const { id: doneId } = addTask({ type: 'feature', title: 'Done feature', status: 'refinement' });
-    store.setStatus(doneId, 'done');
-
-    const resp = await handleGetByType(store, { type: 'feature', status: 'open' }, CTX);
-    const { tasks } = decode(resp) as { tasks: { status: string }[] };
-    assert.ok(tasks.every((t) => t.status !== 'done'));
-    assert.equal(tasks.length, 1);
-  });
-
-  test('status: "todo" returns only todo tasks', async () => {
-    store.add({ project: 'default', type: 'feature', priority: 'medium', title: 'Todo feature', description: '', summary: 'x', status: 'todo' });
-    store.add({ project: 'default', type: 'feature', priority: 'medium', title: 'Refinement feature', description: '', status: 'refinement' });
-
-    const resp = await handleGetByType(store, { type: 'feature', status: 'todo' }, CTX);
-    const { tasks } = decode(resp) as { tasks: { status: string }[] };
-    assert.ok(tasks.every((t) => t.status === 'todo'));
-    assert.equal(tasks.length, 1);
-  });
-});
-
-describe('getByScope handler — status filter', () => {
-  test('no status omits done tasks', async () => {
-    store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Active', description: '', scope: 'myapp', status: 'refinement' });
-    const { id: doneId } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Done', description: '', scope: 'myapp', status: 'refinement' });
-    store.setStatus(doneId, 'done');
-
-    const resp = await handleGetByScope(store, { scope: 'myapp' }, CTX);
-    const { tasks } = decode(resp) as { tasks: { status: string }[] };
-    assert.ok(tasks.every((t) => t.status !== 'done'));
-    assert.equal(tasks.length, 1);
-  });
-
-  test('status: "done" returns only done tasks', async () => {
-    store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Active', description: '', scope: 'myapp', status: 'refinement' });
-    const { id: doneId } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Done', description: '', scope: 'myapp', status: 'refinement' });
-    store.setStatus(doneId, 'done');
-
-    const resp = await handleGetByScope(store, { scope: 'myapp', status: 'done' }, CTX);
-    const { tasks } = decode(resp) as { tasks: { status: string; title: string }[] };
-    assert.ok(tasks.every((t) => t.status === 'done'));
-    assert.equal(tasks[0]?.title, 'Done');
-  });
-
-  test('status: "open" returns refinement+todo+in_progress, not done', async () => {
-    store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Active', description: '', scope: 'myapp', status: 'refinement' });
-    const { id: doneId } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Done', description: '', scope: 'myapp', status: 'refinement' });
-    store.setStatus(doneId, 'done');
-
-    const resp = await handleGetByScope(store, { scope: 'myapp', status: 'open' }, CTX);
-    const { tasks } = decode(resp) as { tasks: { status: string }[] };
-    assert.ok(tasks.every((t) => t.status !== 'done'));
-    assert.equal(tasks.length, 1);
-  });
-
-  test('status: "todo" returns only todo tasks', async () => {
-    store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Todo', description: '', summary: 'x', scope: 'myapp', status: 'todo' });
-    store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Refinement', description: '', scope: 'myapp', status: 'refinement' });
-
-    const resp = await handleGetByScope(store, { scope: 'myapp', status: 'todo' }, CTX);
-    const { tasks } = decode(resp) as { tasks: { status: string }[] };
-    assert.ok(tasks.every((t) => t.status === 'todo'));
-    assert.equal(tasks.length, 1);
-  });
-});
-
-describe('getRelated handler — status filter', () => {
-  test('no status omits done related tasks', async () => {
-    const { id: a } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Anchor', description: '' });
-    const { id: b } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Active ref', description: '', refs: [{ id: a, relation: 'blocks' }] });
-    const { id: c } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Done ref', description: '', refs: [{ id: a, relation: 'blocks' }] });
-    store.setStatus(c, 'done');
-
-    const resp = await handleGetRelated(store, { id: a });
-    const payload = decode(resp) as { inbound: { id: number }[] };
-    const inboundIds = payload.inbound.map((t) => t.id);
-    assert.ok(inboundIds.includes(b), 'active ref should appear');
-    assert.ok(!inboundIds.includes(c), 'done ref should be filtered out by default');
-  });
-
-  test('status: "done" returns done related tasks', async () => {
-    const { id: a } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Anchor', description: '' });
-    const { id: c } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Done ref', description: '', refs: [{ id: a, relation: 'blocks' }] });
-    store.setStatus(c, 'done');
-
-    const resp = await handleGetRelated(store, { id: a, status: 'done' });
-    const payload = decode(resp) as { inbound: { id: number }[] };
-    const inboundIds = payload.inbound.map((t) => t.id);
-    assert.ok(inboundIds.includes(c), 'done ref should appear when status=done');
-  });
-
-  test('status: "open" returns refinement+todo+in_progress, not done', async () => {
-    const { id: a } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Anchor', description: '' });
-    const { id: b } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Active ref', description: '', refs: [{ id: a, relation: 'blocks' }] });
-    const { id: c } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Done ref', description: '', refs: [{ id: a, relation: 'blocks' }] });
-    store.setStatus(c, 'done');
-
-    const resp = await handleGetRelated(store, { id: a, status: 'open' });
-    const payload = decode(resp) as { inbound: { id: number }[] };
-    const inboundIds = payload.inbound.map((t) => t.id);
-    assert.ok(inboundIds.includes(b));
-    assert.ok(!inboundIds.includes(c));
-  });
-
-  test('status: "todo" returns only todo related tasks', async () => {
-    const { id: a } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Anchor', description: '' });
-    store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Refinement ref', description: '', refs: [{ id: a, relation: 'blocks' }] });
-    const { id: c } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Todo ref', description: '', summary: 'x', refs: [{ id: a, relation: 'blocks' }] });
-    store.setStatus(c, 'todo');
-
-    const resp = await handleGetRelated(store, { id: a, status: 'todo' });
-    const payload = decode(resp) as { inbound: { id: number; status: string }[] };
-    assert.ok(payload.inbound.every((t) => t.status === 'todo'));
-    assert.equal(payload.inbound.length, 1);
-  });
+  for (const [name, list] of lists) {
+    for (const [status, expected] of cases) {
+      test(`${name} with status ${status ?? '(none)'} returns ${expected.join('+')}`, async () => {
+        const { anchor, ids } = seed();
+        const got = (await list(anchor, status)).filter((t) => ids.has(t.id)).map((t) => t.status).sort();
+        assert.deepEqual(got, expected);
+      });
+    }
+  }
 });
 
 describe('getOverview handler — status filter', () => {
@@ -1038,19 +909,6 @@ describe('stdio server — legacy TASK_UI_MODE', () => {
 });
 
 describe('getAll handler', () => {
-  test('excludes done tasks by default', async () => {
-    addTask({ type: 'bug', title: 'Active bug' });
-    const { id: doneId } = addTask({ type: 'bug', title: 'Resolved bug' });
-    store.setStatus(doneId, 'done');
-
-    const resp = await handleGetAll(store, {}, CTX);
-    const { tasks } = decode(resp) as { tasks: Record<string, { status: string; title: string }[]> };
-    const bugs = tasks.bug ?? [];
-    assert.ok(bugs.every((t) => t.status !== 'done'), 'done tasks must not appear in getAll by default');
-    assert.equal(bugs.length, 1);
-    assert.equal(bugs[0]?.title, 'Active bug');
-  });
-
   test('omits type key entirely when all tasks of that type are done', async () => {
     const { id } = addTask({ type: 'idea', title: 'An idea' });
     store.setStatus(id, 'done');
@@ -1071,40 +929,18 @@ describe('getAll handler', () => {
     assert.deepEqual(tasks, {});
   });
 
-  test('status: "done" returns only done tasks', async () => {
-    addTask({ type: 'bug', title: 'Active bug' });
-    const { id: doneId } = addTask({ type: 'bug', title: 'Resolved bug' });
-    store.setStatus(doneId, 'done');
-
-    const resp = await handleGetAll(store, { status: 'done' }, CTX);
-    const { tasks } = decode(resp) as { tasks: Record<string, { status: string; title: string }[]> };
-    const bugs = tasks.bug ?? [];
-    assert.ok(bugs.every((t) => t.status === 'done'), 'only done tasks when status=done');
-    assert.equal(bugs.length, 1);
-    assert.equal(bugs[0]?.title, 'Resolved bug');
-  });
-
-  test('status: "open" returns refinement+todo+in_progress but not done', async () => {
-    addTask({ type: 'bug', title: 'Refinement bug', status: 'refinement' });
-    const { id: doneId } = addTask({ type: 'bug', title: 'Done bug' });
-    store.setStatus(doneId, 'done');
-
-    const resp = await handleGetAll(store, { status: 'open' }, CTX);
-    const { tasks } = decode(resp) as { tasks: Record<string, { status: string }[]> };
-    const bugs = tasks.bug ?? [];
-    assert.ok(bugs.every((t) => t.status !== 'done'), 'done must not appear when status=open');
-    assert.equal(bugs.length, 1);
-  });
-
-  test('status: "todo" returns only todo tasks', async () => {
-    store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Todo bug', description: '', summary: 'x', status: 'todo' });
-    store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'Refinement bug', description: '', status: 'refinement' });
-
-    const resp = await handleGetAll(store, { status: 'todo' }, CTX);
-    const { tasks } = decode(resp) as { tasks: Record<string, { status: string }[]> };
-    const bugs = tasks.bug ?? [];
-    assert.ok(bugs.every((t) => t.status === 'todo'), 'only todo tasks when status=todo');
-    assert.equal(bugs.length, 1);
+  test('type and scope filters keep the grouped shape', async () => {
+    const webBug = addTask({ type: 'bug', scope: 'web' }).id;
+    addTask({ type: 'bug', scope: 'cli' });
+    const webIdea = addTask({ type: 'idea', scope: 'web' }).id;
+    const ids = async (args: { type?: 'bug'; scope?: string }) => {
+      const { tasks } = decode(await handleGetAll(store, args, CTX)) as { tasks: Record<string, { id: number }[]> };
+      return Object.fromEntries(Object.entries(tasks).map(([k, v]) => [k, v.map((t) => t.id)]));
+    };
+    assert.deepEqual(Object.keys(await ids({ type: 'bug' })), ['bug']);
+    assert.deepEqual(await ids({ scope: 'web' }), { bug: [webBug], idea: [webIdea] });
+    assert.deepEqual(await ids({ type: 'bug', scope: 'web' }), { bug: [webBug] });
+    assert.deepEqual(await ids({ scope: 'nope' }), {});
   });
 });
 
@@ -1157,12 +993,12 @@ describe('note handlers', () => {
     assert.deepEqual(task.notes.map((n) => n.body), ['first', 'second']);
   });
 
-  test('getAll and getByScope show noteCount without bodies', async () => {
+  test('getAll, filtered or not, shows noteCount without bodies', async () => {
     const { id } = addTask({ scope: 'area' });
     store.addNote(id, 'a');
     const all = decode(await handleGetAll(store, {}, CTX))['tasks'] as Record<string, Record<string, unknown>[]>;
-    const scoped = decode(await handleGetByScope(store, { scope: 'area' }, CTX))['tasks'] as Record<string, unknown>[];
-    for (const t of [all['bug']![0]!, scoped[0]!]) {
+    const scoped = decode(await handleGetAll(store, { scope: 'area' }, CTX))['tasks'] as Record<string, Record<string, unknown>[]>;
+    for (const t of [all['bug']![0]!, scoped['bug']![0]!]) {
       assert.equal(t['noteCount'], 1);
       assert.equal('notes' in t, false);
     }
@@ -1216,13 +1052,10 @@ describe('epics — MCP layer', () => {
         else Object.values(v).forEach(walk);
       }
     };
-    walk(decode(await handleGetAll(store, {}, CTX)));
+    for (const args of [{}, { type: 'epic' as const }, { type: 'bug' as const }, { scope: 's' }]) walk(decode(await handleGetAll(store, args, CTX)));
     const related = decode(await handleGetRelated(store, { id: epic })) as { task: Row; inbound: Row[] };
     const rows = [
       ...flat,
-      ...(decode(await handleGetByType(store, { type: 'epic' }, CTX)).tasks as Row[]),
-      ...(decode(await handleGetByType(store, { type: 'bug' }, CTX)).tasks as Row[]),
-      ...(decode(await handleGetByScope(store, { scope: 's' }, CTX)).tasks as Row[]),
       (decode(await handleGetNext(store, {}, CTX)).task as Row),
       related.task,
       ...related.inbound,

@@ -20,6 +20,12 @@ How to move a local clone to a newer version without losing data or quietly losi
 
 ## Version notes
 
+### `getByType` and `getByScope` removed (2026-10-042)
+
+- Both tools are gone; `getAll` takes optional `type` and `scope` filters instead: `getAll({ type: "bug" })`, `getAll({ scope: "auth" })`, or both together. `status` and `project` work as before.
+- `getAll` always returns tasks grouped by type (`{ tasks: { <type>: [...] } }`), filtered or not, so a filtered call is the old flat list nested under its type.
+- Prompts, scripts or custom skills that call the old tools need updating. The bundled skills and rules already use `getAll`.
+
 ### Commands print as `/tm:<skill>` (2026-10-041)
 
 - The UI's copy button, the server instructions, the rules and the skills now name `/tm:refine`, `/tm:implement` and so on. Bare `/implement` doesn't resolve in every session ("Unknown command"); `/tm:implement` always does.
