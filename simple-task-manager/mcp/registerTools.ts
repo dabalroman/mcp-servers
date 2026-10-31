@@ -27,8 +27,6 @@ import {
   handleUiStop,
 } from './mutationHandlers.js';
 
-const NOTES_RULE = 'Notes are as authoritative as the description; on conflict the newest statement wins (a newer note overrides an older note, any note overrides the description). Use notes for decisions, findings and spec changes made after refinement — not as a scratchpad or progress log.';
-
 const PARENT_ID_RULE = 'Optional id of the epic this task belongs to. Must point to a task of type "epic"; an epic itself cannot have a parent (no nesting) and a task belongs to at most one epic. Violations return an error.';
 
 const statusParam = z.enum(['refinement', 'plan', 'todo', 'in_progress', 'done', 'open']).optional()
@@ -38,7 +36,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   // ── add ────────────────────────────────────────────────────────────────────────
   const addSchema = {
     type: z.enum(['bug', 'feature', 'idea', 'tool', 'other', 'epic'])
-      .describe('bug = defect to fix (highest priority class); feature = planned work that requires a /plan session before implementation; idea = exploratory thought, needs refinement before it becomes a feature; tool = developer-tooling improvement; other = anything that does not fit the above; epic = umbrella holding project context (goals, order, rules) for its child tasks — never implemented directly'),
+      .describe('bug = defect to fix (highest priority class); feature = planned work; goes through refinement, a plan is opt-in; idea = exploratory thought, needs refinement before it becomes a feature; tool = developer-tooling improvement; other = anything that does not fit the above; epic = umbrella holding project context (goals, order, rules) for its child tasks — never implemented directly'),
     priority: z.enum(['low', 'medium', 'high', 'critical'])
       .describe('critical = blocking or data-loss risk, fix immediately; high = important, tackle soon; medium = normal backlog; low = nice-to-have'),
     title: z.string().min(1, 'Title must not be empty')
@@ -52,7 +50,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     plan: z.string().optional()
       .describe('Optional implementation plan in markdown. Written by the agent after /plan; read back via getById before /tm:implement. Must be plain UTF-8 text (no control characters); a BOM is stripped and CRLF is stored as LF.'),
     refs: refsSchema
-      .describe('Optional related-task references — use when this task depends on, blocks, or is otherwise connected to existing tasks. Each entry: { id: number, relation?: string }. Relation must be one of the canonical values; default "relates to". The server automatically writes the inverse on the referenced task — you only need to specify one side.'),
+      .describe('Optional related-task references (depends on, blocks, …). Each entry: { id, relation? }, relation one of the canonical values (default "relates to"). The inverse is written automatically — specify one side only. Nonexistent ids and self-references are silently dropped.'),
     status: z.enum(['refinement', 'plan', 'todo']).default('refinement')
       .describe('Initial status. ALWAYS leave as default "refinement" unless one of these holds: (a) the user explicitly told you to skip refinement / mark as todo, or (b) you just refined this exact task with the user in the current conversation. Otherwise pass "refinement" (or omit the field). Choosing "todo" without one of those conditions is a rule violation — when in doubt, pick "refinement".'),
     parentId: z.number().int().positive().optional()
@@ -63,7 +61,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   };
   server.tool(
     'add',
-    'Schedule a new task — call this whenever the user reports a bug, requests a feature, shares an idea, or says "schedule" / "TODO" / "add to the list". Do NOT implement the task inline; add it and stop. New tasks ALWAYS default to status "refinement"; only pass status: "todo" when (a) the user explicitly asks to skip refinement, OR (b) the current conversation already refined this exact task with the user. When in doubt, omit status and let the next session run PM-style clarification. Returns { id } of the newly created task. Refs are auto-mirrored on the other side; no need for a separate update call. Refs pointing to nonexistent IDs or self-references are silently dropped.',
+    'Schedule a new task — call this whenever the user reports a bug, requests a feature, shares an idea, or says "schedule" / "TODO" / "add to the list". Do NOT implement the task inline; add it and stop. Status defaults to "refinement" — see status. Returns { id }. Refs pointing to nonexistent IDs or self-references are silently dropped.',
     addSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof addSchema>>): Promise<MCPContent> => handleAdd(store, args, ctx))
   );
@@ -72,7 +70,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   const getOverviewSchema = { status: statusParam, project: projectParam };
   server.tool(
     'getOverview',
-    'Get a count summary per type: refinement, plan, open (todo + in_progress), and done counts. Use for dashboard questions like "how many tasks are there?" or "give me a backlog summary". Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Returns only types with at least one matching task, sorted by open count desc. Do NOT use this to answer "what\'s next?" — use getNext for that.',
+    'Get a count summary per type: refinement, plan, open (todo + in_progress), and done counts. Use for dashboard questions like "how many tasks are there?" or "give me a backlog summary". Returns only types with at least one matching task, sorted by open count desc. Do NOT use this to answer "what\'s next?" — use getNext for that.',
     getOverviewSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getOverviewSchema>>): Promise<MCPContent> => handleGetOverview(store, args, ctx))
   );
@@ -80,12 +78,12 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   // ── getNext ────────────────────────────────────────────────────────────────────
   const getNextSchema = {
     type: z.enum(['bug', 'feature', 'idea', 'tool', 'other', 'epic']).optional()
-      .describe('Narrow to one type (optional). Omit to recommend across all types using the bug > tool > feature > idea > other order. Epics are never returned, so "epic" always yields null.'),
+      .describe('Narrow to one type (optional). Omit to consider all types. "epic" always yields null.'),
     project: projectParam,
   };
   server.tool(
     'getNext',
-    'Get the single next actionable task — use for "what should I do next?", "what\'s next?", or any recommendation request. Sort order: in_progress first (resume interrupted work), then refinement (needs PM clarification), then plan (awaiting plan write), then todo, then highest priority, then newest id (FILO). Considers refinement, plan, todo, and in_progress tasks. Never returns an epic — epics are context umbrellas, their children are the actionable work. Optional type filter narrows to one category. When no filter is given, apply the project prioritization order: bug > tool > feature > idea > other. IMPORTANT: if the returned task has status "refinement", do NOT start implementing — instead ask the user clarifying questions to refine the description, then promote to "todo" via setStatus. When a task has a summary, description is omitted; tasks with notes show noteCount instead of the bodies — call getById for the full task.',
+    'Get the single next actionable task — use for "what should I do next?", "what\'s next?", or any recommendation request. Sort order: in_progress first (resume interrupted work), then refinement, then plan, then todo, then highest priority, then newest id (FILO). With no type filter the type order is bug > tool > feature > idea > other. Never returns an epic — its children are the actionable work.',
     getNextSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getNextSchema>>): Promise<MCPContent> => handleGetNext(store, args, ctx))
   );
@@ -99,7 +97,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   };
   server.tool(
     'getAll',
-    'List tasks grouped by type — use for "show me everything", "all bugs", "what is open in auth?". Optional type and scope filters narrow the list; the shape is always { tasks: { <type>: [...] } }, groups in type order (bug, feature, idea, tool, other, epic), empty groups dropped, each sorted by priority desc then id desc. Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Prefer getNext for a single recommendation. When a task has a summary, description is omitted; tasks with notes show noteCount instead of the bodies — call getById for the full task.',
+    'List tasks grouped by type — use for "show me everything", "all bugs", "what is open in auth?". Optional type and scope filters narrow the list; the shape is always { tasks: { <type>: [...] } }, groups in type order (bug, feature, idea, tool, other, epic), empty groups dropped, each sorted by priority desc then id desc. Prefer getNext for a single recommendation.',
     getAllSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getAllSchema>>): Promise<MCPContent> => handleGetAll(store, args, ctx))
   );
@@ -108,7 +106,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   const getByIdSchema = { id: z.coerce.number().int().positive().describe('The numeric task ID to look up') };
   server.tool(
     'getById',
-    'Get a single task by its numeric ID — returns the full task including both summary (if set) and description, plus notes (oldest first) when the task has any, and refs as { id, relation, title } so you can tell what each linked task is without fetching it. A task in an epic also carries `epic` { id, title, status, summary, description, notes } — the epic\'s full text and notes, authoritative context for the child (order, goals, rules). An epic carries `children` [{ id, title, status, type, priority }] ordered by id. List methods carry only parentId + epicTitle. Other list methods omit description when summary is present and show only noteCount — use this when you need the full body. Notes are as authoritative as the description; newest statement wins on conflict. Use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Returns an error listing valid IDs if not found.',
+    'Get a single task by its numeric ID — returns the full task including both summary (if set) and description, plus notes (oldest first) when the task has any, and refs as { id, relation, title } so you can tell what each linked task is without fetching it. A task in an epic also carries `epic` { id, title, status, summary, description, notes } — the epic\'s full text and notes, authoritative context for the child (order, goals, rules). An epic carries `children` [{ id, title, status, type, priority }] ordered by id. List methods carry only parentId + epicTitle. List tools omit description when a summary is present and show only noteCount, so use this for the full body. Use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Returns an error listing valid IDs if not found.',
     getByIdSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getByIdSchema>>): Promise<MCPContent> => handleGetById(store, args))
   );
@@ -120,7 +118,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   };
   server.tool(
     'setStatus',
-    'Update a task\'s status. Lifecycle rules: always call setStatus(in_progress) before starting work on a task; always call setStatus(done) after the commit is made and the user confirms. Returns { success: true } — plus knowledgeReminder on done, and epicStatus when the task\'s epic moved (epic status follows its children automatically) — or { error }.',
+    'Update a task\'s status. Returns { success: true } — plus knowledgeReminder on done, and epicStatus when the task\'s epic moved (epic status follows its children automatically) — or { error }.',
     setStatusSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof setStatusSchema>>): Promise<MCPContent> => handleSetStatus(store, args))
   );
@@ -129,17 +127,17 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   const updateSchema = {
     id: z.coerce.number().int().positive().describe('Task ID to update — get it from getNext, getAll, getById, etc.'),
     title: z.string().min(1).optional().describe('New title (replaces current). Start with a verb.'),
-    description: z.string().optional().describe('New description (replaces current). Include full context: what, why, acceptance criteria, file paths.'),
-    priority: z.enum(['low', 'medium', 'high', 'critical']).optional().describe('New priority: critical = blocking; high = important soon; medium = normal; low = nice-to-have'),
+    description: z.string().optional().describe('New description (replaces current).'),
+    priority: z.enum(['low', 'medium', 'high', 'critical']).optional().describe('New priority (see add for the scale)'),
     type: z.enum(['bug', 'feature', 'idea', 'tool', 'other', 'epic']).optional().describe('New type — use to reclassify a task (e.g. idea → feature after refinement). An epic with children cannot be retyped.'),
     scope: z.string().nullable().optional().describe('New scope tag (e.g. "eink-frame"), or null to clear the scope entirely'),
     externalId: z.string().nullable().optional().describe('New external tracker ticket ID (JIRA/Asana/…, e.g. "OPXPIQ-6532"), or null / empty string to clear it'),
     summary: z.string().nullable().optional()
-      .describe('Short 2–3 line summary of the task. Pass null or empty string to clear it. Should capture: what the task does, the most important decision, and the user-visible outcome.'),
+      .describe('Short 2–3 line gist. Pass null or empty string to clear it.'),
     plan: z.string().nullable().optional()
       .describe('New plan content (markdown) — this is how a plan is stored. Pass null or empty string to clear. For small edits use replace(). Must be plain UTF-8 text (no control characters); a BOM is stripped and CRLF is stored as LF.'),
     refs: refsSchema.nullable()
-      .describe('Full replacement list of related-task references, or null / empty array to clear all refs. Each entry: { id, relation? } where relation is one of the canonical values. Defaults to "relates to". The server automatically updates the inverse on each referenced task — only specify one side. This replaces the existing refs list entirely — include all refs you want to keep.'),
+      .describe('Full replacement list of related-task references, or null / empty array to clear all. Each entry: { id, relation? }, relation one of the canonical values (default "relates to"). The inverse is written automatically — specify one side only. Replaces the existing list entirely — include every ref you want to keep. Nonexistent ids and self-references are silently dropped.'),
     parentId: z.number().int().positive().nullable().optional()
       .describe(`${PARENT_ID_RULE} Pass null to detach the task from its epic.`),
     project: z.string().min(1).optional()
@@ -147,7 +145,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   };
   server.tool(
     'update',
-    'Patch any fields of an existing task in place — use when the user asks to edit, rename, reprioritize, retype, rescope, move to another project, or update the refs/description of a task. Only the fields you provide are changed; omitted fields keep their current values. Returns { success: true, task } with the updated task (plan and note bodies omitted, noteCount instead — use getById), or { success: false, error }. Refs pointing to nonexistent IDs or self-references are silently dropped.',
+    'Patch any fields of an existing task in place — use when the user asks to edit, rename, reprioritize, retype, rescope, move to another project, or update the refs/description of a task. Omitted fields keep their current values. Returns { success: true, task } (plan and note bodies omitted, noteCount instead — use getById), or { success: false, error }.',
     updateSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof updateSchema>>): Promise<MCPContent> => handleUpdate(store, args))
   );
@@ -173,7 +171,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   };
   server.tool(
     'addNote',
-    `Append a note to a task without re-sending the description. Prefer this over update({ description }) for incremental additions. ${NOTES_RULE} Bumps the task's updated_at. Returns { success, note }.`,
+    "Append a note to a task without re-sending the description. Prefer this over update({ description }) for incremental additions. Returns { success, note }.",
     addNoteSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof addNoteSchema>>): Promise<MCPContent> => handleAddNote(store, args))
   );
@@ -185,7 +183,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   };
   server.tool(
     'updateNote',
-    `Replace the body of an existing note. ${NOTES_RULE} Bumps the parent task's updated_at. Returns { success, note }.`,
+    'Replace the body of an existing note. Returns { success, note }.',
     updateNoteSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof updateNoteSchema>>): Promise<MCPContent> => handleUpdateNote(store, args))
   );
@@ -196,7 +194,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   };
   server.tool(
     'deleteNote',
-    "Permanently remove a note — e.g. after /tm:refine has folded it into the description. Bumps the parent task's updated_at. Returns { success }.",
+    "Permanently remove a note. Returns { success }.",
     deleteNoteSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof deleteNoteSchema>>): Promise<MCPContent> => handleDeleteNote(store, args))
   );
@@ -207,7 +205,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   };
   server.tool(
     'getByExternalId',
-    'Find tasks by external tracker ticket ID — call this first whenever the user asks about a JIRA/Asana/other ticket ID (e.g. "what is the status of OPXPIQ-6532?"). Case-insensitive exact match across all statuses, including done. Returns { externalId, tasks } — an array, since several tasks (e.g. an epic and its children) may share one ID; sorted by id; empty when none match. When a task has a summary, description is omitted — call getById for the full task.',
+    'Find tasks by external tracker ticket ID — call this first whenever the user asks about a JIRA/Asana/other ticket ID (e.g. "what is the status of OPXPIQ-6532?"). Case-insensitive exact match across all statuses, including done. Returns { externalId, tasks } — an array, since several tasks (e.g. an epic and its children) may share one ID; sorted by id; empty when none match.',
     getByExternalIdSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getByExternalIdSchema>>): Promise<MCPContent> => handleGetByExternalId(store, args))
   );
@@ -219,7 +217,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   };
   server.tool(
     'getRelated',
-    'Get tasks related to a given task — returns the task itself, outbound (tasks that #X references, decorated with refRelation), and inbound (tasks that reference #X). Filters by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a single status (incl. "done") for exact match. Every entry, the anchor included, is list mode: summary when present, description otherwise; no plan; noteCount instead of note bodies. Call getById for the full task.',
+    'Get tasks related to a given task — returns the task itself, outbound (tasks that #X references, decorated with refRelation), and inbound (tasks that reference #X). Every entry, the anchor included, is shaped like a list entry (see getById).',
     getRelatedSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getRelatedSchema>>): Promise<MCPContent> => handleGetRelated(store, args))
   );
