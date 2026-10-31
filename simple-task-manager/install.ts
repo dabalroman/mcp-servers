@@ -11,7 +11,7 @@
 import { readFileSync, writeFileSync, existsSync } from 'fs';
 import { resolve, basename } from 'path';
 import { execFileSync } from 'node:child_process';
-import { ENV_DOCS, ENV_ORDER, INSTALL_USAGE, isStaleEntry, parseInstallArgs, parseMcpConfig, serializeMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
+import { ENV_DOCS, ENV_ORDER, INSTALL_USAGE, parseInstallArgs, parseMcpConfig, serializeMcpConfig, type McpConfig, type McpEntry } from './mcpConfig.js';
 import { PACKAGE_DIR } from './packageDir.js';
 import { runServerSetup } from './serverSetup.js';
 
@@ -69,13 +69,12 @@ if (existsSync(mcpFile)) {
 
 const existingEntry = config.mcpServers['task-manager'];
 
-if (existingEntry && !isStaleEntry(existingEntry)) {
+if (existingEntry) {
   console.log(`task-manager is already registered in ${mcpFile} — .mcp.json left unchanged (dist/ was rebuilt above).`);
 } else {
-  const action = existingEntry ? 'Refreshed' : 'Registered';
   config.mcpServers['task-manager'] = entry;
   writeFileSync(mcpFile, serializeMcpConfig(config));
-  console.log(`${action} task-manager in ${mcpFile}`);
+  console.log(`Registered task-manager in ${mcpFile}`);
   console.log(`  server : ${entry.args[0]}`);
   console.log(`  db     : ${entry.env?.TASKS_DB ?? '(unset)'}`);
 

@@ -5,8 +5,8 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  isStaleEntry, serializeMcpConfig, parseMcpConfig, parseInstallArgs, pm2AppName,
-  type McpConfig, type McpEntry
+  serializeMcpConfig, parseMcpConfig, parseInstallArgs, pm2AppName,
+  type McpConfig
 } from './mcpConfig.js';
 import { ecosystemFile } from './serverSetup.js';
 
@@ -79,34 +79,6 @@ describe('serializeMcpConfig', () => {
     const out = serializeMcpConfig(config);
     assert.ok(out.includes('"alpha"'));
     assert.ok(out.includes('"beta"'));
-  });
-});
-
-// ── isStaleEntry ──────────────────────────────────────────────────────────────
-
-describe('isStaleEntry — rewrite path detection', () => {
-  test('returns false for undefined', () => {
-    assert.equal(isStaleEntry(undefined), false);
-  });
-
-  test('returns true when args[0] ends with /server.js (old root layout)', () => {
-    const e: McpEntry = { command: 'node', args: ['/home/rd/.claude/mcp-servers/simple-task-manager/server.js'] };
-    assert.equal(isStaleEntry(e), true);
-  });
-
-  test('returns true when args[0] ends with /server.ts (tsx direct run)', () => {
-    const e: McpEntry = { command: 'node', args: ['/path/to/server.ts'] };
-    assert.equal(isStaleEntry(e), true);
-  });
-
-  test('returns false for the correct dist/server.js path', () => {
-    const e: McpEntry = { command: 'node', args: ['/home/rd/.claude/mcp-servers/simple-task-manager/dist/server.js'] };
-    assert.equal(isStaleEntry(e), false);
-  });
-
-  test('returns false for empty args', () => {
-    const e: McpEntry = { command: 'node', args: [] };
-    assert.equal(isStaleEntry(e), false);
   });
 });
 

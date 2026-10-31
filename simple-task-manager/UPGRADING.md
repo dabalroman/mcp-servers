@@ -20,6 +20,11 @@ How to move a local clone to a newer version without losing data or quietly losi
 
 ## Version notes
 
+### `install.ts` no longer rewrites pre-dist entries (2026-10-045)
+
+- An existing `task-manager` entry in `.mcp.json` is now always left unchanged. Entries from before the `dist/` layout (`args[0]` ending in `server.ts` or a non-dist `server.js`) are no longer repaired automatically; edit `args[0]` to `<dir>/dist/server.js` by hand.
+- `health` no longer flags the old `AUTO_OPEN_TASK_UI` key; use `TASK_UI_AUTO_OPEN_IN_BROWSER`.
+
 ### `getByType` and `getByScope` removed (2026-10-042)
 
 - Both tools are gone; `getAll` takes optional `type` and `scope` filters instead: `getAll({ type: "bug" })`, `getAll({ scope: "auth" })`, or both together. `status` and `project` work as before.

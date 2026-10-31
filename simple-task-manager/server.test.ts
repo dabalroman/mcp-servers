@@ -741,18 +741,16 @@ describe('health handler — config section env validation', () => {
     return (decode(resp) as { report: string }).report;
   }
 
-  test('flags legacy TASK_UI_DISABLE and AUTO_OPEN_TASK_UI as ✗ with hints', async () => {
+  test('flags legacy TASK_UI_DISABLE as ✗ with hints', async () => {
     writeMcpJson({
       TASKS_DB: dbPath,
       PROJECT_NAME: 'demo',
       TASK_UI_PORT: '7374',
       TASK_UI_AUTO_OPEN_IN_BROWSER: '0',
       TASK_UI_DISABLE: '0',
-      AUTO_OPEN_TASK_UI: '0',
     });
     const report = getReport(await handleHealth());
     assert.match(report, /✗ TASK_UI_DISABLE — removed: .*client mode/);
-    assert.match(report, /✗ AUTO_OPEN_TASK_UI — renamed to `TASK_UI_AUTO_OPEN_IN_BROWSER`/);
   });
 
   test('canonical env produces ✓ for all four canonical vars and no TASK_UI_MODE line', async () => {

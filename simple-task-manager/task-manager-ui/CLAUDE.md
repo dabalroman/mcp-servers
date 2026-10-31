@@ -13,7 +13,7 @@ Web UI (and the HTTP `/mcp` endpoint) for the `simple-task-manager` MCP. Sibling
 
 | Path | Purpose |
 |---|---|
-| `server.ts` | Express bootstrap: mounts `/api/tasks`, serves built client from `dist/`, SPA fallback. Reads `TASK_UI_PORT`, `TASKS_DB`, `AUTO_OPEN_TASK_UI`. |
+| `server.ts` | Express bootstrap: mounts `/api/tasks`, serves built client from `dist/`, SPA fallback. Reads `TASK_UI_PORT`, `TASKS_DB`, `TASK_UI_AUTO_OPEN_IN_BROWSER`. |
 | `src/server/taskStore.ts` | Thin wrapper over the MCP's `createStore`. Adds `isValidationError(err)` helper. |
 | `src/server/taskApi.ts` | REST + SSE handlers. Self-write broadcast on every mutation + 1s `data_version` poll for external writes. The 20s SSE heartbeat must stay a named `event: ping`, not a `: ping` comment — `EventSource` never exposes comments, and the `useTasks` watchdog reopens the stream after 45s without one. |
 | `src/server/taskRouter.ts` | connect/express middleware that fronts the API. Used by both `server.ts` and the Vite dev plugin. |
@@ -35,7 +35,7 @@ Web UI (and the HTTP `/mcp` endpoint) for the `simple-task-manager` MCP. Sibling
 |---|---|---|
 | `TASKS_DB` | `./tasks.db` from cwd | Path to the SQLite database. The MCP forwards its own value when spawning. |
 | `TASK_UI_PORT` | `7374` | HTTP port. |
-| `AUTO_OPEN_TASK_UI` | unset | When `"1"`, open the printed URL in the system browser on startup. |
+| `TASK_UI_AUTO_OPEN_IN_BROWSER` | unset | When `"1"`, open the printed URL in the system browser on startup. |
 | `TASK_UI_BUNDLED` | unset | Set to `"1"` by the MCP when it spawns this UI. `/api/config` reports `mode: 'bundled'` then, `'server'` otherwise. Never set it by hand. |
 
 ## Logging convention

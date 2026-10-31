@@ -60,15 +60,7 @@ export const ENV_ORDER = [
 export const LEGACY_ENV_KEYS: Record<string, string> = {
   TASK_UI_MODE: 'removed: a stdio entry is always bundled. To share one DB, run the server (`install.ts --server on`) and connect repos in client mode (UI → Connect a machine)',
   TASK_UI_DISABLE: 'removed: a stdio entry always runs its UI. For no per-repo UI, connect the repo in client mode (UI → Connect a machine)',
-  AUTO_OPEN_TASK_UI: 'renamed to `TASK_UI_AUTO_OPEN_IN_BROWSER`',
 };
-
-/** Returns true when an existing task-manager entry points at the old pre-dist path. */
-export function isStaleEntry(e: McpEntry | undefined): boolean {
-  if (!e) return false;
-  const arg0 = e.args?.[0] ?? '';
-  return arg0.endsWith('/server.ts') || (arg0.endsWith('/server.js') && !arg0.endsWith('/dist/server.js'));
-}
 
 export function parseMcpConfig(raw: string): McpConfig {
   return JSON.parse(raw) as McpConfig;

@@ -55,7 +55,7 @@ After any change to `server.ts`, `instructions.ts`, anything in `mcp/`, `tasks.t
 
 `server.test.ts` imports the real handlers directly — there is no copied handler logic in tests. Adding a new handler: add it to `mcp/{query,mutation}Handlers.ts`, register it in `mcp/registerTools.ts`, write tests against the imported handler in `server.test.ts`. Query handlers are async — test call sites must `await` them and the enclosing test function must be `async`.
 
-`install.test.ts` tests `serializeMcpConfig`, `isStaleEntry`, `parseInstallArgs` (runs before the build; rejects unknown flags and `--global`), and `loadMigrations` from `mcpConfig.ts` and `tasks.ts`. `install.ts` is a top-level script (calls `process.exit`) and cannot be imported; testable logic lives in `mcpConfig.ts` instead. `isStaleEntry` checks for `/dist/server.js` suffix specifically — `endsWith('/server.js')` alone is too broad and would flag the current `dist/server.js` path as stale.
+`install.test.ts` tests `serializeMcpConfig`, `parseInstallArgs` (runs before the build; rejects unknown flags and `--global`), and `loadMigrations` from `mcpConfig.ts` and `tasks.ts`. `install.ts` is a top-level script (calls `process.exit`) and cannot be imported; testable logic lives in `mcpConfig.ts` instead.
 
 ## tsconfig — excluding the UI sub-package
 
