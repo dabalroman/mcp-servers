@@ -1036,7 +1036,7 @@ describe('epics', () => {
   });
 
   test('list reads carry parentId and epicTitle but never epic or children', () => {
-    const epic = makeEpic();
+    const epic = makeEpic({ scope: 's' });
     store.addNote(epic, 'n');
     const { id } = makeTask({ parentId: epic, scope: 's' });
     const find = (ts: { id: number }[]) => ts.find((t) => t.id === id) as Task;
@@ -1086,6 +1086,108 @@ describe('epics', () => {
     assert.ok(t);
     assert.equal(t.parentId, undefined);
     assert.equal(t.epic, undefined);
+  });
+});
+
+describe('epic scope and project rules', () => {
+  function makeEpic(overrides: Partial<AddInput> = {}): number {
+    return makeTask({ type: 'epic', title: 'Roadmap', scope: 'example-scope', ...overrides }).id;
+  }
+  const scopeOf = (id: number) => store.getById(id)?.scope;
+
+  test('add with a mismatching scope gets the epic scope', () => {
+    const epic = makeEpic();
+    const { id } = makeTask({ parentId: epic, scope: 'other-scope' });
+    assert.equal(scopeOf(id), 'example-scope');
+  });
+
+  test('update of scope on a child is ignored', () => {
+    const epic = makeEpic();
+    const { id } = makeTask({ parentId: epic });
+    assert.equal(store.update(id, { scope: 'other-scope' })?.task.scope, 'example-scope');
+    store.update(id, { scope: null });
+    assert.equal(scopeOf(id), 'example-scope');
+  });
+
+  test('moving a task under an epic adopts its scope', () => {
+    const epic = makeEpic();
+    const { id } = makeTask({ scope: 'other-scope' });
+    store.update(id, { parentId: epic });
+    assert.equal(scopeOf(id), 'example-scope');
+  });
+
+  test('one update changing both parentId and scope ends up with the new epic scope', () => {
+    const a = makeEpic();
+    const b = makeEpic({ scope: 'scope-b' });
+    const { id } = makeTask({ parentId: a });
+    store.update(id, { parentId: b, scope: 'other-scope' });
+    assert.equal(scopeOf(id), 'scope-b');
+  });
+
+  test('rescoping an epic cascades to all its children, done ones included', () => {
+    const epic = makeEpic();
+    const { id: open } = makeTask({ parentId: epic });
+    const { id: done } = makeTask({ parentId: epic });
+    store.setStatus(done, 'done');
+    const { id: unrelated } = makeTask({ scope: 'example-scope' });
+    store.update(epic, { scope: 'new-scope' });
+    assert.equal(scopeOf(open), 'new-scope');
+    assert.equal(scopeOf(done), 'new-scope');
+    assert.equal(scopeOf(unrelated), 'example-scope');
+  });
+
+  test('an epic without a scope forces its children to none', () => {
+    const epic = makeEpic({ scope: undefined });
+    const { id } = makeTask({ parentId: epic, scope: 'other-scope' });
+    assert.equal(scopeOf(id), undefined);
+    const scoped = makeEpic();
+    const { id: child } = makeTask({ parentId: scoped });
+    store.update(scoped, { scope: null });
+    assert.equal(scopeOf(child), undefined);
+  });
+
+  test('detaching a child keeps its scope and frees it', () => {
+    const epic = makeEpic();
+    const { id } = makeTask({ parentId: epic });
+    store.update(id, { parentId: null });
+    assert.equal(scopeOf(id), 'example-scope');
+    store.update(id, { scope: 'other-scope' });
+    assert.equal(scopeOf(id), 'other-scope');
+  });
+
+  test('rejects a parent from another project on add and on update', () => {
+    store.createProject('proj-a');
+    const epic = makeEpic();
+    assert.throws(() => makeTask({ project: 'proj-a', parentId: epic }), new RegExp(`parent #${epic} is in project default`));
+    const { id } = makeTask({ project: 'proj-a' });
+    assert.throws(() => store.update(id, { parentId: epic }), /is in project default/);
+    const { id: child } = makeTask({ parentId: epic });
+    assert.throws(() => store.update(child, { project: 'proj-a' }), /is in project default/);
+    assert.equal(store.getById(child)?.project, 'default');
+  });
+
+  test('rejects moving an epic with children to another project; allowed once emptied', () => {
+    store.createProject('proj-a');
+    const epic = makeEpic();
+    const { id: child } = makeTask({ parentId: epic });
+    assert.throws(() => store.update(epic, { project: 'proj-a' }), new RegExp(`epic #${epic} still has children`));
+    store.update(child, { parentId: null });
+    assert.equal(store.update(epic, { project: 'proj-a' })?.task.project, 'proj-a');
+  });
+
+  test('rejects a new reference to another project; an existing one survives a resend', () => {
+    store.createProject('proj-a');
+    const { id: foreign } = makeTask({ project: 'proj-a' });
+    const ref = (id: number) => [{ id, relation: 'relates to' as const }];
+    assert.throws(() => makeTask({ refs: ref(foreign) }), new RegExp(`reference #${foreign} is in project proj-a`));
+    const { id: target } = makeTask();
+    assert.throws(() => store.update(target, { refs: ref(foreign) }), /is in project proj-a/);
+
+    // Moving a referenced task is allowed and leaves a legacy cross-project ref behind.
+    const { id: source } = makeTask({ refs: ref(target) });
+    store.update(target, { project: 'proj-a' });
+    assert.deepEqual(store.update(source, { title: 'Renamed', refs: ref(target) })?.task.refs?.map((r) => r.id), [target]);
+    assert.throws(() => store.update(source, { refs: [...ref(target), ...ref(foreign)] }), /is in project proj-a/);
   });
 });
 
@@ -1166,7 +1268,9 @@ describe('projects', () => {
   test('getById, getRelated and refs work across projects', () => {
     store.createProject('example-project');
     const a = makeTask({ title: 'A' }).id;
-    const b = makeTask({ project: 'example-project', title: 'B', refs: [{ id: a, relation: 'depends on' }] }).id;
+    // New cross-project refs are rejected; a move is how a legacy one arises.
+    const b = makeTask({ title: 'B', refs: [{ id: a, relation: 'depends on' }] }).id;
+    store.update(b, { project: 'example-project' });
     assert.equal(store.getById(b)?.refs?.[0]?.id, a);
     assert.deepEqual(store.getRelated(a)?.inbound.map((t) => t.id), [b]);
   });

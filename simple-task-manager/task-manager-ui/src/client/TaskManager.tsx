@@ -8,7 +8,7 @@ import { sortTasks, groupTasks, nestEpicChildren, epicProgress, filterByProject,
 import type { ViewState } from '@/lib/taskView';
 import { useTasks } from './useTasks';
 import { TaskCard } from './TaskCard';
-import { TaskForm } from './TaskForm';
+import { TaskForm, type TaskPrefill } from './TaskForm';
 import { ProjectDialog } from './ProjectDialog';
 import { ProjectSwitcher } from './ProjectSwitcher';
 import { isCollapsed } from './collapseState';
@@ -50,6 +50,7 @@ export default function TaskManager() {
   const [formOpen, setFormOpen] = useState(false);
   const [projectDialogOpen, setProjectDialogOpen] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
+  const [prefill, setPrefill] = useState<TaskPrefill | undefined>(undefined);
   const [view, setView] = useState<ViewState>(loadViewState);
   const [rememberedProject, setRememberedProject] = useState<string | null>(() => projectFromPath(window.location.pathname) ?? loadProject());
 
@@ -111,9 +112,14 @@ export default function TaskManager() {
     setFormOpen(true);
   }
 
-  function openAdd() {
+  function openAdd(next?: TaskPrefill) {
     setEditing(null);
+    setPrefill(next);
     setFormOpen(true);
+  }
+
+  function openAddChild(epic: Task) {
+    openAdd({ project: epic.project, parentId: epic.id, scope: epic.scope ?? '' });
   }
 
   async function handleCreateProject(name: string): Promise<boolean> {
@@ -209,6 +215,7 @@ export default function TaskManager() {
             task={task}
             onStatus={handleStatus}
             onEdit={openEdit}
+            onAddChild={openAddChild}
             onRefClick={navigateToRef}
             highlighted={highlightedId === task.id}
             showReopen={showReopen}
@@ -259,24 +266,39 @@ export default function TaskManager() {
           const collapsed = isCollapsed(localStorage, COLLAPSE_KEY, collapseKey);
           return (
             <section key={collapseKey}>
-              <button
-                type="button"
-                aria-expanded={!collapsed}
-                onClick={() => toggleCollapse(collapseKey)}
-                className="flex items-center gap-3 mb-3 w-full cursor-pointer hover:bg-accent/20 rounded -mx-2 px-2 py-1 transition-colors"
-              >
-                {collapsed
-                  ? <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground transition-transform" strokeWidth={1.5} />
-                  : <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground transition-transform" strokeWidth={1.5} />
-                }
-                <span className="text-xs tracking-widest text-muted-foreground uppercase">
-                  {label}
-                </span>
-                <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
-                  {sectionTasks.length}
-                </span>
-                <div className="tick-rule flex-1" />
-              </button>
+              <div className="flex items-center gap-2 mb-3">
+                <button
+                  type="button"
+                  aria-expanded={!collapsed}
+                  onClick={() => toggleCollapse(collapseKey)}
+                  className="flex items-center gap-3 flex-1 min-w-0 cursor-pointer hover:bg-accent/20 rounded -ml-2 px-2 py-1 transition-colors"
+                >
+                  {collapsed
+                    ? <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground transition-transform" strokeWidth={1.5} />
+                    : <ChevronDown className="w-4 h-4 shrink-0 text-muted-foreground transition-transform" strokeWidth={1.5} />
+                  }
+                  <span className="text-xs tracking-widest text-muted-foreground uppercase">
+                    {label}
+                  </span>
+                  <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
+                    {sectionTasks.length}
+                  </span>
+                  <div className="tick-rule flex-1" />
+                </button>
+                {/* Sections are never empty; the no-scope one yields ''. */}
+                {view.groupBy === 'scope' && tab === 'active' && project !== null && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-7 px-2"
+                    aria-label={`Add task to ${label}`}
+                    title={`Add task to ${label}`}
+                    onClick={() => openAdd({ project, scope: sectionTasks[0]?.scope ?? '' })}
+                  >
+                    +
+                  </Button>
+                )}
+              </div>
               {!collapsed && (
                 <div hidden={collapsed} className="flex flex-col gap-2">
                   {renderCards(sectionTasks, showReopen)}
@@ -320,7 +342,7 @@ export default function TaskManager() {
         </div>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialogOpen(true)}>+ Project</Button>
-          <Button size="sm" onClick={openAdd} disabled={project === null}>+ New</Button>
+          <Button size="sm" onClick={() => openAdd()} disabled={project === null}>+ New</Button>
         </div>
       </div>
 
@@ -330,10 +352,11 @@ export default function TaskManager() {
       {tab === 'done'   && renderTaskList(groupedDone,   'No done tasks yet.', true)}
 
       <TaskForm
-        key={`${String(formOpen)}:${editing?.id ?? 'new'}`}
+        key={`${String(formOpen)}:${editing?.id ?? 'new'}:${JSON.stringify(prefill ?? null)}`}
         open={formOpen}
         onOpenChange={setFormOpen}
         initial={editing}
+        prefill={prefill}
         allTasks={[...allActive, ...allDone]}
         projects={projects.map((p) => p.name)}
         project={project ?? ''}

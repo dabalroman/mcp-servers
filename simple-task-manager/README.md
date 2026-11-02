@@ -80,10 +80,11 @@ If another command uses the same name, the namespaced form works too (`/tm:imple
   global.
 - **Scopes** — free-text tags for an area within a project (`"auth"`, `"api"`).
 - **Epics** — an umbrella task holding the goal, order and rules for its children. Its status
-  follows them.
+  follows them; children share its project and always inherit its scope.
 - **Notes** — decisions made after refinement. The newest statement wins over older notes and the
   description.
 - **Refs** — links like `blocks` or `depends on`. The server writes the inverse on the other task.
+  Refs and epic links stay within one project.
 
 Claude calls the tools itself: `add`, `update`, `setStatus`, `getNext`, `getAll`, `getById`,
 `addNote`, `health`, and more. Each describes itself to Claude when it connects.
@@ -93,7 +94,8 @@ Claude calls the tools itself: `add`, `update`, `setStatus`, `getNext`, `getAll`
 A small Express + React app that shows the tasks Claude sees and pushes changes live. You can add,
 edit, re-prioritise, link and delete tasks, and switch projects from a tab strip (a dropdown menu on phones); the URL
 (`http://<host>:7374/<project>`) opens a project directly. The UI and `health` both say when a
-newer version is published.
+newer version is published. Epic cards and scope headers have quick-add buttons that pre-fill
+the project, epic and scope.
 
 ### Env vars
 

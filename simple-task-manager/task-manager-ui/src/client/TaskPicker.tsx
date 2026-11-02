@@ -10,9 +10,11 @@ export type TaskPickerProps = {
   onPick: (task: Task) => void;
   placeholder: string;
   autoFocus?: boolean;
+  // For a field near the bottom of a dialog, where a downward list on a phone runs off-screen.
+  dropUpOnMobile?: boolean;
 };
 
-export function TaskPicker({ tasks, onPick, placeholder, autoFocus }: TaskPickerProps) {
+export function TaskPicker({ tasks, onPick, placeholder, autoFocus, dropUpOnMobile = false }: TaskPickerProps) {
   const [search, setSearch] = useState('');
   const [open, setOpen] = useState(false);
   const [highlight, setHighlight] = useState(-1);
@@ -117,7 +119,13 @@ export function TaskPicker({ tasks, onPick, placeholder, autoFocus }: TaskPicker
         </button>
       )}
       {open && candidates.length > 0 && (
-        <div tabIndex={-1} className="absolute top-full left-0 right-0 border border-border border-t-0 bg-card z-10 max-h-48 overflow-y-auto">
+        <div
+          tabIndex={-1}
+          className={cn(
+            'absolute left-0 right-0 border border-border bg-card z-10 max-h-48 overflow-y-auto',
+            dropUpOnMobile ? 'bottom-full border-b-0 sm:bottom-auto sm:top-full sm:border-b sm:border-t-0' : 'top-full border-t-0',
+          )}
+        >
           {candidates.map((t, i) => (
             <button
               key={t.id}

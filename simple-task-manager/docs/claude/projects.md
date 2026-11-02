@@ -15,7 +15,7 @@ Read before touching project binding, project-aware handlers, `PROJECT_NAME`, or
 - `server.ts` builds `ctx = { project: PROJECT_NAME || 'default' }` and passes it to `registerTools`; HTTP builds `{ project: X-Project ?? key's default project, transport: 'http' }` per request.
 - `ctx.transport === 'http'` skips `ui-start`/`ui-stop`, makes health collapse Config/Plugin into one `–` line (process.env is the UI server's, not the client's), and points the unknown-project hint at the header.
 - Project-aware handlers (`getNext`, `getAll`, `getScopes`, `getOverview`, `add`) call `resolveProject(store, ctx, args.project)` in `mcp/shared.ts`, which returns the name or an `errorText`.
-- Global on purpose (IDs are global): `getById`, `getRelated`, `getByExternalId` (a ticket ID is an identifier lookup), `setStatus`, `delete`, notes, refs, epic links, and `load()`/`loadWithNotes()`.
+- Global on purpose (IDs are global): `getById`, `getRelated`, `getByExternalId` (a ticket ID is an identifier lookup), `setStatus`, `delete`, notes, refs, epic links, and `load()`/`loadWithNotes()`. Reads only: new refs and epic links must stay in one project (#499).
 - Only the session-binding note lives in `plugin/RULES.md` (Projects); never-invent and global ids live in the `project` param, `getProjects` and `createProject` descriptions, so plugin-less sessions get them too.
 
 ## UI

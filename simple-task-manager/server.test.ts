@@ -1036,7 +1036,7 @@ describe('epics — MCP layer', () => {
   });
 
   test('list handlers carry parentId and epicTitle and never epic or children', async () => {
-    const epic = epicId();
+    const epic = addTask({ type: 'epic', title: 'Roadmap', description: 'Rules', scope: 's' }).id;
     store.addNote(epic, 'ctx');
     const { id } = addTask({ parentId: epic, scope: 's' });
     store.update(id, { refs: [{ id: epic, relation: 'relates to' }] });

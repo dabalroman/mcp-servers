@@ -494,6 +494,7 @@ export function createStore(dbPath: string): Store {
   const stmtDeleteNote      = db.prepare('DELETE FROM notes WHERE id = ?');
   const stmtChildrenOf      = db.prepare('SELECT id, title, status, type, priority FROM tasks WHERE parent_id = ? ORDER BY id');
   const stmtHasChildren     = db.prepare('SELECT 1 FROM tasks WHERE parent_id = ? LIMIT 1');
+  const stmtRescopeChildren = db.prepare("UPDATE tasks SET scope = @scope, updated_at = datetime('now') WHERE parent_id = @id AND scope IS NOT @scope");
   const stmtSelectProject   = db.prepare('SELECT name FROM projects WHERE name = ?');
   const API_KEY_COLS = 'id, label, project, created_at AS createdAt, last_used_at AS lastUsedAt, revoked_at AS revokedAt';
   const stmtSelectApiKey    = db.prepare(`SELECT ${API_KEY_COLS} FROM api_keys WHERE id = ?`);
@@ -522,17 +523,32 @@ export function createStore(dbPath: string): Store {
     return task;
   }
 
-  // Throws on an invalid epic link. selfId is set on update, for the
-  // "epic still has children" check when the type changes away from epic.
-  function assertParent(selfType: TaskType, parentId: number | null, selfId?: number, prevType?: TaskType): void {
-    if (selfId !== undefined && prevType === 'epic' && selfType !== 'epic' && stmtHasChildren.get(selfId)) {
-      throw new Error(`Validation failed: epic #${selfId} still has children — move them off it first.`);
+  // Throws on an invalid epic link; returns the parent row. `prev` is set on
+  // update, for the checks that need the task's current type/project.
+  function assertParent(
+    selfType: TaskType,
+    parentId: number | null,
+    project: string,
+    prev?: { id: number; type: TaskType; project: string }
+  ): TaskRow | undefined {
+    if (prev && prev.type === 'epic' && stmtHasChildren.get(prev.id)) {
+      if (selfType !== 'epic') throw new Error(`Validation failed: epic #${prev.id} still has children — move them off it first.`);
+      if (!sameProject(project, prev.project)) {
+        throw new Error(`Validation failed: epic #${prev.id} still has children — move them off it before changing its project.`);
+      }
     }
-    if (parentId === null) return;
+    if (parentId === null) return undefined;
     if (selfType === 'epic') throw new Error('Validation failed: epics cannot have a parent.');
     const parent = stmtSelectTask.get(parentId) as TaskRow | undefined;
     if (!parent) throw new Error(`Validation failed: parent #${parentId} does not exist.`);
     if (parent.type !== 'epic') throw new Error(`Validation failed: parent #${parentId} is not an epic.`);
+    if (!sameProject(parent.project, project)) throw new Error(`Validation failed: parent #${parentId} is in project ${parent.project}.`);
+    return parent;
+  }
+
+  // Project names match case-insensitively (the FK is NOCASE).
+  function sameProject(a: string, b: string): boolean {
+    return a.toLowerCase() === b.toLowerCase();
   }
 
   // Returns the stored spelling: tasks.project would otherwise keep whatever
@@ -607,14 +623,20 @@ export function createStore(dbPath: string): Store {
 
   // Apply refs change for a single source task. Mirrors canonical refs and removes
   // mirrors when refs are removed/changed. Mutates the refs table; callers wrap
-  // in a transaction.
-  function applyRefsImpl(sourceId: number, oldRefs: Ref[], nextRefs: Ref[] | null | undefined): Ref[] {
+  // in a transaction. Only newly added refs must stay in `project`: legacy
+  // cross-project refs survive the full-list resend every edit does.
+  function applyRefsImpl(sourceId: number, project: string, oldRefs: Ref[], nextRefs: Ref[] | null | undefined): Ref[] {
     const validIds = getValidIds();
     const cleanedNext = (nextRefs ?? []).filter((r) => {
       if (r.id === sourceId) return false;
       if (!validIds.has(r.id)) return false;
       return true;
     });
+    for (const r of cleanedNext) {
+      if (oldRefs.some((o) => o.id === r.id)) continue;
+      const target = stmtSelectTask.get(r.id) as TaskRow;
+      if (!sameProject(target.project, project)) throw new Error(`Validation failed: reference #${r.id} is in project ${target.project}.`);
+    }
 
     const canonOld = (oldRefs ?? []).filter((r) => !r.nonCanonical);
     const canonNext = cleanedNext.filter((r) => !r.nonCanonical);
@@ -671,14 +693,15 @@ export function createStore(dbPath: string): Store {
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
 
     return db.transaction(() => {
-      assertParent(type, parentId ?? null);
+      const canonical = canonicalProject(project);
+      const parent = assertParent(type, parentId ?? null, canonical);
       const info = stmtInsertTask.run(
         trimmedTitle,
         type,
         status,
         priority,
-        canonicalProject(project),
-        scope?.trim() || null,
+        canonical,
+        parent ? parent.scope : scope?.trim() || null,
         summary?.trim() || null,
         description.trim(),
         plan?.trim() || null,
@@ -689,7 +712,7 @@ export function createStore(dbPath: string): Store {
       if (parentId != null) syncEpicStatus(parentId, status);
 
       if (refs?.length) {
-        applyRefsImpl(newId, [], refs);
+        applyRefsImpl(newId, canonical, [], refs);
       }
       return { id: newId };
     })();
@@ -723,17 +746,22 @@ export function createStore(dbPath: string): Store {
       };
 
       // Only re-validate when the link can change, so plan/description edits never trip it.
-      if (patch.type !== undefined || patch.parentId !== undefined) assertParent(next.type, next.parentId, id, existing.type);
+      const linkChanged = patch.type !== undefined || patch.parentId !== undefined || next.project !== existing.project;
+      let parent: TaskRow | undefined;
+      if (linkChanged) parent = assertParent(next.type, next.parentId, next.project, { id, type: existing.type, project: existing.project });
+      else if (next.parentId !== null) parent = stmtSelectTask.get(next.parentId) as TaskRow | undefined;
+      if (parent) next.scope = parent.scope;
       stmtUpdateTask.run(next.title, next.type, next.priority, next.project, next.scope, next.summary, next.description, next.plan, next.parentId, next.externalId, id);
       if (next.parentId !== existing.parent_id) {
         if (existing.parent_id !== null) syncEpicStatus(existing.parent_id, null);
         if (next.parentId !== null) syncEpicStatus(next.parentId, existing.status);
       }
+      if (next.type === 'epic' && next.scope !== existing.scope) stmtRescopeChildren.run({ scope: next.scope, id });
 
       if (patch.refs !== undefined) {
         const oldRefs = readRefsFor(id);
         const nextRefs: Ref[] = patch.refs === null || patch.refs.length === 0 ? [] : patch.refs;
-        applyRefsImpl(id, oldRefs, nextRefs);
+        applyRefsImpl(id, next.project, oldRefs, nextRefs);
       }
 
       const task = readTask(id);

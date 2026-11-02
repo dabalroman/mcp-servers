@@ -16,7 +16,7 @@ These extend the core instructions the task-manager MCP server sends on connect.
 Refs are mirrored automatically. Pick the relation that describes A → B when adding a ref on A (A "blocks" B, A "depends on" B, A "causes" B, A "tests" B).
 
 ## Projects
-This session is bound to the project in its `.mcp.json` (PROJECT_NAME) or its API key's default; list tools and add default to it. Pass `project` when the user names another one. Refs may cross projects.
+This session is bound to the project in its `.mcp.json` (PROJECT_NAME) or its API key's default; list tools and add default to it. Pass `project` when the user names another one. Refs and epic links stay within one project.
 
 ## Auto-knowledge capture
 After every task is closed (setStatus → done), curate the relevant CLAUDE.md file(s) before moving on:

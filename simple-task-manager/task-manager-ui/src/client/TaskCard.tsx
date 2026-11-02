@@ -6,7 +6,8 @@ import { ChevronDown, ChevronRight, ChevronUp, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { TYPE_LABELS, PRIORITY_CLASSES, STATUS_LABELS, STATUS_CLASSES } from './constants';
+import { TYPE_LABELS, PRIORITY_CLASSES } from './constants';
+import { StatusPicker } from './StatusPicker';
 import type { EpicProgress } from '@/lib/taskView';
 import type { Note, Task, TaskStatus } from '@/types/task';
 
@@ -39,6 +40,7 @@ export type TaskCardProps = {
   task: Task;
   onStatus: (id: number, status: TaskStatus) => void;
   onEdit: (task: Task) => void;
+  onAddChild?: (epic: Task) => void;
   onRefClick?: (id: number) => void;
   highlighted?: boolean;
   showReopen?: boolean;
@@ -49,7 +51,7 @@ export type TaskCardProps = {
   sticky?: boolean;
 };
 
-export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = false, showReopen = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false }: TaskCardProps) {
+export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highlighted = false, showReopen = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false }: TaskCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const hasSummary = Boolean(task.summary);
@@ -283,27 +285,19 @@ export function TaskCard({ task, onStatus, onEdit, onRefClick, highlighted = fal
             Re-open
           </Button>
         ) : (
-          <div className="flex border border-border divide-x divide-border">
-            {STATUSES.map(s => (
-              <button
-                key={s}
-                onClick={() => s !== task.status && onStatus(task.id, s)}
-                className={cn(
-                  'text-xs tracking-widest px-2 py-1 transition-colors',
-                  s === task.status
-                    ? STATUS_CLASSES[s] + ' bg-accent/30'
-                    : 'text-muted-foreground/40 hover:text-muted-foreground',
-                )}
-              >
-                {STATUS_LABELS[s]}
-              </button>
-            ))}
-          </div>
+          <StatusPicker value={task.status} options={STATUSES} onChange={(st) => onStatus(task.id, st)} />
         )}
 
-        <Button size="sm" variant="outline" className="ml-auto" onClick={() => onEdit(task)}>
-          Edit
-        </Button>
+        <div className="ml-auto flex gap-2">
+          {onAddChild && task.type === 'epic' && task.status !== 'done' && (
+            <Button size="sm" variant="outline" onClick={() => onAddChild(task)}>
+              + Task
+            </Button>
+          )}
+          <Button size="sm" variant="outline" onClick={() => onEdit(task)}>
+            Edit
+          </Button>
+        </div>
       </div>
 
       {task.plan && (
