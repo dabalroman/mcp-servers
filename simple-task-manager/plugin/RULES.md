@@ -5,6 +5,7 @@ These extend the core instructions the task-manager MCP server sends on connect.
 - An epic (type 'epic') is an umbrella holding project context for a group of tasks: goals, order, rules. Link a task with parentId.
 - Epic status follows its children automatically (setStatus reports a change as `epicStatus`): a child going in_progress moves the epic to in_progress (reopening a done epic); the epic closes once all its children are done (also when the last open child is moved away or deleted); moving a child back or adding a not-started child leaves it as is. Don't set an epic's status by hand unless the user asks.
 - When a child lands, addNote on its epic ("#NN done, commit <sha>" plus anything the next child needs).
+- Keep the flow: after any work on an epic or one of its children (refine, plan, implement, land, or a question about it), end by suggesting the next step from the epic's order: which child, which pipeline step, and what it waits on (a merge, a deploy, the user's go). Read the epic via getById if its order is not in context. Suggest only; start it only on the user's yes.
 
 ## User prefixes
 - BUG      → type: bug,     high priority by default
