@@ -122,8 +122,8 @@ export function TaskPicker({ tasks, onPick, placeholder, autoFocus, dropUpOnMobi
         <div
           tabIndex={-1}
           className={cn(
-            'absolute left-0 right-0 border border-border bg-card z-10 max-h-48 overflow-y-auto',
-            dropUpOnMobile ? 'bottom-full border-b-0 sm:bottom-auto sm:top-full sm:border-b sm:border-t-0' : 'top-full border-t-0',
+            'absolute left-0 right-0 border border-primary/50 bg-muted shadow-xl shadow-background z-10 max-h-48 overflow-y-auto',
+            dropUpOnMobile ? 'bottom-full mb-1 sm:bottom-auto sm:top-full sm:mb-0 sm:mt-1' : 'top-full mt-1',
           )}
         >
           {candidates.map((t, i) => (
