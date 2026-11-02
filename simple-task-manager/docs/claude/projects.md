@@ -22,4 +22,4 @@ Read before touching project binding, project-aware handlers, `PROJECT_NAME`, or
 
 - The UI loads everything and filters on the client (`filterByProject` in `src/lib/taskView.ts`), so `/api/tasks` and `/stream` stay project-agnostic; `GET/POST /api/projects` lists and creates projects.
 - Selection (#369): the URL's first path segment is the project (`projectFromPath`/`projectPath` in `taskView.ts`), plain History API, no router. URL beats localStorage on load; `selectProject` pushes, an effect `replaceState`s `/`, miscased or unknown names to the canonical path, `popstate` follows Back/Forward. Deep links work only because `server.ts` (and Vite's default `appType: 'spa'`) fall back to `index.html` and assets are absolute — keep both.
-- There is no project label in the UI (#370): the project tabs show the active project.
+- There is no project label in the UI (#370): the project tabs show the active project. Below `sm` (#500) `ProjectSwitcher` swaps the tabs for a dropdown trigger (shown even with one project, so its `+ Project` item stays reachable).

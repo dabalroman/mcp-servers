@@ -19,9 +19,10 @@ Web UI (and the HTTP `/mcp` endpoint) for the `simple-task-manager` MCP. Sibling
 | `src/server/taskRouter.ts` | connect/express middleware that fronts the API. Used by both `server.ts` and the Vite dev plugin. |
 | `src/client/*` | The React SPA (TaskManager, TaskCard, TaskForm, useTasks, helpers). Copied from random-tools and stripped of the tool-registry coupling. |
 | `src/client/TaskPicker.tsx` | Task search combobox (`#id`/title via `taskView.matchesTaskQuery`, arrows/Enter/Escape) shared by TaskForm's References and Parent epic fields. Add new task-picking fields with it, not another hand-rolled dropdown. |
+| `src/client/ProjectSwitcher.tsx` | Project tabs from `sm` up (only with >1 project); below `sm` a Radix dropdown with `+ Project` as its last item (the Active/Done row's `+ Project` is `hidden sm:inline-flex`). A dialog opened from a dropdown item must wait for the menu to close (`onCloseAutoFocus`), or Radix leaves the page pointer-locked. |
 | `src/client/ConnectDialog.tsx` | Connect a machine dialog (opened from `Footer`): creates a per-repo API key, shows the `claude mcp add` line and the agent setup prompt once, lists/revokes active keys. |
 | `src/lib/connectSetup.ts` | Pure builders for that add line and prompt (tested). |
-| `src/components/*` | Shared UI: ToolHeader, Footer, `CodeBlock` (click-to-copy + `copyText`, execCommand fallback for plain HTTP) + shadcn primitives (Button, Dialog, Sonner). |
+| `src/components/*` | Shared UI: ToolHeader, Footer, `CodeBlock` (click-to-copy + `copyText`, execCommand fallback for plain HTTP) + shadcn primitives (Button, Dialog, DropdownMenu, Sonner). |
 | `src/types/task.ts` | Shared client types — independent of the MCP's tasks.ts to keep the client compile-time clean. Shape must stay aligned. |
 | `vite.config.ts` | Vite plugin mounts the task API on the dev middleware stack so `vite` is enough for full-stack dev. |
 

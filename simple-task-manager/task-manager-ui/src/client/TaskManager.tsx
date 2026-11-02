@@ -10,6 +10,7 @@ import { useTasks } from './useTasks';
 import { TaskCard } from './TaskCard';
 import { TaskForm } from './TaskForm';
 import { ProjectDialog } from './ProjectDialog';
+import { ProjectSwitcher } from './ProjectSwitcher';
 import { isCollapsed } from './collapseState';
 import { useRefNavigation } from './useRefNavigation';
 import type { Task, TaskStatus, TaskType } from '@/types/task';
@@ -290,27 +291,12 @@ export default function TaskManager() {
 
   return (
     <div className="flex flex-col gap-7">
-      {projects.length > 1 && (
-        <div className="flex flex-wrap border-b border-border">
-          {projects.map((p) => (
-            <button
-              key={p.name}
-              onClick={() => selectProject(p.name)}
-              className={cn(
-                'flex items-center gap-2 px-5 py-2 tracking-widest uppercase transition-colors border-b-2 -mb-px',
-                p.name === project
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <span className="text-xs">{p.name}</span>
-              <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
-                {p.open}
-              </span>
-            </button>
-          ))}
-        </div>
-      )}
+      <ProjectSwitcher
+        projects={projects}
+        current={project}
+        onSelect={selectProject}
+        onNewProject={() => setProjectDialogOpen(true)}
+      />
 
       <div className="flex items-center justify-between border-b border-border">
         <div className="flex">
@@ -333,7 +319,7 @@ export default function TaskManager() {
           ))}
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => setProjectDialogOpen(true)}>+ Project</Button>
+          <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialogOpen(true)}>+ Project</Button>
           <Button size="sm" onClick={openAdd} disabled={project === null}>+ New</Button>
         </div>
       </div>
