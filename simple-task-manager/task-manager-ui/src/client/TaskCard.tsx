@@ -6,7 +6,7 @@ import { Check, ChevronDown, ChevronRight, ChevronUp, FileText } from 'lucide-re
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { TYPE_LABELS, PRIORITY_CLASSES, PR_STATUS_CLASSES } from './constants';
+import { TYPE_LABELS, PRIORITY_CLASSES, PR_STATUS_CLASSES, STATUS_CLASSES } from './constants';
 import { StatusPicker } from './StatusPicker';
 import type { EpicProgress } from '@/lib/taskView';
 import type { Note, Task, TaskStatus } from '@/types/task';
@@ -58,11 +58,9 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
   const notes = task.notes ?? [];
   const noteCount = task.noteCount ?? notes.length;
 
-  const idButtonClass =
-    'text-xs tracking-widest border border-border px-2 py-1 shrink-0 text-muted-foreground cursor-pointer hover:border-primary/60 hover:text-foreground transition-colors';
   const externalIdClass = 'text-xs tracking-widest border border-border px-2 py-1 truncate text-muted-foreground';
 
-  const prTags = (placement: string) => task.prs?.map((pr) => (
+  const prTags = task.prs?.map((pr) => (
     <a
       key={pr.url}
       href={pr.url}
@@ -70,9 +68,8 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
       rel="noopener noreferrer"
       title={`${pr.status} — ${pr.url}`}
       className={cn(
-        'items-center gap-1 text-xs tracking-widest border px-2 py-1 shrink-0 hover:text-foreground transition-colors',
+        'inline-flex items-center gap-1 text-xs tracking-widest border px-2 py-1 shrink-0 hover:text-foreground transition-colors',
         PR_STATUS_CLASSES[pr.status],
-        placement,
       )}
     >
       PR #{pr.number}
@@ -121,22 +118,86 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
         highlighted ? 'border-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.4)]' : 'border-border',
       )}
     >
-      <div className="flex flex-col-reverse gap-3 px-3 pt-3 pb-2 md:flex-row md:items-start md:gap-2">
-        <button
-          type="button"
-          onClick={copyIdCommand}
-          className={cn(idButtonClass, 'hidden md:inline-flex items-center self-start')}
-        >
-          #{task.id}
-        </button>
-        {task.externalId && (
-          <span title={task.externalId} className={cn(externalIdClass, 'hidden md:inline-block self-start max-w-48')}>
-            {task.externalId}
-          </span>
-        )}
-        {prTags('hidden md:inline-flex self-start')}
+      <div className="flex flex-col gap-3 px-3 pt-3 pb-2">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex flex-wrap items-center gap-2 min-w-0">
+            <div className="flex items-stretch shrink-0">
+              <button
+                type="button"
+                onClick={copyIdCommand}
+                className={cn(
+                  'text-xs tracking-widest border bg-accent/30 px-2 py-1 shrink-0 cursor-pointer hover:text-foreground transition-colors',
+                  STATUS_CLASSES[task.status],
+                )}
+              >
+                #{task.id}
+              </button>
+              {showReopen ? (
+                <Button size="sm" variant="outline" onClick={() => onStatus(task.id, 'todo')}
+                  className={cn('text-xs h-auto px-2 py-1 border-l-0', STATUS_CLASSES[task.status])}>
+                  Re-open
+                </Button>
+              ) : (
+                <StatusPicker value={task.status} options={STATUSES} onChange={(st) => onStatus(task.id, st)} className="border-l-0" />
+              )}
+            </div>
+            {task.externalId && (
+              <span title={task.externalId} className={cn(externalIdClass, 'min-w-0 max-w-48')}>{task.externalId}</span>
+            )}
+            {prTags}
+          </div>
 
-        <div className="flex items-start gap-2 md:flex-1 md:min-w-0">
+          <div className="flex flex-wrap items-center gap-2 min-w-0">
+            {task.plan && (
+              <button
+                type="button"
+                onClick={() => setPlanOpen(true)}
+                className="inline-flex items-center text-muted-foreground hover:text-primary cursor-pointer transition-colors shrink-0"
+                title="View plan"
+              >
+                <FileText className="w-4 h-4" strokeWidth={1.5} />
+              </button>
+            )}
+
+            {task.parentId !== undefined && !nested && (
+              <button
+                type="button"
+                onClick={() => onRefClick?.(task.parentId!)}
+                className={cn(
+                  'text-xs tracking-widest uppercase border border-border px-2 py-1 text-muted-foreground transition-colors max-w-48 truncate',
+                  onRefClick && 'hover:border-primary/60 hover:text-foreground cursor-pointer',
+                )}
+              >
+                EPIC #{task.parentId}{task.epicTitle && <span className="ml-1 normal-case tracking-normal text-muted-foreground/50">{task.epicTitle}</span>}
+              </button>
+            )}
+
+            {progress && progress.total > 0 && (
+              <span className="text-xs tracking-widest border border-border px-2 py-1 shrink-0 text-muted-foreground">
+                {progress.done}/{progress.total}
+              </span>
+            )}
+
+            {task.scope && (
+              <span className="text-xs tracking-widest text-primary/70 border border-primary/30 px-2 py-1 shrink-0">
+                {task.scope}
+              </span>
+            )}
+
+            <span className="text-xs tracking-widest text-muted-foreground border border-border px-2 py-1 shrink-0">
+              {TYPE_LABELS[task.type] ?? task.type.toUpperCase()}
+            </span>
+
+            <span className={cn(
+              'text-xs tracking-widest border px-2 py-1 shrink-0',
+              PRIORITY_CLASSES[task.priority],
+            )}>
+              {task.priority.toUpperCase()}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex items-start gap-2 min-w-0">
           {onToggleCollapse && (
             <button
               type="button"
@@ -152,70 +213,6 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
             </button>
           )}
           <span className="text-base text-foreground leading-[1.625rem] break-words min-w-0">{task.title}</span>
-        </div>
-
-        <div className="flex items-center justify-between gap-2 w-full md:w-auto md:justify-start">
-          <div className="flex flex-wrap items-center gap-2 min-w-0 md:hidden">
-            <button
-              type="button"
-              onClick={copyIdCommand}
-              className={idButtonClass}
-            >
-              #{task.id}
-            </button>
-            {task.externalId && (
-              <span title={task.externalId} className={cn(externalIdClass, 'min-w-0')}>{task.externalId}</span>
-            )}
-            {prTags('inline-flex')}
-          </div>
-
-          {task.plan && (
-            <button
-              type="button"
-              onClick={() => setPlanOpen(true)}
-              className="inline-flex items-center text-muted-foreground hover:text-primary cursor-pointer transition-colors shrink-0"
-              title="View plan"
-            >
-              <FileText className="w-4 h-4" strokeWidth={1.5} />
-            </button>
-          )}
-
-          {task.parentId !== undefined && !nested && (
-            <button
-              type="button"
-              onClick={() => onRefClick?.(task.parentId!)}
-              className={cn(
-                'text-xs tracking-widest uppercase border border-border px-2 py-1 text-muted-foreground transition-colors max-w-48 truncate',
-                onRefClick && 'hover:border-primary/60 hover:text-foreground cursor-pointer',
-              )}
-            >
-              EPIC #{task.parentId}{task.epicTitle && <span className="ml-1 normal-case tracking-normal text-muted-foreground/50">{task.epicTitle}</span>}
-            </button>
-          )}
-
-          {progress && progress.total > 0 && (
-            <span className="text-xs tracking-widest border border-border px-2 py-1 shrink-0 text-muted-foreground">
-              {progress.done}/{progress.total}
-            </span>
-          )}
-
-          {task.scope && (
-            <span className="text-xs tracking-widest text-primary/70 border border-primary/30 px-2 py-1 shrink-0">
-              {task.scope}
-            </span>
-          )}
-
-          <span className="text-xs tracking-widest text-muted-foreground border border-border px-2 py-1 shrink-0">
-            {TYPE_LABELS[task.type] ?? task.type.toUpperCase()}
-          </span>
-
-          <span className={cn(
-            'text-xs tracking-widest border px-2 py-1 shrink-0',
-            PRIORITY_CLASSES[task.priority],
-          )}>
-            {task.priority.toUpperCase()}
-          </span>
-
         </div>
       </div>
 
@@ -299,15 +296,6 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
       )}
 
       <div className="flex items-center gap-2 px-3 pb-3 border-t border-border/50 pt-2">
-        {showReopen ? (
-          <Button size="sm" variant="outline" onClick={() => onStatus(task.id, 'todo')}
-            className="text-xs h-6 px-2">
-            Re-open
-          </Button>
-        ) : (
-          <StatusPicker value={task.status} options={STATUSES} onChange={(st) => onStatus(task.id, st)} />
-        )}
-
         <div className="ml-auto flex gap-2">
           {onAddChild && task.type === 'epic' && task.status !== 'done' && (
             <Button size="sm" variant="outline" onClick={() => onAddChild(task)}>
