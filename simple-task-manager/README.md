@@ -5,7 +5,7 @@ A persistent task manager for [Claude Code](https://claude.ai/code), exposed as 
 session restarts and context compaction. Claude files work as you mention it, refines it with you,
 implements it, and suggests what to do next.
 
-- **Rules built in** — the server and the `task-manager` plugin teach Claude how to use it.
+- **Rules built in** — the server and the `tm` plugin teach Claude how to use it.
 - **Skills** — `/tm:refine`, `/tm:implement`, `/tm:implement-as-coordinator` and `/tm:assess`.
 - **Web UI** — browse and edit the same tasks at <http://localhost:7374>, with live updates.
 - **One DB or many** — one per repo by default, or one shared server for every repo and machine.
@@ -16,6 +16,16 @@ implements it, and suggests what to do next.
 ## Quick start
 
 You need **Claude Code**, and **Node.js 18+** on any machine that runs the server.
+
+It comes in **two parts, and you need both**. `/plugin` lists them separately:
+
+| Part | Brings | Installed | Shown as |
+|---|---|---|---|
+| `tm` plugin | the skills and the full usage rules | once per machine | `tm`, Plugin, under **User** |
+| `task-manager` MCP server | the tools and the tasks | per repo | `task-manager`, MCP, under **Project** (`.mcp.json`) or **Local** (client mode) |
+
+Without the server the skills have no tasks to work on; without the plugin the tools still work,
+but the skills and extended rules are missing.
 
 **1. Install the plugin** (once per machine). It brings the skills and the full usage rules.
 
@@ -153,6 +163,8 @@ Only a hash of each key is stored, so a lost key is replaced, not recovered.
 ## Troubleshooting
 
 - **Claude doesn't see the tools** — approve the server when prompted, then restart the session.
+- **Claude misses a field or tool the server has** (e.g. after an upgrade) — start a new session.
+  `/mcp` reconnect can pick up new tools yet keep the old schemas of the existing ones.
 - **The UI doesn't open** — reconnect with `/mcp` and read the MCP's stderr. `not found` or
   `failed to spawn` means a missing build: run `npm install` in the package. A port clash means
   setting `TASK_UI_PORT` to a free port. `TASK_UI_MODE=… is no longer supported` prints its own fix.

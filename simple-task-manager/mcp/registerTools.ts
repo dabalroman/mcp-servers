@@ -59,7 +59,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     externalId: z.string().optional()
       .describe('External tracker ticket ID (JIRA/Asana/…, e.g. "OPXPIQ-6532"). Set it whenever the user names a ticket ID for this task. Find tasks by it later with getByExternalId.'),
     prs: prsSchema
-      .describe('Pull/merge requests of this task: { url, number, status: draft|open|closed|merged }, url http(s) and unique per task.'),
+      .describe('Pull/merge requests of this task: { url, number, status: draft|open|closed|merged }, url http(s) and unique per task. Works in every project, whether or not it tracks PRs.'),
     project: projectParam,
   };
   server.tool(
@@ -142,7 +142,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     refs: refsSchema.nullable()
       .describe('Full replacement list of related-task references, or null / empty array to clear all. Each entry: { id, relation? }, relation one of the canonical values (default "relates to"). The inverse is written automatically — specify one side only. Replaces the existing list entirely — include every ref you want to keep. Nonexistent ids and self-references are silently dropped; a newly added task from another project is rejected.'),
     prs: prsSchema.nullable()
-      .describe('Full replacement list of the task\'s pull/merge requests ({ url, number, status: draft|open|closed|merged }), or null / empty array to clear. Include every PR you want to keep; to change a status, resend the list with the new status.'),
+      .describe('Full replacement list of the task\'s pull/merge requests ({ url, number, status: draft|open|closed|merged }), or null / empty array to clear. Include every PR you want to keep; to change a status, resend the list with the new status. Works in every project, whether or not it tracks PRs.'),
     parentId: z.number().int().positive().nullable().optional()
       .describe(`${PARENT_ID_RULE} Pass null to detach the task from its epic.`),
     project: z.string().min(1).optional()
@@ -258,11 +258,11 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   // ── updateProject ─────────────────────────────────────────────────────────────
   const updateProjectSchema = {
     project: z.string().min(1).describe('Name of the project to change (case-insensitive).'),
-    trackPrs: z.boolean().describe('true = agents in this project are told to record pull/merge requests on tasks (prs). Takes effect from the next session.'),
+    trackPrs: z.boolean().describe('true adds an instruction telling agents in this project to record the PRs/MRs they open. It does not enable the prs field: prs on add/update works in every project either way. Takes effect from the next session.'),
   };
   server.tool(
     'updateProject',
-    'Change a project\'s settings. Only call when the user asks (e.g. "turn on PR tracking"). Returns { success, project: { name, trackPrs } }, or an error for an unknown project.',
+    'Change a project\'s settings. Only call when the user asks for this setting (e.g. "turn on PR tracking"), never to make another tool or field work. Returns { success, project: { name, trackPrs } }, or an error for an unknown project.',
     updateProjectSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof updateProjectSchema>>): Promise<MCPContent> => handleUpdateProject(store, args))
   );
