@@ -20,6 +20,11 @@ How to move a local clone to a newer version without losing data or quietly losi
 
 ## Version notes
 
+### Projects get an id and a display name (2026-11-014)
+
+- Nothing to do: the `split-project-id-name` migration runs by itself on the first open (backup first, as always). Every existing project keeps its name as its id, so `PROJECT_NAME`, `X-Project`, API keys and UI links keep working.
+- `getProjects`, `createProject`, `updateProject` and `/api/projects` now return `{ id, name, … }`. `project` arguments take the id. A new project's id is derived from its name (`"Random Tools"` → `random-tools`), and creating one whose id is taken fails.
+
 ### `install.ts` no longer rewrites pre-dist entries (2026-10-045)
 
 - An existing `task-manager` entry in `.mcp.json` is now always left unchanged. Entries from before the `dist/` layout (`args[0]` ending in `server.ts` or a non-dist `server.js`) are no longer repaired automatically; edit `args[0]` to `<dir>/dist/server.js` by hand.

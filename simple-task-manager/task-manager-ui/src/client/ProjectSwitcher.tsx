@@ -11,9 +11,9 @@ import {
 } from '@/components/ui/dropdown-menu';
 
 interface Props {
-  projects: { name: string; open: number }[];
+  projects: { id: string; name: string; open: number }[];
   current: string | null;
-  onSelect: (name: string) => void;
+  onSelect: (id: string) => void;
   onNewProject: () => void;
 }
 
@@ -24,7 +24,7 @@ const Badge = ({ children }: { children: React.ReactNode }) => (
 );
 
 export function ProjectSwitcher({ projects, current, onSelect, onNewProject }: Props) {
-  const active = projects.find((p) => p.name === current);
+  const active = projects.find((p) => p.id === current);
   // Opening the dialog while the menu is still closing leaves the page pointer-locked; defer it until the menu has closed.
   const newProjectPending = useRef(false);
   return (
@@ -33,11 +33,11 @@ export function ProjectSwitcher({ projects, current, onSelect, onNewProject }: P
         <div className="hidden sm:flex flex-wrap border-b border-border">
           {projects.map((p) => (
             <button
-              key={p.name}
-              onClick={() => onSelect(p.name)}
+              key={p.id}
+              onClick={() => onSelect(p.id)}
               className={cn(
                 'flex items-center gap-2 px-5 py-2 tracking-widest uppercase transition-colors border-b-2 -mb-px',
-                p.name === current
+                p.id === current
                   ? 'border-primary text-primary'
                   : 'border-transparent text-muted-foreground hover:text-foreground',
               )}
@@ -69,9 +69,9 @@ export function ProjectSwitcher({ projects, current, onSelect, onNewProject }: P
           >
             {projects.map((p) => (
               <DropdownMenuItem
-                key={p.name}
-                onSelect={() => onSelect(p.name)}
-                className={cn('justify-between', p.name === current && 'text-primary')}
+                key={p.id}
+                onSelect={() => onSelect(p.id)}
+                className={cn('justify-between', p.id === current && 'text-primary')}
               >
                 <span className="truncate">{p.name}</span>
                 <Badge>{p.open}</Badge>

@@ -9,12 +9,14 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import Database from 'better-sqlite3';
 import { createStore, loadMigrations } from './tasks.js';
+import { assertProjectFks } from './migrations/20261106150000_split-project-id-name.js';
 
 const EPIC_MIGRATION = '20261020120000_add-epic-type-and-parent';
 const EXTERNAL_ID_MIGRATION = '20261027120000_add-external-id';
 const PROJECTS_MIGRATION = '20261027130000_add-projects';
 const TASK_PRS_MIGRATION = '20261106120000_add-task-prs';
 const PR_DEPLOYED_MIGRATION = '20261106140000_add-pr-deployed-status';
+const SPLIT_PROJECT_MIGRATION = '20261106150000_split-project-id-name';
 
 let dir: string;
 let dbPath: string;
@@ -467,6 +469,106 @@ describe('add-pr-deployed-status migration', () => {
     sdb.prepare('DELETE FROM tasks WHERE id = 1').run();
     assert.equal((sdb.prepare('SELECT COUNT(*) AS n FROM task_prs').get() as { n: number }).n, 0);
     store.close();
+  });
+});
+
+describe('split-project-id-name migration', () => {
+  type Fk = { table: string; from: string; to: string; on_update: string };
+  const projectFk = (db: Database.Database, table: string) =>
+    (db.pragma(`foreign_key_list(${table})`) as Fk[]).filter((f) => f.from === 'project').map((f) => [f.table, f.to, f.on_update]);
+
+  // The previous head with two projects (one mixed case), tasks in each, a
+  // bound key, a revoked key and a deleted top key id.
+  function seedPreSplitDb(): void {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    const earlier = loadMigrations().filter((m) => m.name < SPLIT_PROJECT_MIGRATION);
+    earlier.forEach((m, i) => {
+      m.up(db);
+      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(i + 1, m.name);
+    });
+    db.pragma(`user_version = ${earlier.length}`);
+    db.prepare("INSERT INTO projects (name, track_prs) VALUES ('Foo', 1)").run();
+    const task = db.prepare("INSERT INTO tasks (title, type, status, priority, project, description) VALUES (?, 'bug', 'todo', 'high', ?, '')");
+    task.run('in default', 'default');
+    task.run('in Foo', 'Foo');
+    const key = db.prepare('INSERT INTO api_keys (label, hash, project, revoked_at) VALUES (?, ?, ?, ?)');
+    key.run('bound', 'h1', 'Foo', null);
+    key.run('revoked', 'h2', 'default', '2026-01-01 00:00:00');
+    key.run('deleted', 'h3', null, null);
+    db.prepare('DELETE FROM api_keys WHERE id = 3').run();
+    db.close();
+  }
+
+  test('runs by itself on reopen, keeps every id as the old name and backs the DB up first', () => {
+    seedPreSplitDb();
+    createStore(dbPath).close();
+
+    assert.ok(readdirSync(dir).some((f) => f.endsWith(`-pre-${SPLIT_PROJECT_MIGRATION}`)), 'pre-migration backup written');
+    const db = new Database(dbPath);
+    assert.deepEqual(db.prepare('SELECT id, name, track_prs FROM projects ORDER BY id').all(), [
+      { id: 'default', name: 'default', track_prs: 0 },
+      { id: 'Foo', name: 'Foo', track_prs: 1 },
+    ]);
+    assert.deepEqual(db.prepare('SELECT id, project FROM tasks ORDER BY id').all(), [
+      { id: 1, project: 'default' },
+      { id: 2, project: 'Foo' },
+    ]);
+    assert.deepEqual(db.prepare('SELECT id, label, hash, project, revoked_at FROM api_keys ORDER BY id').all(), [
+      { id: 1, label: 'bound', hash: 'h1', project: 'Foo', revoked_at: null },
+      { id: 2, label: 'revoked', hash: 'h2', project: 'default', revoked_at: '2026-01-01 00:00:00' },
+    ]);
+    assert.deepEqual(projectFk(db, 'tasks'), [['projects', 'id', 'CASCADE']]);
+    assert.deepEqual(projectFk(db, 'api_keys'), [['projects', 'id', 'CASCADE']]);
+    assert.deepEqual(db.pragma('foreign_key_check'), []);
+    db.close();
+  });
+
+  test('keeps the api_keys AUTOINCREMENT high-water mark, so a deleted top key id is not reused', () => {
+    seedPreSplitDb();
+    const store = createStore(dbPath);
+    assert.equal(store.createApiKey('new', 'default').id, 4);
+    store.close();
+  });
+
+  test('a changed id cascades to tasks and bound keys', () => {
+    seedPreSplitDb();
+    const store = createStore(dbPath);
+    store.db.prepare("UPDATE projects SET id = 'bar' WHERE id = 'Foo'").run();
+    assert.deepEqual(store.db.prepare("SELECT project FROM tasks WHERE id = 2").get(), { project: 'bar' });
+    assert.deepEqual(store.db.prepare("SELECT project FROM api_keys WHERE id = 1").get(), { project: 'bar' });
+    store.close();
+  });
+
+  test('old code still finds every migrated project by name', () => {
+    seedPreSplitDb();
+    createStore(dbPath).close();
+    const db = new Database(dbPath);
+    const byName = db.prepare('SELECT name FROM projects WHERE name = ?');
+    for (const n of ['default', 'foo']) assert.ok(byName.get(n), n);
+    db.close();
+  });
+
+  test('a fresh DB through every migration has id + name and FKs on projects(id)', () => {
+    const store = createStore(dbPath);
+    assert.deepEqual(store.db.prepare('SELECT id, name FROM projects').all(), [{ id: 'default', name: 'default' }]);
+    assert.deepEqual(projectFk(store.db, 'tasks'), [['projects', 'id', 'CASCADE']]);
+    assert.deepEqual(projectFk(store.db, 'api_keys'), [['projects', 'id', 'CASCADE']]);
+    store.close();
+  });
+
+  test('assertProjectFks throws when a project FK still targets projects(name)', () => {
+    const db = new Database(':memory:');
+    db.exec(`
+      CREATE TABLE projects (id TEXT PRIMARY KEY, name TEXT UNIQUE);
+      CREATE TABLE tasks (id INTEGER PRIMARY KEY, project TEXT REFERENCES projects(name));
+      CREATE TABLE api_keys (id INTEGER PRIMARY KEY, project TEXT REFERENCES projects(id));
+    `);
+    assert.throws(() => assertProjectFks(db), /tasks\.project must reference projects\(id\), found projects\(name\)/);
+    db.exec('DROP TABLE tasks; CREATE TABLE tasks (id INTEGER PRIMARY KEY, project TEXT REFERENCES projects(id));');
+    assertProjectFks(db);
+    db.close();
   });
 });
 

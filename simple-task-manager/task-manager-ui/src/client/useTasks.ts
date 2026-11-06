@@ -156,8 +156,8 @@ export function useTasks() {
       body: JSON.stringify({ name }),
     });
     if (!res.ok) throw await httpError(res);
-    const json = await res.json() as { name: string };
-    return json.name;
+    const json = await res.json() as { id: string };
+    return json.id;
   }, []);
 
   const remove = useCallback(async (id: number) => {

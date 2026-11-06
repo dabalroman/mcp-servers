@@ -55,17 +55,17 @@ export default function TaskManager() {
   const [rememberedProject, setRememberedProject] = useState<string | null>(() => projectFromPath(window.location.pathname) ?? loadProject());
 
   const { active: allActive, done: allDone, projects } = data;
-  const project = pickProject(projects.map((p) => p.name), rememberedProject);
+  const project = pickProject(projects.map((p) => p.id), rememberedProject);
   const active = project === null ? [] : filterByProject(allActive, project);
   const done = project === null ? [] : filterByProject(allDone, project);
 
-  const selectProject = useCallback((name: string) => {
-    setRememberedProject(name);
-    saveProject(name);
-    if (window.location.pathname !== projectPath(name)) window.history.pushState(null, '', projectPath(name));
+  const selectProject = useCallback((id: string) => {
+    setRememberedProject(id);
+    saveProject(id);
+    if (window.location.pathname !== projectPath(id)) window.history.pushState(null, '', projectPath(id));
   }, []);
 
-  // Rewrite /, a miscased or an unknown name to the shown project's path,
+  // Rewrite /, a miscased or an unknown id to the shown project's path,
   // without adding a history entry.
   useEffect(() => {
     if (project === null) return;
@@ -361,7 +361,7 @@ export default function TaskManager() {
         initial={editing}
         prefill={prefill}
         allTasks={[...allActive, ...allDone]}
-        projects={projects.map((p) => p.name)}
+        projects={projects}
         project={project ?? ''}
         onSubmit={handleFormSubmit}
         onDelete={handleDelete}

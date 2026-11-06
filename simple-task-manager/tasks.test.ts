@@ -16,6 +16,7 @@ import {
   type PullRequest,
   StaleSchemaError,
   hashApiKey,
+  slugifyProjectId,
 } from './tasks.js';
 
 const MIGRATION_NAMES = [
@@ -34,6 +35,7 @@ const MIGRATION_NAMES = [
   '20261106120000_add-task-prs',
   '20261106130000_add-task-prs-number-index',
   '20261106140000_add-pr-deployed-status',
+  '20261106150000_split-project-id-name',
 ];
 
 let dir: string;
@@ -1362,9 +1364,9 @@ describe('project PR tracking', () => {
   test('is off by default and toggles via updateProject, case-insensitively', () => {
     store.createProject('Example-Project');
     assert.equal(store.projectTracksPrs('example-project'), false);
-    assert.deepEqual(store.updateProject('example-project', { trackPrs: true }), { name: 'Example-Project', trackPrs: true });
+    assert.deepEqual(store.updateProject('EXAMPLE-project', { trackPrs: true }), { id: 'example-project', name: 'Example-Project', trackPrs: true });
     assert.equal(store.projectTracksPrs('Example-Project'), true);
-    assert.equal(store.getProjects().find((p) => p.name === 'Example-Project')?.trackPrs, true);
+    assert.equal(store.getProjects().find((p) => p.id === 'example-project')?.trackPrs, true);
     store.updateProject('Example-Project', { trackPrs: false });
     assert.equal(store.projectTracksPrs('Example-Project'), false);
   });
@@ -1377,7 +1379,7 @@ describe('project PR tracking', () => {
 
 describe('projects', () => {
   test('a fresh DB has only the default project', () => {
-    assert.deepEqual(store.getProjects(), [{ name: 'default', total: 0, open: 0, trackPrs: false }]);
+    assert.deepEqual(store.getProjects(), [{ id: 'default', name: 'default', total: 0, open: 0, trackPrs: false }]);
   });
 
   test('list methods only return the given project', () => {
@@ -1397,9 +1399,9 @@ describe('projects', () => {
   });
 
   test('project filters ignore case', () => {
-    store.createProject('Example-Project');
-    const { id } = makeTask({ project: 'example-project', status: 'todo' });
-    assert.equal(store.getById(id)?.project, 'Example-Project', 'stored in the canonical spelling');
+    store.createProject('Example Project');
+    const { id } = makeTask({ project: 'EXAMPLE-project', status: 'todo' });
+    assert.equal(store.getById(id)?.project, 'example-project', 'stored as the id');
     assert.equal(store.getNext('EXAMPLE-PROJECT')?.id, id);
   });
 
@@ -1428,12 +1430,21 @@ describe('projects', () => {
     assert.equal(store.getNext('example-project')?.id, id);
   });
 
-  test('createProject trims, rejects case-insensitive duplicates and bad lengths', () => {
-    assert.deepEqual(store.createProject('  example-project '), { name: 'example-project' });
-    assert.throws(() => store.createProject('EXAMPLE-project'), /already exists/);
+  test('createProject trims the name, derives the id and rejects a taken id and bad lengths', () => {
+    assert.deepEqual(store.createProject('  Example Project '), { id: 'example-project', name: 'Example Project' });
+    assert.throws(() => store.createProject('EXAMPLE-project'), /id "example-project" is already taken by project "Example Project"/);
+    assert.throws(() => store.createProject('Example  Project!'), /already taken/);
     assert.throws(() => store.createProject('   '), /1–64 characters/);
     assert.throws(() => store.createProject('x'.repeat(65)), /1–64 characters/);
+    assert.throws(() => store.createProject('!!!'), /no letters or digits/);
     assert.ok(store.hasProject('Example-Project'));
+    assert.equal(store.hasProject('Example Project'), false, 'the display name is not a lookup key');
+  });
+
+  test('a migrated id that is not a slug still matches by id, and a new slug colliding with it is rejected', () => {
+    store.db.prepare("INSERT INTO projects (id, name) VALUES ('Legacy', 'Legacy')").run();
+    assert.ok(store.hasProject('legacy'));
+    assert.throws(() => store.createProject('legacy'), /id "legacy" is already taken by project "Legacy"/);
   });
 
   test('getProjects counts total and open tasks per project, sorted by name', () => {
@@ -1443,18 +1454,39 @@ describe('projects', () => {
     const done = makeTask({ project: 'a-project' }).id;
     store.setStatus(done, 'done');
     assert.deepEqual(store.getProjects(), [
-      { name: 'a-project', total: 2, open: 1, trackPrs: false },
-      { name: 'b-project', total: 0, open: 0, trackPrs: false },
-      { name: 'default', total: 0, open: 0, trackPrs: false },
+      { id: 'a-project', name: 'a-project', total: 2, open: 1, trackPrs: false },
+      { id: 'b-project', name: 'b-project', total: 0, open: 0, trackPrs: false },
+      { id: 'default', name: 'default', total: 0, open: 0, trackPrs: false },
+    ]);
+  });
+
+  test('getProjects sorts by display name', () => {
+    store.createProject('Zebra');
+    store.createProject('Alpha Project');
+    assert.deepEqual(store.getProjects().map((p) => [p.id, p.name]), [
+      ['alpha-project', 'Alpha Project'],
+      ['default', 'default'],
+      ['zebra', 'Zebra'],
     ]);
   });
 
   test('adoptDefaultProject renames default, tasks included, when it is the only project', () => {
     const { id } = makeTask();
     assert.equal(store.adoptDefaultProject('example-project'), true);
-    assert.deepEqual(store.getProjects().map((p) => p.name), ['example-project']);
+    assert.deepEqual(store.getProjects().map((p) => [p.id, p.name]), [['example-project', 'example-project']]);
     assert.equal(store.getById(id)?.project, 'example-project');
     assert.equal(store.adoptDefaultProject('another'), false, 'default is gone, nothing to adopt');
+  });
+
+  test('adoptDefaultProject uses PROJECT_NAME verbatim as the id', () => {
+    assert.equal(store.adoptDefaultProject('My Repo'), true);
+    assert.deepEqual(store.getProjects().map((p) => [p.id, p.name]), [['My Repo', 'My Repo']]);
+  });
+
+  test('adoptDefaultProject carries an API key bound to default along', () => {
+    const { id } = store.createApiKey('laptop', 'default');
+    assert.equal(store.adoptDefaultProject('example-project'), true);
+    assert.equal(store.listApiKeys().find((k) => k.id === id)?.project, 'example-project');
   });
 
   test('adoptDefaultProject is a no-op once another project exists, for default itself and for an existing name', () => {
@@ -1463,7 +1495,35 @@ describe('projects', () => {
     store.createProject('example-project');
     assert.equal(store.adoptDefaultProject('example-project'), false);
     assert.equal(store.adoptDefaultProject('another'), false);
-    assert.deepEqual(store.getProjects().map((p) => p.name), ['default', 'example-project']);
+    assert.deepEqual(store.getProjects().map((p) => p.id), ['default', 'example-project']);
+  });
+});
+
+describe('slugifyProjectId', () => {
+  test('lowercases and joins words with dashes', () => {
+    assert.equal(slugifyProjectId('Random Tools'), 'random-tools');
+    assert.equal(slugifyProjectId('already-slug'), 'already-slug');
+  });
+
+  test('strips diacritics, ł included', () => {
+    assert.equal(slugifyProjectId('Dąbal Łódź'), 'dabal-lodz');
+    assert.equal(slugifyProjectId('Żółć ŁÓDŹ'), 'zolc-lodz');
+  });
+
+  test('collapses punctuation runs and trims dashes', () => {
+    assert.equal(slugifyProjectId('  --Foo!!Bar--  '), 'foo-bar');
+    assert.equal(slugifyProjectId('Squash Scoreboard (ESP32)'), 'squash-scoreboard-esp32');
+  });
+
+  test('caps at 64 characters without a trailing dash', () => {
+    const id = slugifyProjectId(`${'a'.repeat(63)} b${'c'.repeat(20)}`);
+    assert.equal(id, 'a'.repeat(63));
+    assert.equal(slugifyProjectId('x'.repeat(80)).length, 64);
+  });
+
+  test('throws when nothing is left', () => {
+    assert.throws(() => slugifyProjectId('!!!'), /no letters or digits/);
+    assert.throws(() => slugifyProjectId('日本'), /no letters or digits/);
   });
 });
 

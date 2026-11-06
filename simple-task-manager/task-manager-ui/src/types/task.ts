@@ -30,7 +30,8 @@ export type Note = {
   updated_at: string;
 };
 
-export type Project = { name: string; total: number; open: number; trackPrs: boolean };
+// id is the identity (URLs, task.project, API keys); name is display only.
+export type Project = { id: string; name: string; total: number; open: number; trackPrs: boolean };
 
 export type PrStatus = 'draft' | 'open' | 'closed' | 'merged' | 'deployed';
 

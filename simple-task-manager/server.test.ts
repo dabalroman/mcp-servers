@@ -1401,15 +1401,15 @@ describe('project binding', () => {
   });
 
   test('getProjects and createProject', async () => {
-    assert.deepEqual(decode(handleCreateProject(store, { name: 'example-project' })), { success: true, project: { name: 'example-project' } });
+    assert.deepEqual(decode(handleCreateProject(store, { name: 'Example Project' })), { success: true, project: { id: 'example-project', name: 'Example Project' } });
     assert.equal(handleCreateProject(store, { name: 'Example-Project' }).isError, true);
-    const out = decode(await handleGetProjects(store, CTX)) as { boundProject: string; projects: { name: string }[] };
+    const out = decode(await handleGetProjects(store, CTX)) as { boundProject: string; projects: { id: string; name: string }[] };
     assert.equal(out.boundProject, 'default');
-    assert.deepEqual(out.projects.map((p) => p.name), ['default', 'example-project']);
+    assert.deepEqual(out.projects.map((p) => [p.id, p.name]), [['default', 'default'], ['example-project', 'Example Project']]);
   });
 
   test('updateProject toggles trackPrs and getProjects reports it', async () => {
-    assert.deepEqual(decode(handleUpdateProject(store, { project: 'DEFAULT', trackPrs: true })), { success: true, project: { name: 'default', trackPrs: true } });
+    assert.deepEqual(decode(handleUpdateProject(store, { project: 'DEFAULT', trackPrs: true })), { success: true, project: { id: 'default', name: 'default', trackPrs: true } });
     const out = decode(await handleGetProjects(store, CTX)) as { projects: { name: string; trackPrs: boolean }[] };
     assert.deepEqual(out.projects.map((p) => [p.name, p.trackPrs]), [['default', true]]);
     assert.equal(handleUpdateProject(store, { project: 'nope', trackPrs: true }).isError, true);

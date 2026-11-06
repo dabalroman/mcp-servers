@@ -7,7 +7,7 @@ import { addLine, mcpUrlFor, setupPrompt } from '@/lib/connectSetup';
 
 type ApiKey = { id: number; label: string; project: string | null; createdAt: string; lastUsedAt: string | null };
 type Created = { key: string; url: string; project: string };
-type Project = { name: string };
+type Project = { id: string; name: string };
 
 const INPUT = 'bg-background border border-border px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary';
 const LABEL = 'text-xs tracking-widest text-muted-foreground uppercase';
@@ -26,7 +26,7 @@ export type ConnectDialogProps = {
 
 export function ConnectDialog({ open, onOpenChange }: ConnectDialogProps) {
   const [keys, setKeys] = useState<ApiKey[]>([]);
-  const [projects, setProjects] = useState<string[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [project, setProject] = useState('');
   const [label, setLabel] = useState('');
   const [url, setUrl] = useState(() => mcpUrlFor(window.location.origin));
@@ -38,8 +38,8 @@ export function ConnectDialog({ open, onOpenChange }: ConnectDialogProps) {
     try {
       const [k, p] = await Promise.all([api<ApiKey[]>('/api/keys'), api<Project[]>('/api/projects')]);
       setKeys(k);
-      setProjects(p.map((x) => x.name));
-      setProject((cur) => cur || (p[0]?.name ?? ''));
+      setProjects(p);
+      setProject((cur) => cur || (p[0]?.id ?? ''));
     } catch (err) {
       toast.error(`Failed to load keys. ${err instanceof Error ? err.message : ''}`);
     }
@@ -116,7 +116,7 @@ export function ConnectDialog({ open, onOpenChange }: ConnectDialogProps) {
               <label className="flex flex-col gap-1">
                 <span className={LABEL}>Default project</span>
                 <select value={project} onChange={(e) => setProject(e.target.value)} className={INPUT}>
-                  {projects.map((p) => <option key={p} value={p}>{p}</option>)}
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
                 <span className="text-2xs text-muted-foreground">Used when a tool call names no project. Others stay reachable.</span>
               </label>

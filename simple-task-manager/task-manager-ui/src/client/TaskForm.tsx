@@ -40,7 +40,7 @@ export type TaskFormProps = {
   initial: Task | null;
   prefill?: TaskPrefill;
   allTasks: Task[];
-  projects: string[];
+  projects: { id: string; name: string }[];
   // Selected project; new tasks default to it.
   project: string;
   onSubmit: (form: FormState & { status: InitialStatus | undefined }) => Promise<boolean>;
@@ -325,7 +325,7 @@ export function TaskForm({ open, onOpenChange, initial, prefill, allTasks, proje
                     onChange={changeProject}
                     className="bg-background border border-border px-2 h-9 text-base text-foreground focus:outline-none focus:border-primary min-w-0"
                   >
-                    {projects.map((p) => <option key={p} value={p}>{p}</option>)}
+                    {projects.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
                   </select>
                 </label>
               )}

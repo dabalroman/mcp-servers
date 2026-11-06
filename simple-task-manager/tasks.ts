@@ -266,7 +266,7 @@ function runMigrations(db: DB): Set<string> {
 //   priority TEXT NOT NULL CHECK IN (low, medium, high, critical)
 //   scope, summary, description, plan, external_id TEXT NULL
 //   parent_id INTEGER NULL FK tasks(id) ON DELETE SET NULL — the task's epic
-//   project TEXT NOT NULL COLLATE NOCASE FK projects(name) ON UPDATE CASCADE — no default, on purpose
+//   project TEXT NOT NULL COLLATE NOCASE FK projects(id) ON UPDATE CASCADE — no default, on purpose
 //   created_at, updated_at TEXT NOT NULL DEFAULT now
 //   indexes: status, type, scope, project, parent_id, lower(external_id)
 //   widening a CHECK needs a table rebuild (see 20260519010000_add-plan-status)
@@ -290,14 +290,15 @@ function runMigrations(db: DB): Set<string> {
 //   index: number (getByPr)
 //
 // projects
-//   name TEXT PK COLLATE NOCASE; created_at TEXT NOT NULL DEFAULT now
+//   id TEXT PK COLLATE NOCASE — the identity every FK, PROJECT_NAME, X-Project and UI URL uses; immutable except adoptDefaultProject
+//   name TEXT NOT NULL DEFAULT '' COLLATE NOCASE — display only, never a lookup key; created_at TEXT NOT NULL DEFAULT now
 //   track_prs INTEGER NOT NULL DEFAULT 0 — only decides whether agents are told to record PRs
 //
 // api_keys — HTTP MCP keys (docs/claude/mcp-over-http.md)
 //   id INTEGER PK AUTOINCREMENT; label TEXT NOT NULL
 //   hash TEXT NOT NULL UNIQUE — SHA-256 of the key; the plaintext is never stored
 //   created_at TEXT NOT NULL DEFAULT now; last_used_at, revoked_at TEXT NULL (revoked_at set = revoked)
-//   project TEXT NULL FK projects(name), no ON UPDATE/DELETE action; NULL for keys before 20261029120000
+//   project TEXT NULL FK projects(id) ON UPDATE CASCADE; NULL for keys before 20261029120000
 //
 // schema_migrations — the migration gate
 //   version INTEGER PK — 1-based ordinal, backward compat only; name TEXT NOT NULL — authoritative key
@@ -419,7 +420,7 @@ export type OverviewEntry =
   | { type: TaskType; refinement: number; plan: number; open: number; done: number }
   | { type: TaskType; count: number; status: TaskStatus };
 export type ScopeEntry = { scope: string; total: number; open: number };
-export type ProjectEntry = { name: string; total: number; open: number; trackPrs: boolean };
+export type ProjectEntry = { id: string; name: string; total: number; open: number; trackPrs: boolean };
 
 export type StatusFilter = TaskStatus | 'open';
 export type ListFilter = { status?: StatusFilter; type?: TaskType; scope?: string };
@@ -452,11 +453,11 @@ export type Store = {
   getById(id: number): Task | null;
   getAll(project: string, filter?: ListFilter): Task[];
   getProjects(): ProjectEntry[];
-  createProject(name: string): { name: string };
-  updateProject(name: string, settings: { trackPrs: boolean }): { name: string; trackPrs: boolean };
-  projectTracksPrs(name: string): boolean;
-  hasProject(name: string): boolean;
-  adoptDefaultProject(name: string): boolean;
+  createProject(name: string): { id: string; name: string };
+  updateProject(id: string, settings: { trackPrs: boolean }): { id: string; name: string; trackPrs: boolean };
+  projectTracksPrs(id: string): boolean;
+  hasProject(id: string): boolean;
+  adoptDefaultProject(id: string): boolean;
   addNote(taskId: number, body: string): Note | null;
   updateNote(noteId: number, body: string): Note | null;
   deleteNote(noteId: number): boolean;
@@ -494,6 +495,20 @@ function validProjectName(name: string): string {
     throw new Error(`Validation failed: project name must be 1–${PROJECT_NAME_MAX} characters.`);
   }
   return trimmed;
+}
+
+// ł has no NFKD decomposition, so it is mapped by hand before stripping marks.
+export function slugifyProjectId(name: string): string {
+  const id = name
+    .replace(/ł/g, 'l').replace(/Ł/g, 'L')
+    .normalize('NFKD').replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, PROJECT_NAME_MAX)
+    .replace(/-+$/, '');
+  if (!id) throw new Error(`Validation failed: project name "${name}" has no letters or digits to build an id from.`);
+  return id;
 }
 
 // Throws on the first invalid entry; returns the list with trimmed urls.
@@ -588,9 +603,9 @@ export function createStore(dbPath: string): Store {
   const stmtChildrenOf      = db.prepare('SELECT id, title, status, type, priority FROM tasks WHERE parent_id = ? ORDER BY id');
   const stmtHasChildren     = db.prepare('SELECT 1 FROM tasks WHERE parent_id = ? LIMIT 1');
   const stmtRescopeChildren = db.prepare("UPDATE tasks SET scope = @scope, updated_at = datetime('now') WHERE parent_id = @id AND scope IS NOT @scope");
-  const stmtSelectProject   = db.prepare('SELECT name FROM projects WHERE name = ?');
-  const stmtProjectTrackPrs = db.prepare('SELECT track_prs FROM projects WHERE name = ?');
-  const stmtSetTrackPrs     = db.prepare('UPDATE projects SET track_prs = ? WHERE name = ?');
+  const stmtSelectProject   = db.prepare('SELECT id, name FROM projects WHERE id = ?');
+  const stmtProjectTrackPrs = db.prepare('SELECT track_prs FROM projects WHERE id = ?');
+  const stmtSetTrackPrs     = db.prepare('UPDATE projects SET track_prs = ? WHERE id = ?');
   const stmtPrsFor          = db.prepare('SELECT url, number, status FROM task_prs WHERE task_id = ? ORDER BY created_at, rowid');
   const stmtPrCreatedAt     = db.prepare('SELECT url, created_at FROM task_prs WHERE task_id = ?');
   const stmtDeletePrsFor    = db.prepare('DELETE FROM task_prs WHERE task_id = ?');
@@ -649,19 +664,19 @@ export function createStore(dbPath: string): Store {
     return parent;
   }
 
-  // Project names match case-insensitively (the FK is NOCASE).
+  // Project ids match case-insensitively (the FK is NOCASE).
   function sameProject(a: string, b: string): boolean {
     return a.toLowerCase() === b.toLowerCase();
   }
 
   // Returns the stored spelling: tasks.project would otherwise keep whatever
   // case the caller typed, since the NOCASE FK accepts it.
-  function canonicalProject(name: string): string {
-    const trimmed = String(name ?? '').trim();
+  function canonicalProject(id: string): string {
+    const trimmed = String(id ?? '').trim();
     if (!trimmed) throw new Error('Validation failed: project is required.');
-    const row = stmtSelectProject.get(trimmed) as { name: string } | undefined;
+    const row = stmtSelectProject.get(trimmed) as { id: string } | undefined;
     if (!row) throw new Error(`Validation failed: ${unknownProjectMessage(trimmed)}`);
-    return row.name;
+    return row.id;
   }
 
   function readAllTasks(withNotes = false): Task[] {
@@ -1127,56 +1142,60 @@ export function createStore(dbPath: string): Store {
 
   function getProjects(): ProjectEntry[] {
     const rows = db.prepare(`
-      SELECT p.name,
+      SELECT p.id, p.name,
              COUNT(t.id) AS total,
              COALESCE(SUM(CASE WHEN t.status != 'done' THEN 1 ELSE 0 END), 0) AS open,
              p.track_prs
       FROM projects p
-      LEFT JOIN tasks t ON t.project = p.name
-      GROUP BY p.name
-      ORDER BY p.name COLLATE NOCASE
+      LEFT JOIN tasks t ON t.project = p.id
+      GROUP BY p.id
+      ORDER BY p.name COLLATE NOCASE, p.id
     `).all() as (Omit<ProjectEntry, 'trackPrs'> & { track_prs: number })[];
     return rows.map(({ track_prs, ...p }) => ({ ...p, trackPrs: track_prs === 1 }));
   }
 
   // False for an unknown project, so a session bound to a typo just gets no PR nudge.
-  function projectTracksPrs(name: string): boolean {
-    const row = stmtProjectTrackPrs.get(name.trim()) as { track_prs: number } | undefined;
+  function projectTracksPrs(id: string): boolean {
+    const row = stmtProjectTrackPrs.get(id.trim()) as { track_prs: number } | undefined;
     return row?.track_prs === 1;
   }
 
-  function updateProject(name: string, settings: { trackPrs: boolean }): { name: string; trackPrs: boolean } {
+  function updateProject(id: string, settings: { trackPrs: boolean }): { id: string; name: string; trackPrs: boolean } {
     assertSchemaCurrent();
-    const canonical = canonicalProject(name);
+    const canonical = canonicalProject(id);
     stmtSetTrackPrs.run(settings.trackPrs ? 1 : 0, canonical);
-    return { name: canonical, trackPrs: settings.trackPrs };
+    const { name } = stmtSelectProject.get(canonical) as { name: string };
+    return { id: canonical, name, trackPrs: settings.trackPrs };
   }
 
-  function hasProject(name: string): boolean {
-    return stmtSelectProject.get(name.trim()) !== undefined;
+  function hasProject(id: string): boolean {
+    return stmtSelectProject.get(id.trim()) !== undefined;
   }
 
-  function createProject(name: string): { name: string } {
+  // The id is derived once and never follows a later name change.
+  function createProject(name: string): { id: string; name: string } {
     assertSchemaCurrent();
     const trimmed = validProjectName(name);
-    const existing = stmtSelectProject.get(trimmed) as { name: string } | undefined;
-    if (existing) throw new Error(`Validation failed: project "${existing.name}" already exists.`);
-    db.prepare('INSERT INTO projects (name) VALUES (?)').run(trimmed);
-    return { name: trimmed };
+    const id = slugifyProjectId(trimmed);
+    const existing = stmtSelectProject.get(id) as { id: string; name: string } | undefined;
+    if (existing) throw new Error(`Validation failed: id "${id}" is already taken by project "${existing.name}".`);
+    db.prepare('INSERT INTO projects (id, name) VALUES (?, ?)').run(id, trimmed);
+    return { id, name: trimmed };
   }
 
   // A DB that only knows the migration's 'default' project takes the
   // connection's PROJECT_NAME instead, so single-project installs need no
-  // setup. ON UPDATE CASCADE carries the tasks along.
-  function adoptDefaultProject(name: string): boolean {
+  // setup. PROJECT_NAME is an id, so it is used verbatim (not slugified) for
+  // both columns; ON UPDATE CASCADE carries the tasks and API keys along.
+  function adoptDefaultProject(id: string): boolean {
     assertSchemaCurrent();
-    const trimmed = name.trim();
+    const trimmed = id.trim();
     if (!isValidProjectName(trimmed) || trimmed.toLowerCase() === 'default') return false;
     return db.transaction(() => {
       if (stmtSelectProject.get(trimmed)) return false;
-      const names = (db.prepare('SELECT name FROM projects').all() as { name: string }[]).map((r) => r.name);
-      if (names.length !== 1 || names[0] !== 'default') return false;
-      db.prepare(`UPDATE projects SET name = ? WHERE name = 'default'`).run(trimmed);
+      const ids = (db.prepare('SELECT id FROM projects').all() as { id: string }[]).map((r) => r.id);
+      if (ids.length !== 1 || ids[0] !== 'default') return false;
+      db.prepare(`UPDATE projects SET id = ?, name = ? WHERE id = 'default'`).run(trimmed, trimmed);
       return true;
     }).immediate();
   }

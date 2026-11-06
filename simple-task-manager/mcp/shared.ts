@@ -51,15 +51,15 @@ export function toListTask<T extends Task>(task: T): Omit<T, ListOmit> | Omit<T,
 // from X-Project or the API key's default project. transport absent = stdio.
 export type SessionContext = { project: string; transport?: 'stdio' | 'http' };
 
-// Explicit `project` arg wins over the session's bound project. Unknown names
-// are an error, never auto-created.
+// Explicit `project` arg wins over the session's bound project. Matches the
+// project id only, never the display name. Unknown ids are an error, never auto-created.
 export function resolveProject(store: Store, ctx: SessionContext, argProject?: string): string | MCPContent {
   const explicit = argProject?.trim();
-  const name = explicit || ctx.project;
-  if (store.hasProject(name)) return name;
+  const id = explicit || ctx.project;
+  if (store.hasProject(id)) return id;
   const source = ctx.transport === 'http' ? 'X-Project header or API key default' : 'PROJECT_NAME';
   const hint = explicit ? '' : ` This is the session's bound project (${source}); pass \`project\` to use another one.`;
-  return errorText({ error: `${capitalise(unknownProjectMessage(name))}${hint}` });
+  return errorText({ error: `${capitalise(unknownProjectMessage(id))}${hint}` });
 }
 
 function capitalise(s: string): string {
@@ -95,7 +95,7 @@ export function probeTcp(port: number, timeoutMs: number): Promise<boolean> {
 }
 
 export const projectParam = z.string().min(1).optional()
-  .describe("Project to work in. Defaults to this session's project (PROJECT_NAME). Never invent one — ask the user or call getProjects.");
+  .describe("Project id to work in (the `id` from getProjects, not its display name). Defaults to this session's project (PROJECT_NAME). Never invent one — ask the user or call getProjects.");
 
 export const refsSchema = z.array(z.object({
   id: z.number().int().positive(),

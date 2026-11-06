@@ -80,17 +80,17 @@ describe('/api/projects', () => {
     await request(app).post('/api/tasks/').send({ project: 'default', type: 'bug', priority: 'high', title: 'T' });
     const res = await request(app).get('/api/projects/');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([{ name: 'default', total: 1, open: 1, trackPrs: false }]);
+    expect(res.body).toEqual([{ id: 'default', name: 'default', total: 1, open: 1, trackPrs: false }]);
   });
 
-  it('POST creates a project; a case-insensitive duplicate or empty name is a 400', async () => {
-    const created = await request(app).post('/api/projects/').send({ name: 'example-project' });
+  it('POST creates a project with a derived id; a taken id or empty name is a 400', async () => {
+    const created = await request(app).post('/api/projects/').send({ name: 'Example Project' });
     expect(created.status).toBe(200);
-    expect(created.body).toEqual({ name: 'example-project' });
+    expect(created.body).toEqual({ id: 'example-project', name: 'Example Project' });
     expect((await request(app).post('/api/projects/').send({ name: 'Example-Project' })).status).toBe(400);
     expect((await request(app).post('/api/projects/').send({ name: ' ' })).status).toBe(400);
     const list = await request(app).get('/api/projects/');
-    expect(list.body.map((p: { name: string }) => p.name)).toEqual(['default', 'example-project']);
+    expect(list.body.map((p: { id: string }) => p.id)).toEqual(['default', 'example-project']);
   });
 });
 
