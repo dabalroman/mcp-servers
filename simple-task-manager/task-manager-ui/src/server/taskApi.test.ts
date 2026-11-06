@@ -123,3 +123,13 @@ describe('externalId passthrough', () => {
     }
   });
 });
+
+describe('prs passthrough', () => {
+  it('load carries prs, and a UI edit that omits them keeps them', async () => {
+    const pr = { url: 'https://example.com/pr/7', number: 7, status: 'open' as const };
+    const { id } = await api.add({ project: 'default', type: 'bug', priority: 'medium', title: 'T', description: '', prs: [pr] });
+    await api.patch(id, { title: 'Renamed', externalId: null });
+    const { active } = api.list();
+    expect(active.find((t) => t.id === id)?.prs).toEqual([pr]);
+  });
+});

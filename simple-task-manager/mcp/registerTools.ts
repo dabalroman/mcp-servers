@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { refsSchema, projectParam, withSchemaCheck, type MCPContent, type SessionContext } from './shared.js';
+import { refsSchema, prsSchema, projectParam, withSchemaCheck, type MCPContent, type SessionContext } from './shared.js';
 import type { Store } from '../tasks.js';
 import {
   handleGetOverview,
@@ -23,6 +23,7 @@ import {
   handleSetStatus,
   handleDelete,
   handleCreateProject,
+  handleUpdateProject,
   handleUiStart,
   handleUiStop,
 } from './mutationHandlers.js';
@@ -57,6 +58,8 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
       .describe(PARENT_ID_RULE),
     externalId: z.string().optional()
       .describe('External tracker ticket ID (JIRA/Asana/…, e.g. "OPXPIQ-6532"). Set it whenever the user names a ticket ID for this task. Find tasks by it later with getByExternalId.'),
+    prs: prsSchema
+      .describe('Pull/merge requests of this task: { url, number, status: draft|open|closed|merged }, url http(s) and unique per task.'),
     project: projectParam,
   };
   server.tool(
@@ -138,6 +141,8 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
       .describe('New plan content (markdown) — this is how a plan is stored. Pass null or empty string to clear. For small edits use replace(). Must be plain UTF-8 text (no control characters); a BOM is stripped and CRLF is stored as LF.'),
     refs: refsSchema.nullable()
       .describe('Full replacement list of related-task references, or null / empty array to clear all. Each entry: { id, relation? }, relation one of the canonical values (default "relates to"). The inverse is written automatically — specify one side only. Replaces the existing list entirely — include every ref you want to keep. Nonexistent ids and self-references are silently dropped; a newly added task from another project is rejected.'),
+    prs: prsSchema.nullable()
+      .describe('Full replacement list of the task\'s pull/merge requests ({ url, number, status: draft|open|closed|merged }), or null / empty array to clear. Include every PR you want to keep; to change a status, resend the list with the new status.'),
     parentId: z.number().int().positive().nullable().optional()
       .describe(`${PARENT_ID_RULE} Pass null to detach the task from its epic.`),
     project: z.string().min(1).optional()
@@ -234,7 +239,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   // ── getProjects ───────────────────────────────────────────────────────────────
   server.tool(
     'getProjects',
-    "List all projects with task counts — use when the user asks which projects exist, or before passing `project` to another tool. Every task belongs to exactly one project; list tools default to this session's project (PROJECT_NAME). Task IDs are global, so getById, getRelated, setStatus and notes work across projects. Returns { boundProject, projects: Array<{ name, total, open }> } sorted by name; open = not done.",
+    "List all projects with task counts — use when the user asks which projects exist, or before passing `project` to another tool. Every task belongs to exactly one project; list tools default to this session's project (PROJECT_NAME). Task IDs are global, so getById, getRelated, setStatus and notes work across projects. Returns { boundProject, projects: Array<{ name, total, open, trackPrs }> } sorted by name; open = not done; trackPrs = agents in it are expected to record PRs.",
     {},
     withSchemaCheck(store, async (): Promise<MCPContent> => handleGetProjects(store, ctx))
   );
@@ -248,6 +253,18 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     'Create a new, empty project. Only call this when the user asks for a new project — never to make an unknown `project` argument work. Names are case-insensitive unique. Returns { success, project: { name } }, or an error if it already exists.',
     createProjectSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof createProjectSchema>>): Promise<MCPContent> => handleCreateProject(store, args))
+  );
+
+  // ── updateProject ─────────────────────────────────────────────────────────────
+  const updateProjectSchema = {
+    project: z.string().min(1).describe('Name of the project to change (case-insensitive).'),
+    trackPrs: z.boolean().describe('true = agents in this project are told to record pull/merge requests on tasks (prs). Takes effect from the next session.'),
+  };
+  server.tool(
+    'updateProject',
+    'Change a project\'s settings. Only call when the user asks (e.g. "turn on PR tracking"). Returns { success, project: { name, trackPrs } }, or an error for an unknown project.',
+    updateProjectSchema,
+    withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof updateProjectSchema>>): Promise<MCPContent> => handleUpdateProject(store, args))
   );
 
   // ── health ────────────────────────────────────────────────────────────────────

@@ -2,11 +2,11 @@ import { useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
-import { ChevronDown, ChevronRight, ChevronUp, FileText } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ChevronUp, FileText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { TYPE_LABELS, PRIORITY_CLASSES } from './constants';
+import { TYPE_LABELS, PRIORITY_CLASSES, PR_STATUS_CLASSES } from './constants';
 import { StatusPicker } from './StatusPicker';
 import type { EpicProgress } from '@/lib/taskView';
 import type { Note, Task, TaskStatus } from '@/types/task';
@@ -62,6 +62,24 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
     'text-xs tracking-widest border border-border px-2 py-1 shrink-0 text-muted-foreground cursor-pointer hover:border-primary/60 hover:text-foreground transition-colors';
   const externalIdClass = 'text-xs tracking-widest border border-border px-2 py-1 truncate text-muted-foreground';
 
+  const prTags = (placement: string) => task.prs?.map((pr) => (
+    <a
+      key={pr.url}
+      href={pr.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={`${pr.status} — ${pr.url}`}
+      className={cn(
+        'items-center gap-1 text-xs tracking-widest border px-2 py-1 shrink-0 hover:text-foreground transition-colors',
+        PR_STATUS_CLASSES[pr.status],
+        placement,
+      )}
+    >
+      PR #{pr.number}
+      {pr.status === 'merged' && <Check className="w-3 h-3" strokeWidth={1.5} />}
+    </a>
+  ));
+
   const copyIdCommand = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
     const cmd =
@@ -116,6 +134,7 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
             {task.externalId}
           </span>
         )}
+        {prTags('hidden md:inline-flex self-start')}
 
         <div className="flex items-start gap-2 md:flex-1 md:min-w-0">
           {onToggleCollapse && (
@@ -136,7 +155,7 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
         </div>
 
         <div className="flex items-center justify-between gap-2 w-full md:w-auto md:justify-start">
-          <div className="flex items-center gap-2 min-w-0 md:hidden">
+          <div className="flex flex-wrap items-center gap-2 min-w-0 md:hidden">
             <button
               type="button"
               onClick={copyIdCommand}
@@ -147,6 +166,7 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
             {task.externalId && (
               <span title={task.externalId} className={cn(externalIdClass, 'min-w-0')}>{task.externalId}</span>
             )}
+            {prTags('inline-flex')}
           </div>
 
           {task.plan && (

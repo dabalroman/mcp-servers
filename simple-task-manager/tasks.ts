@@ -23,6 +23,15 @@ export type Ref = {
   title?: string;
 };
 
+export const PR_STATUSES = ['draft', 'open', 'closed', 'merged'] as const;
+export type PrStatus = typeof PR_STATUSES[number];
+
+export type PullRequest = {
+  url: string;
+  number: number;
+  status: PrStatus;
+};
+
 export type Task = {
   id: number;
   title: string;
@@ -41,6 +50,7 @@ export type Task = {
   epic?: EpicContext;
   children?: EpicChild[];
   refs?: Ref[];
+  prs?: PullRequest[];
   notes?: Note[];
   noteCount?: number;
   created_at: string;
@@ -314,6 +324,7 @@ export type AddInput = {
   summary?: string;
   plan?: string;
   refs?: Ref[];
+  prs?: PullRequest[];
   status?: TaskStatus;
   parentId?: number;
   externalId?: string;
@@ -330,6 +341,8 @@ export type UpdatePatch = {
   summary?: string | null;
   plan?: string | null;
   refs?: Ref[] | null;
+  // Full replacement list; null or [] clears, undefined keeps.
+  prs?: PullRequest[] | null;
   parentId?: number | null;
   externalId?: string | null;
 };
@@ -349,7 +362,7 @@ export type OverviewEntry =
   | { type: TaskType; refinement: number; plan: number; open: number; done: number }
   | { type: TaskType; count: number; status: TaskStatus };
 export type ScopeEntry = { scope: string; total: number; open: number };
-export type ProjectEntry = { name: string; total: number; open: number };
+export type ProjectEntry = { name: string; total: number; open: number; trackPrs: boolean };
 
 export type StatusFilter = TaskStatus | 'open';
 export type ListFilter = { status?: StatusFilter; type?: TaskType; scope?: string };
@@ -382,6 +395,8 @@ export type Store = {
   getAll(project: string, filter?: ListFilter): Task[];
   getProjects(): ProjectEntry[];
   createProject(name: string): { name: string };
+  updateProject(name: string, settings: { trackPrs: boolean }): { name: string; trackPrs: boolean };
+  projectTracksPrs(name: string): boolean;
   hasProject(name: string): boolean;
   adoptDefaultProject(name: string): boolean;
   addNote(taskId: number, body: string): Note | null;
@@ -421,6 +436,26 @@ function validProjectName(name: string): string {
     throw new Error(`Validation failed: project name must be 1–${PROJECT_NAME_MAX} characters.`);
   }
   return trimmed;
+}
+
+// Throws on the first invalid entry; returns the list with trimmed urls.
+export function validatePrs(prs: PullRequest[]): PullRequest[] {
+  const seen = new Set<string>();
+  return prs.map((pr) => {
+    const url = String(pr.url ?? '').trim();
+    let protocol: string;
+    try {
+      protocol = new URL(url).protocol;
+    } catch {
+      throw new Error(`Validation failed: PR url "${url}" is not a valid URL.`);
+    }
+    if (protocol !== 'http:' && protocol !== 'https:') throw new Error(`Validation failed: PR url "${url}" must be http(s).`);
+    if (!Number.isInteger(pr.number) || pr.number <= 0) throw new Error(`Validation failed: PR number must be a positive integer (got ${pr.number}).`);
+    if (!PR_STATUSES.includes(pr.status)) throw new Error(`Validation failed: PR status must be one of ${PR_STATUSES.join(', ')} (got ${pr.status}).`);
+    if (seen.has(url)) throw new Error(`Validation failed: PR url "${url}" is listed twice.`);
+    seen.add(url);
+    return { url, number: pr.number, status: pr.status };
+  });
 }
 
 export function unknownProjectMessage(name: string): string {
@@ -496,6 +531,14 @@ export function createStore(dbPath: string): Store {
   const stmtHasChildren     = db.prepare('SELECT 1 FROM tasks WHERE parent_id = ? LIMIT 1');
   const stmtRescopeChildren = db.prepare("UPDATE tasks SET scope = @scope, updated_at = datetime('now') WHERE parent_id = @id AND scope IS NOT @scope");
   const stmtSelectProject   = db.prepare('SELECT name FROM projects WHERE name = ?');
+  const stmtProjectTrackPrs = db.prepare('SELECT track_prs FROM projects WHERE name = ?');
+  const stmtSetTrackPrs     = db.prepare('UPDATE projects SET track_prs = ? WHERE name = ?');
+  const stmtPrsFor          = db.prepare('SELECT url, number, status FROM task_prs WHERE task_id = ? ORDER BY created_at, rowid');
+  const stmtPrCreatedAt     = db.prepare('SELECT url, created_at FROM task_prs WHERE task_id = ?');
+  const stmtDeletePrsFor    = db.prepare('DELETE FROM task_prs WHERE task_id = ?');
+  const stmtInsertPr        = db.prepare(`
+    INSERT INTO task_prs (task_id, url, number, status, created_at) VALUES (?, ?, ?, ?, COALESCE(?, datetime('now')))
+  `);
   const API_KEY_COLS = 'id, label, project, created_at AS createdAt, last_used_at AS lastUsedAt, revoked_at AS revokedAt';
   const stmtSelectApiKey    = db.prepare(`SELECT ${API_KEY_COLS} FROM api_keys WHERE id = ?`);
   const stmtApiKeyByHash    = db.prepare(`
@@ -514,6 +557,8 @@ export function createStore(dbPath: string): Store {
     const refs = (stmtRefsFromTitled.all(id) as (RefRow & { title: string })[])
       .map((r) => ({ ...refRowToObj(r), title: r.title }));
     const task = rowToTask(row, refs);
+    const prs = stmtPrsFor.all(id) as PullRequest[];
+    if (prs.length) task.prs = prs;
     const notes = stmtNotesFor.all(id) as Note[];
     if (notes.length) task.notes = notes;
     if (row.parent_id !== null) {
@@ -582,6 +627,15 @@ export function createStore(dbPath: string): Store {
       arr.push(refRowToObj(r));
       refsByFrom.set(r.from_id, arr);
     }
+    const prsByTask = new Map<number, PullRequest[]>();
+    const prRows = db.prepare(
+      `SELECT task_id, url, number, status FROM task_prs WHERE task_id IN (${placeholders}) ORDER BY created_at, rowid`
+    ).all(...ids) as (PullRequest & { task_id: number })[];
+    for (const { task_id, ...pr } of prRows) {
+      const arr = prsByTask.get(task_id) ?? [];
+      arr.push(pr);
+      prsByTask.set(task_id, arr);
+    }
     const countRows = db.prepare(
       `SELECT task_id, COUNT(*) AS n FROM notes WHERE task_id IN (${placeholders}) GROUP BY task_id`
     ).all(...ids) as { task_id: number; n: number }[];
@@ -609,12 +663,22 @@ export function createStore(dbPath: string): Store {
       const task = rowToTask(row, refsByFrom.get(row.id) ?? []);
       const epicTitle = row.parent_id !== null ? epicTitles.get(row.parent_id) : undefined;
       if (epicTitle !== undefined) task.epicTitle = epicTitle;
+      const prs = prsByTask.get(row.id);
+      if (prs) task.prs = prs;
       const n = noteCounts.get(row.id);
       if (n) task.noteCount = n;
       const notes = notesByTask.get(row.id);
       if (notes) task.notes = notes;
       return task;
     });
+  }
+
+  // Replaces the task's PRs; a url that stays keeps its created_at, so the list
+  // order survives status updates. Callers wrap in a transaction.
+  function applyPrs(taskId: number, prs: PullRequest[]): void {
+    const createdAt = new Map((stmtPrCreatedAt.all(taskId) as { url: string; created_at: string }[]).map((r) => [r.url, r.created_at]));
+    stmtDeletePrsFor.run(taskId);
+    for (const pr of prs) stmtInsertPr.run(taskId, pr.url, pr.number, pr.status, createdAt.get(pr.url) ?? null);
   }
 
   function getValidIds(): Set<number> {
@@ -688,9 +752,10 @@ export function createStore(dbPath: string): Store {
 
   function add(input: AddInput): { id: number } {
     assertSchemaCurrent();
-    const { project, type, priority, title, description = '', scope, summary, plan, refs, status = 'refinement', parentId, externalId } = input;
+    const { project, type, priority, title, description = '', scope, summary, plan, refs, prs, status = 'refinement', parentId, externalId } = input;
     const trimmedTitle = String(title ?? '').trim();
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
+    const validPrs = prs?.length ? validatePrs(prs) : [];
 
     return db.transaction(() => {
       const canonical = canonicalProject(project);
@@ -714,12 +779,14 @@ export function createStore(dbPath: string): Store {
       if (refs?.length) {
         applyRefsImpl(newId, canonical, [], refs);
       }
+      if (validPrs.length) applyPrs(newId, validPrs);
       return { id: newId };
     })();
   }
 
   function update(id: number, patch: UpdatePatch): { task: Task } | null {
     assertSchemaCurrent();
+    const nextPrs = patch.prs === undefined ? undefined : patch.prs === null ? [] : validatePrs(patch.prs);
     return db.transaction(() => {
       const existing = stmtSelectTask.get(id) as TaskRow | undefined;
       if (!existing) return null;
@@ -763,6 +830,7 @@ export function createStore(dbPath: string): Store {
         const nextRefs: Ref[] = patch.refs === null || patch.refs.length === 0 ? [] : patch.refs;
         applyRefsImpl(id, next.project, oldRefs, nextRefs);
       }
+      if (nextPrs !== undefined) applyPrs(id, nextPrs);
 
       const task = readTask(id);
       return task ? { task } : null;
@@ -975,15 +1043,30 @@ export function createStore(dbPath: string): Store {
   }
 
   function getProjects(): ProjectEntry[] {
-    return db.prepare(`
+    const rows = db.prepare(`
       SELECT p.name,
              COUNT(t.id) AS total,
-             COALESCE(SUM(CASE WHEN t.status != 'done' THEN 1 ELSE 0 END), 0) AS open
+             COALESCE(SUM(CASE WHEN t.status != 'done' THEN 1 ELSE 0 END), 0) AS open,
+             p.track_prs
       FROM projects p
       LEFT JOIN tasks t ON t.project = p.name
       GROUP BY p.name
       ORDER BY p.name COLLATE NOCASE
-    `).all() as ProjectEntry[];
+    `).all() as (Omit<ProjectEntry, 'trackPrs'> & { track_prs: number })[];
+    return rows.map(({ track_prs, ...p }) => ({ ...p, trackPrs: track_prs === 1 }));
+  }
+
+  // False for an unknown project, so a session bound to a typo just gets no PR nudge.
+  function projectTracksPrs(name: string): boolean {
+    const row = stmtProjectTrackPrs.get(name.trim()) as { track_prs: number } | undefined;
+    return row?.track_prs === 1;
+  }
+
+  function updateProject(name: string, settings: { trackPrs: boolean }): { name: string; trackPrs: boolean } {
+    assertSchemaCurrent();
+    const canonical = canonicalProject(name);
+    stmtSetTrackPrs.run(settings.trackPrs ? 1 : 0, canonical);
+    return { name: canonical, trackPrs: settings.trackPrs };
   }
 
   function hasProject(name: string): boolean {
@@ -1138,6 +1221,8 @@ export function createStore(dbPath: string): Store {
     getAll,
     getProjects,
     createProject,
+    updateProject,
+    projectTracksPrs,
     hasProject,
     adoptDefaultProject,
     addNote,

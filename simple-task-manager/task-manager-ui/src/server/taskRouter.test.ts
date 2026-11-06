@@ -80,7 +80,7 @@ describe('/api/projects', () => {
     await request(app).post('/api/tasks/').send({ project: 'default', type: 'bug', priority: 'high', title: 'T' });
     const res = await request(app).get('/api/projects/');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([{ name: 'default', total: 1, open: 1 }]);
+    expect(res.body).toEqual([{ name: 'default', total: 1, open: 1, trackPrs: false }]);
   });
 
   it('POST creates a project; a case-insensitive duplicate or empty name is a 400', async () => {

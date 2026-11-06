@@ -13,6 +13,7 @@ import { createStore, loadMigrations } from './tasks.js';
 const EPIC_MIGRATION = '20261020120000_add-epic-type-and-parent';
 const EXTERNAL_ID_MIGRATION = '20261027120000_add-external-id';
 const PROJECTS_MIGRATION = '20261027130000_add-projects';
+const TASK_PRS_MIGRATION = '20261106120000_add-task-prs';
 
 let dir: string;
 let dbPath: string;
@@ -395,6 +396,34 @@ describe('add-projects migration', () => {
       () => store.db.prepare("INSERT INTO tasks (title, type, status, priority, project) VALUES ('X', 'bug', 'todo', 'low', 'nope')").run(),
       /FOREIGN KEY constraint failed/,
     );
+    store.close();
+  });
+});
+
+describe('add-task-prs migration', () => {
+  test('adds task_prs with CHECKs and CASCADE, and track_prs defaulting to 0 on existing projects', () => {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    const earlier = loadMigrations().filter((m) => m.name < TASK_PRS_MIGRATION);
+    earlier.forEach((m, i) => {
+      m.up(db);
+      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(i + 1, m.name);
+    });
+    db.pragma(`user_version = ${earlier.length}`);
+    db.prepare("INSERT INTO tasks (title, type, status, priority, project, description) VALUES ('Old', 'bug', 'todo', 'high', 'default', '')").run();
+    db.close();
+
+    const store = createStore(dbPath);
+    const sdb = store.db;
+    assert.deepEqual(sdb.prepare('SELECT name, track_prs FROM projects').all(), [{ name: 'default', track_prs: 0 }]);
+    const ins = sdb.prepare('INSERT INTO task_prs (task_id, url, number, status) VALUES (?, ?, ?, ?)');
+    ins.run(1, 'https://example.com/pr/1', 1, 'open');
+    assert.throws(() => ins.run(1, 'https://example.com/pr/2', 2, 'declined'), /CHECK constraint failed/);
+    assert.throws(() => ins.run(1, 'https://example.com/pr/3', 0, 'open'), /CHECK constraint failed/);
+    assert.throws(() => ins.run(1, 'https://example.com/pr/1', 1, 'merged'), /UNIQUE constraint failed/);
+    sdb.prepare('DELETE FROM tasks WHERE id = 1').run();
+    assert.equal((sdb.prepare('SELECT COUNT(*) AS n FROM task_prs').get() as { n: number }).n, 0);
     store.close();
   });
 });

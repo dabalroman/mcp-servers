@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { VERSION } from '../version.js';
-import { INSTRUCTIONS } from '../instructions.js';
+import { buildInstructions } from '../instructions.js';
 import { registerTools } from './registerTools.js';
 import type { Store, VerifiedKey } from '../tasks.js';
 
@@ -59,7 +59,7 @@ export function createMcpHttpHandler({ store }: { store: Store }): McpHttpHandle
     }
 
     try {
-      const server = new McpServer({ name: 'simple-task-manager', version: VERSION }, { instructions: INSTRUCTIONS });
+      const server = new McpServer({ name: 'simple-task-manager', version: VERSION }, { instructions: buildInstructions(store.projectTracksPrs(project)) });
       registerTools(server, store, { project, transport: 'http' });
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: undefined,

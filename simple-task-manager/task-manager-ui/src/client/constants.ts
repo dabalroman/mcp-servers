@@ -1,5 +1,5 @@
 import { CANONICAL_RELATIONS } from '@/types/task';
-import type { TaskType, TaskPriority, TaskStatus } from '@/types/task';
+import type { TaskType, TaskPriority, TaskStatus, PrStatus } from '@/types/task';
 
 export const RELATIONS = CANONICAL_RELATIONS;
 
@@ -43,6 +43,13 @@ export const STATUS_CLASSES: Record<TaskStatus, string> = {
   todo:        'border-border text-muted-foreground',
   in_progress: 'border-primary text-primary',
   done:        'border-muted-foreground/30 text-muted-foreground/50',
+};
+
+export const PR_STATUS_CLASSES: Record<PrStatus, string> = {
+  draft:  'border-dashed border-border text-muted-foreground',
+  open:   'border-primary text-primary',
+  merged: 'border-border text-muted-foreground',
+  closed: 'border-border text-muted-foreground/60 line-through',
 };
 
 export const TYPES: TaskType[] = ['bug', 'feature', 'idea', 'tool', 'other', 'epic'];

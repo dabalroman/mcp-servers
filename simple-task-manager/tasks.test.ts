@@ -13,6 +13,7 @@ import {
   type AddInput,
   type Store,
   type Task,
+  type PullRequest,
   StaleSchemaError,
   hashApiKey,
 } from './tasks.js';
@@ -30,6 +31,7 @@ const MIGRATION_NAMES = [
   '20261027130000_add-projects',
   '20261028120000_add-api-keys',
   '20261029120000_add-api-key-project',
+  '20261106120000_add-task-prs',
 ];
 
 let dir: string;
@@ -1237,9 +1239,84 @@ describe('externalId', () => {
   });
 });
 
+describe('prs', () => {
+  const pr = (n: number, status: PullRequest['status'] = 'open'): PullRequest => ({ url: `https://example.com/pr/${n}`, number: n, status });
+
+  test('round-trips on add, url trimmed, omitted when empty', () => {
+    const { id } = makeTask({ prs: [{ ...pr(1), url: '  https://example.com/pr/1  ' }] });
+    assert.deepEqual(store.getById(id)?.prs, [pr(1)]);
+    const bare = makeTask().id;
+    assert.ok(!('prs' in store.getById(bare)!));
+  });
+
+  test('list reads carry prs', () => {
+    const { id } = makeTask({ prs: [pr(1), pr(2, 'draft')] });
+    assert.deepEqual(store.getAll('default').find((t) => t.id === id)?.prs, [pr(1), pr(2, 'draft')]);
+    assert.deepEqual(store.load().active.find((t) => t.id === id)?.prs, [pr(1), pr(2, 'draft')]);
+  });
+
+  test('update replaces the list, keeps on undefined, clears on null and on []', () => {
+    const { id } = makeTask({ prs: [pr(1)] });
+    assert.deepEqual(store.update(id, { prs: [pr(1), pr(2)] })?.task.prs, [pr(1), pr(2)]);
+    assert.deepEqual(store.update(id, { title: 'Renamed' })?.task.prs, [pr(1), pr(2)]);
+    assert.deepEqual(store.update(id, { prs: [pr(2)] })?.task.prs, [pr(2)]);
+    assert.equal(store.update(id, { prs: null })?.task.prs, undefined);
+    store.update(id, { prs: [pr(3)] });
+    assert.equal(store.update(id, { prs: [] })?.task.prs, undefined);
+  });
+
+  test('a status change keeps the PR created_at, so the order holds', () => {
+    const { id } = makeTask({ prs: [pr(1)] });
+    store.db.prepare("UPDATE task_prs SET created_at = '2000-01-01 00:00:00' WHERE task_id = ?").run(id);
+    store.update(id, { prs: [pr(2), pr(1, 'merged')] });
+    const rows = store.db.prepare('SELECT url, created_at FROM task_prs WHERE task_id = ? ORDER BY url').all(id) as { url: string; created_at: string }[];
+    assert.equal(rows[0]!.created_at, '2000-01-01 00:00:00');
+    assert.deepEqual(store.getById(id)?.prs, [pr(1, 'merged'), pr(2)]);
+  });
+
+  test('rejects a non-http url, a bad number, a bad status and a duplicate url, writing nothing', () => {
+    const { id } = makeTask({ prs: [pr(1)] });
+    const bad: PullRequest[][] = [
+      [{ ...pr(2), url: 'ftp://example.com/pr/2' }],
+      [{ ...pr(2), url: 'not a url' }],
+      [{ ...pr(2), number: 0 }],
+      [{ ...pr(2), number: 1.5 }],
+      [{ ...pr(2), status: 'declined' as PullRequest['status'] }],
+      [pr(2), pr(2)],
+    ];
+    for (const prs of bad) assert.throws(() => store.update(id, { prs }), /Validation failed/);
+    assert.throws(() => makeTask({ title: 'Bad', prs: [pr(0)] }), /Validation failed/);
+    assert.deepEqual(store.getById(id)?.prs, [pr(1)]);
+    assert.equal(store.getAll('default').some((t) => t.title === 'Bad'), false);
+  });
+
+  test('deleting the task removes its prs', () => {
+    const { id } = makeTask({ prs: [pr(1)] });
+    store.delete(id);
+    assert.equal((store.db.prepare('SELECT COUNT(*) AS n FROM task_prs').get() as { n: number }).n, 0);
+  });
+});
+
+describe('project PR tracking', () => {
+  test('is off by default and toggles via updateProject, case-insensitively', () => {
+    store.createProject('Example-Project');
+    assert.equal(store.projectTracksPrs('example-project'), false);
+    assert.deepEqual(store.updateProject('example-project', { trackPrs: true }), { name: 'Example-Project', trackPrs: true });
+    assert.equal(store.projectTracksPrs('Example-Project'), true);
+    assert.equal(store.getProjects().find((p) => p.name === 'Example-Project')?.trackPrs, true);
+    store.updateProject('Example-Project', { trackPrs: false });
+    assert.equal(store.projectTracksPrs('Example-Project'), false);
+  });
+
+  test('an unknown project tracks nothing and cannot be updated', () => {
+    assert.equal(store.projectTracksPrs('nope'), false);
+    assert.throws(() => store.updateProject('nope', { trackPrs: true }), /does not exist/);
+  });
+});
+
 describe('projects', () => {
   test('a fresh DB has only the default project', () => {
-    assert.deepEqual(store.getProjects(), [{ name: 'default', total: 0, open: 0 }]);
+    assert.deepEqual(store.getProjects(), [{ name: 'default', total: 0, open: 0, trackPrs: false }]);
   });
 
   test('list methods only return the given project', () => {
@@ -1305,9 +1382,9 @@ describe('projects', () => {
     const done = makeTask({ project: 'a-project' }).id;
     store.setStatus(done, 'done');
     assert.deepEqual(store.getProjects(), [
-      { name: 'a-project', total: 2, open: 1 },
-      { name: 'b-project', total: 0, open: 0 },
-      { name: 'default', total: 0, open: 0 },
+      { name: 'a-project', total: 2, open: 1, trackPrs: false },
+      { name: 'b-project', total: 0, open: 0, trackPrs: false },
+      { name: 'default', total: 0, open: 0, trackPrs: false },
     ]);
   });
 

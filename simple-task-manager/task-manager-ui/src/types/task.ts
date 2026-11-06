@@ -30,7 +30,15 @@ export type Note = {
   updated_at: string;
 };
 
-export type Project = { name: string; total: number; open: number };
+export type Project = { name: string; total: number; open: number; trackPrs: boolean };
+
+export type PrStatus = 'draft' | 'open' | 'closed' | 'merged';
+
+export type PullRequest = {
+  url: string;
+  number: number;
+  status: PrStatus;
+};
 
 export type Task = {
   id: number;
@@ -47,6 +55,7 @@ export type Task = {
   externalId: string | null;
   epicTitle?: string;
   refs?: TaskRef[];
+  prs?: PullRequest[];
   notes?: Note[];
   noteCount?: number;
   created_at: string;

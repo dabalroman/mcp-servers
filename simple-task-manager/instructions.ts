@@ -1,4 +1,10 @@
-export const INSTRUCTIONS: string = `
+const PR_RULE = `
+- This project tracks PRs: when you open a PR/MR for a task, record it in prs on update(); update its status whenever you see it change (e.g. gh pr view).`;
+
+// Built per session from the bound project: the PR rule reaches only projects
+// with track_prs on, so other workflows never hear about PRs.
+export function buildInstructions(trackPrs: boolean): string {
+  return `
 You are connected to simple-task-manager — a persistent task tracker that survives session restarts and context compaction.
 Tasks live in a single SQLite database (env var \`TASKS_DB\`).
 
@@ -6,7 +12,7 @@ Tasks live in a single SQLite database (env var \`TASKS_DB\`).
 - When the user says "schedule X", "TODO X", "add to the list", "FEATURE X", "BUG X", "IDEA X" — call add() and STOP. Do NOT also implement it.
 - If the user mentions a bug or feature that is outside the current task's scope, ask whether to schedule it before continuing.
 - Suggest next work via getNext (or getAll for the full picture) whenever a task finishes or a session ends.
-- When the user names an external ticket ID (JIRA/Asana/…, e.g. OPXPIQ-6532) for a task, pass it as externalId on add/update; when they ask about a ticket ID, call getByExternalId first.
+- When the user names an external ticket ID (JIRA/Asana/…, e.g. OPXPIQ-6532) for a task, pass it as externalId on add/update; when they ask about a ticket ID, call getByExternalId first.${trackPrs ? PR_RULE : ''}
 
 ## Default status for NEW tasks — ALWAYS 'refinement'
 This is a hard rule; do not bypass it for "obvious" or "small" tasks. add() defaults status to 'refinement' for a reason.
@@ -37,3 +43,4 @@ For small edits to a task's description or plan, use replace({ id, field, anchor
 
 Extended rules (epics, user prefixes, refs, projects, knowledge capture, binding a repo) ship with the \`tm\` Claude Code plugin (this MCP server keeps the name task-manager); without it they are missing from this session.
 `.trim();
+}

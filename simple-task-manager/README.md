@@ -86,6 +86,8 @@ If another command uses the same name, the namespaced form works too (`/tm:imple
   description.
 - **Refs** — links like `blocks` or `depends on`. The server writes the inverse on the other task.
   Refs and epic links stay within one project.
+- **Pull requests** — a task's PRs/MRs show as linked status tags on its card. Ask Claude to "turn
+  on PR tracking" for a project and it records them as it opens them.
 
 Claude calls the tools itself: `add`, `update`, `setStatus`, `getNext`, `getAll`, `getById`,
 `addNote`, `health`, and more. Each describes itself to Claude when it connects.

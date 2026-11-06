@@ -15,7 +15,7 @@ import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createStore, type AddInput, type Store, type StatusFilter } from './tasks.js';
-import { INSTRUCTIONS } from './instructions.js';
+import { buildInstructions } from './instructions.js';
 import { PACKAGE_DIR } from './packageDir.js';
 import { ENV_ORDER } from './mcpConfig.js';
 import {
@@ -39,8 +39,9 @@ import {
   handleSetStatus,
   handleDelete,
   handleCreateProject,
+  handleUpdateProject,
 } from './mcp/mutationHandlers.js';
-import { withSchemaCheck, type MCPContent } from './mcp/shared.js';
+import { withSchemaCheck, prsSchema, type MCPContent } from './mcp/shared.js';
 import Database from 'better-sqlite3';
 import { resetUpdateCheckCache } from './updateCheck.js';
 import { VERSION } from './version.js';
@@ -1181,8 +1182,16 @@ const PLUGIN_DIR = join(PACKAGE_DIR, 'plugin');
 const RULES = readFileSync(join(PLUGIN_DIR, 'RULES.md'), 'utf8');
 
 describe('instructions size limits', () => {
-  test('INSTRUCTIONS fits the 4,096-char MCP server-instructions cap', () => {
-    assert.ok(INSTRUCTIONS.length <= 4096, `INSTRUCTIONS is ${INSTRUCTIONS.length} chars`);
+  test('instructions fit the 4,096-char MCP server-instructions cap, with and without the PR rule', () => {
+    for (const trackPrs of [false, true]) {
+      const text = buildInstructions(trackPrs);
+      assert.ok(text.length <= 4096, `instructions (trackPrs=${trackPrs}) are ${text.length} chars`);
+    }
+  });
+
+  test('the PR rule appears only when the project tracks PRs', () => {
+    assert.doesNotMatch(buildInstructions(false), /PR/);
+    assert.match(buildInstructions(true), /This project tracks PRs/);
   });
 
   test('plugin RULES.md fits the 10,000-char SessionStart hook cap', () => {
@@ -1278,6 +1287,32 @@ describe('plugin SessionStart hook (session-rules.mjs)', () => {
   });
 });
 
+describe('prs', () => {
+  const pr = { url: 'https://example.com/pr/7', number: 7, status: 'open' as const };
+
+  test('add and update carry prs; the update echo and list reads include them', async () => {
+    const { id } = decode(handleAdd(store, { type: 'bug', priority: 'low', title: 'A', description: '', status: 'todo', prs: [pr] }, CTX)) as { id: number };
+    const echo = decode(handleUpdate(store, { id, prs: [{ ...pr, status: 'merged' }] })) as { task: { prs: unknown } };
+    assert.deepEqual(echo.task.prs, [{ ...pr, status: 'merged' }]);
+    const { tasks } = decode(await handleGetAll(store, {}, CTX)) as { tasks: Record<string, { prs?: unknown }[]> };
+    assert.deepEqual(Object.values(tasks).flat()[0]?.prs, [{ ...pr, status: 'merged' }]);
+  });
+
+  test('an invalid PR is a tool error and writes nothing', () => {
+    const { id } = addTask();
+    const resp = handleUpdate(store, { id, prs: [{ ...pr, url: 'ftp://example.com/pr/7' }] });
+    assert.equal(resp.isError, true);
+    assert.match(String(decode(resp)['error']), /must be http\(s\)/);
+    assert.equal(store.getById(id)?.prs, undefined);
+  });
+
+  test('prsSchema rejects an unknown status and a non-positive number', () => {
+    assert.equal(prsSchema.safeParse([{ ...pr, status: 'declined' }]).success, false);
+    assert.equal(prsSchema.safeParse([{ ...pr, number: 0 }]).success, false);
+    assert.equal(prsSchema.safeParse([pr]).success, true);
+  });
+});
+
 describe('project binding', () => {
   test('list handlers use the bound project', async () => {
     store.createProject('example-project');
@@ -1342,6 +1377,13 @@ describe('project binding', () => {
     const out = decode(await handleGetProjects(store, CTX)) as { boundProject: string; projects: { name: string }[] };
     assert.equal(out.boundProject, 'default');
     assert.deepEqual(out.projects.map((p) => p.name), ['default', 'example-project']);
+  });
+
+  test('updateProject toggles trackPrs and getProjects reports it', async () => {
+    assert.deepEqual(decode(handleUpdateProject(store, { project: 'DEFAULT', trackPrs: true })), { success: true, project: { name: 'default', trackPrs: true } });
+    const out = decode(await handleGetProjects(store, CTX)) as { projects: { name: string; trackPrs: boolean }[] };
+    assert.deepEqual(out.projects.map((p) => [p.name, p.trackPrs]), [['default', true]]);
+    assert.equal(handleUpdateProject(store, { project: 'nope', trackPrs: true }).isError, true);
   });
 
   test('health reports the bound project', async () => {

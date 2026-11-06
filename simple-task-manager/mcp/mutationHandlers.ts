@@ -119,6 +119,14 @@ export function handleCreateProject(store: Store, { name }: { name: string }): M
   }
 }
 
+export function handleUpdateProject(store: Store, { project, trackPrs }: { project: string; trackPrs: boolean }): MCPContent {
+  try {
+    return text({ success: true, project: store.updateProject(project, { trackPrs }) });
+  } catch (err) {
+    return errorText({ error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
 export function handleDelete(store: Store, { id }: { id: number }): MCPContent {
   const ok = store.delete(id);
   if (!ok) return notFoundError(id, store, { withAre: true });

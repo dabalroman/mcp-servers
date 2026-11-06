@@ -83,6 +83,7 @@ Summarise the changes, verify result and OCR summary (files reviewed/skipped, fi
 Once the user confirms:
 
 1. Stage and commit in the project's message style. **No `Co-Authored-By` line.** With per-phase commits, this commits only what is left (the last phase or feedback fixes).
+   If the task-manager server instructions say this project tracks PRs and you opened a PR/MR for the task, record it: `mcp__task-manager__update({ id, prs: [...existing, { url, number, status }] })`.
 2. `mcp__task-manager__setStatus(id, 'done')`. If the response carries `epicStatus` (the last child closed its epic), tell the user.
 3. If the task has an `epic` (from `getById`), `mcp__task-manager__addNote` on it: `"#NN done, commit <sha>. <anything the next child needs to know>"`.
 4. Back to step 1 (next task's summary, then start).

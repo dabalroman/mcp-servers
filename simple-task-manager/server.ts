@@ -3,7 +3,7 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { resolve } from 'node:path';
 import { VERSION } from './version.js';
 import { createStore } from './tasks.js';
-import { INSTRUCTIONS } from './instructions.js';
+import { buildInstructions } from './instructions.js';
 import { registerTools } from './mcp/registerTools.js';
 import { uiPkgDir, initUiChild, spawnUi, getUiChild, setUiChild } from './mcp/uiChild.js';
 import { checkForUpdate } from './updateCheck.js';
@@ -49,16 +49,17 @@ if (!process.env.TASKS_DB) {
 const resolvedTasksDb = resolve(process.env.TASKS_DB);
 const store = createStore(resolvedTasksDb);
 
-const server = new McpServer(
-  { name: 'simple-task-manager', version: VERSION },
-  { instructions: INSTRUCTIONS, capabilities: { logging: {} } }
-);
-
 // PROJECT_NAME binds this connection to a project; list tools default to it.
+// Resolved before the server exists: the instructions depend on its settings.
 const project = process.env.PROJECT_NAME?.trim() || 'default';
 if (store.adoptDefaultProject(project)) {
   logToClient('info', `[simple-task-manager] Adopted the "default" project as "${project}"`);
 }
+
+const server = new McpServer(
+  { name: 'simple-task-manager', version: VERSION },
+  { instructions: buildInstructions(store.projectTracksPrs(project)), capabilities: { logging: {} } }
+);
 
 registerTools(server, store, { project, transport: 'stdio' });
 

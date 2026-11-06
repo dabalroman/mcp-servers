@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import * as net from 'node:net';
-import { RELATIONS, unknownProjectMessage, staleSchemaMessage, StaleSchemaError, type Relation, type Task, type Store } from '../tasks.js';
+import { RELATIONS, PR_STATUSES, unknownProjectMessage, staleSchemaMessage, StaleSchemaError, type Relation, type Task, type Store } from '../tasks.js';
 
 export type MCPContent = {
   content: { type: 'text'; text: string }[];
@@ -100,4 +100,10 @@ export const projectParam = z.string().min(1).optional()
 export const refsSchema = z.array(z.object({
   id: z.number().int().positive(),
   relation: z.enum(RELATIONS as unknown as [Relation, ...Relation[]]).default('relates to'),
+})).optional();
+
+export const prsSchema = z.array(z.object({
+  url: z.string().url(),
+  number: z.number().int().positive(),
+  status: z.enum(PR_STATUSES),
 })).optional();
