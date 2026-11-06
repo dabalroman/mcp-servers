@@ -33,6 +33,7 @@ const MIGRATION_NAMES = [
   '20261029120000_add-api-key-project',
   '20261106120000_add-task-prs',
   '20261106130000_add-task-prs-number-index',
+  '20261106140000_add-pr-deployed-status',
 ];
 
 let dir: string;
@@ -1301,6 +1302,12 @@ describe('prs', () => {
     assert.deepEqual(store.getById(id)?.prs, [pr(1)]);
     const bare = makeTask().id;
     assert.ok(!('prs' in store.getById(bare)!));
+  });
+
+  test('deployed round-trips through update and getById', () => {
+    const { id } = makeTask({ prs: [pr(1, 'merged')] });
+    assert.deepEqual(store.update(id, { prs: [pr(1, 'deployed')] })?.task.prs, [pr(1, 'deployed')]);
+    assert.deepEqual(store.getById(id)?.prs, [pr(1, 'deployed')]);
   });
 
   test('list reads carry prs', () => {

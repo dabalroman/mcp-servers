@@ -14,6 +14,7 @@ const EPIC_MIGRATION = '20261020120000_add-epic-type-and-parent';
 const EXTERNAL_ID_MIGRATION = '20261027120000_add-external-id';
 const PROJECTS_MIGRATION = '20261027130000_add-projects';
 const TASK_PRS_MIGRATION = '20261106120000_add-task-prs';
+const PR_DEPLOYED_MIGRATION = '20261106140000_add-pr-deployed-status';
 
 let dir: string;
 let dbPath: string;
@@ -435,6 +436,36 @@ describe('add-task-prs-number-index migration', () => {
     assert.match(idx.sql, /ON task_prs\(number\)/);
     const plan = store.db.prepare('EXPLAIN QUERY PLAN SELECT task_id, url FROM task_prs WHERE number = ?').all(1) as { detail: string }[];
     assert.match(plan.map((p) => p.detail).join('\n'), /task_prs_number/);
+    store.close();
+  });
+});
+
+describe('add-pr-deployed-status migration', () => {
+  test('keeps existing rows, accepts deployed, keeps the number index', () => {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    const earlier = loadMigrations().filter((m) => m.name < PR_DEPLOYED_MIGRATION);
+    earlier.forEach((m, i) => {
+      m.up(db);
+      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(i + 1, m.name);
+    });
+    db.pragma(`user_version = ${earlier.length}`);
+    db.prepare("INSERT INTO tasks (title, type, status, priority, project, description) VALUES ('Old', 'bug', 'todo', 'high', 'default', '')").run();
+    db.prepare("INSERT INTO task_prs (task_id, url, number, status, created_at) VALUES (1, 'https://example.com/pr/1', 1, 'merged', '2026-01-01 00:00:00')").run();
+    db.close();
+
+    const store = createStore(dbPath);
+    const sdb = store.db;
+    assert.deepEqual(sdb.prepare('SELECT task_id, url, number, status, created_at FROM task_prs').all(), [
+      { task_id: 1, url: 'https://example.com/pr/1', number: 1, status: 'merged', created_at: '2026-01-01 00:00:00' },
+    ]);
+    const ins = sdb.prepare('INSERT INTO task_prs (task_id, url, number, status) VALUES (?, ?, ?, ?)');
+    ins.run(1, 'https://example.com/pr/2', 2, 'deployed');
+    assert.throws(() => ins.run(1, 'https://example.com/pr/3', 3, 'shipped'), /CHECK constraint failed/);
+    assert.ok(sdb.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'task_prs_number'").get());
+    sdb.prepare('DELETE FROM tasks WHERE id = 1').run();
+    assert.equal((sdb.prepare('SELECT COUNT(*) AS n FROM task_prs').get() as { n: number }).n, 0);
     store.close();
   });
 });

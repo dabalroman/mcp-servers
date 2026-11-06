@@ -49,6 +49,7 @@ export const PR_STATUS_CLASSES: Record<PrStatus, string> = {
   draft:  'border-dashed border-border text-muted-foreground',
   open:   'border-primary text-primary',
   merged: 'border-border text-muted-foreground',
+  deployed: 'border-border text-muted-foreground',
   closed: 'border-border text-muted-foreground/60 line-through',
 };
 

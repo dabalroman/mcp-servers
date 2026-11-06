@@ -2,7 +2,7 @@ import { useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
-import { Check, ChevronDown, ChevronRight, ChevronUp, FileText } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ChevronUp, FileText, Rocket } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
@@ -74,6 +74,7 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
     >
       PR #{pr.number}
       {pr.status === 'merged' && <Check className="w-3 h-3" strokeWidth={1.5} />}
+      {pr.status === 'deployed' && <Rocket className="w-3 h-3" strokeWidth={1.5} />}
     </a>
   ));
 

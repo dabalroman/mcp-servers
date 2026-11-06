@@ -32,7 +32,7 @@ export type Note = {
 
 export type Project = { name: string; total: number; open: number; trackPrs: boolean };
 
-export type PrStatus = 'draft' | 'open' | 'closed' | 'merged';
+export type PrStatus = 'draft' | 'open' | 'closed' | 'merged' | 'deployed';
 
 export type PullRequest = {
   url: string;

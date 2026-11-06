@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { sortByPriority, TYPES, TYPE_ORDER, TYPE_LABELS, STATUS_LABELS, STATUS_CLASSES, STATUS_NEXT } from './constants';
+import { sortByPriority, TYPES, TYPE_ORDER, TYPE_LABELS, STATUS_LABELS, STATUS_CLASSES, STATUS_NEXT, PR_STATUS_CLASSES } from './constants';
+import { PR_STATUSES } from '../../../tasks.js';
 import type { Task } from '@/types/task';
 
 function task(id: number, priority: Task['priority']): Task {
@@ -70,5 +71,11 @@ describe('epic type', () => {
     expect(TYPE_LABELS.epic).toBe('EPIC');
     expect(TYPES[TYPES.length - 1]).toBe('epic');
     expect(TYPE_ORDER[TYPE_ORDER.length - 1]).toBe('epic');
+  });
+});
+
+describe('PR_STATUS_CLASSES', () => {
+  it('covers every PR status the store accepts', () => {
+    expect(Object.keys(PR_STATUS_CLASSES).sort()).toEqual([...PR_STATUSES].sort());
   });
 });

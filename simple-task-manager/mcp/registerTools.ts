@@ -60,7 +60,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     externalId: z.string().optional()
       .describe('External tracker ticket ID (JIRA/Asana/…, e.g. "OPXPIQ-6532"). Set it whenever the user names a ticket ID for this task. Find tasks by it later with getByExternalId.'),
     prs: prsSchema
-      .describe('Pull/merge requests of this task: { url, number, status: draft|open|closed|merged }, url http(s) and unique per task. Works in every project, whether or not it tracks PRs.'),
+      .describe('Pull/merge requests of this task: { url, number, status: draft|open|closed|merged|deployed }, url http(s) and unique per task. Works in every project, whether or not it tracks PRs.'),
     project: projectParam,
   };
   server.tool(
@@ -143,7 +143,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     refs: refsSchema.nullable()
       .describe('Full replacement list of related-task references, or null / empty array to clear all. Each entry: { id, relation? }, relation one of the canonical values (default "relates to"). The inverse is written automatically — specify one side only. Replaces the existing list entirely — include every ref you want to keep. Nonexistent ids and self-references are silently dropped; a newly added task from another project is rejected.'),
     prs: prsSchema.nullable()
-      .describe('Full replacement list of the task\'s pull/merge requests ({ url, number, status: draft|open|closed|merged }), or null / empty array to clear. Include every PR you want to keep; to change a status, resend the list with the new status. Works in every project, whether or not it tracks PRs.'),
+      .describe('Full replacement list of the task\'s pull/merge requests ({ url, number, status: draft|open|closed|merged|deployed }), or null / empty array to clear. Include every PR you want to keep; to change a status, resend the list with the new status. Works in every project, whether or not it tracks PRs.'),
     parentId: z.number().int().positive().nullable().optional()
       .describe(`${PARENT_ID_RULE} Pass null to detach the task from its epic.`),
     project: z.string().min(1).optional()
