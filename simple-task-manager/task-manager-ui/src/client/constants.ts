@@ -42,7 +42,16 @@ export const STATUS_CLASSES: Record<TaskStatus, string> = {
   plan:        'border-violet-400/60 text-violet-400',
   todo:        'border-border text-muted-foreground',
   in_progress: 'border-primary text-primary',
-  done:        'border-muted-foreground/30 text-muted-foreground/50',
+  done:        'border-success/60 text-success',
+};
+
+// Text-only status colour for the id inside a ref pill; the pill itself stays neutral.
+export const REF_STATUS_CLASSES: Record<TaskStatus, string> = {
+  refinement:  'text-warning/80',
+  plan:        'text-violet-400/80',
+  todo:        'text-muted-foreground',
+  in_progress: 'text-primary/80',
+  done:        'text-success/80',
 };
 
 export const PR_STATUS_CLASSES: Record<PrStatus, string> = {

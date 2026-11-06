@@ -6,7 +6,7 @@ import { Check, ChevronDown, ChevronRight, ChevronUp, FileText, Rocket } from 'l
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { TYPE_LABELS, PRIORITY_CLASSES, PR_STATUS_CLASSES, STATUS_CLASSES } from './constants';
+import { TYPE_LABELS, PRIORITY_CLASSES, PR_STATUS_CLASSES, REF_STATUS_CLASSES, STATUS_CLASSES, STATUS_LABELS } from './constants';
 import { StatusPicker } from './StatusPicker';
 import type { EpicProgress } from '@/lib/taskView';
 import type { Note, Task, TaskStatus } from '@/types/task';
@@ -42,6 +42,7 @@ export type TaskCardProps = {
   onEdit: (task: Task) => void;
   onAddChild?: (epic: Task) => void;
   onRefClick?: (id: number) => void;
+  refTargets?: Map<number, { title: string; status: TaskStatus }>;
   highlighted?: boolean;
   showReopen?: boolean;
   progress?: EpicProgress;
@@ -51,7 +52,7 @@ export type TaskCardProps = {
   sticky?: boolean;
 };
 
-export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highlighted = false, showReopen = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false }: TaskCardProps) {
+export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, refTargets, highlighted = false, showReopen = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false }: TaskCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [planOpen, setPlanOpen] = useState(false);
   const hasSummary = Boolean(task.summary);
@@ -59,6 +60,8 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
   const noteCount = task.noteCount ?? notes.length;
 
   const externalIdClass = 'text-xs tracking-widest border border-border px-2 py-1 truncate text-muted-foreground';
+  const notesPillClass = 'text-xs tracking-widest uppercase border border-border px-2 py-1 shrink-0 text-muted-foreground';
+  const notesLabel = `${noteCount} ${noteCount === 1 ? 'note' : 'notes'}`;
 
   const prTags = task.prs?.map((pr) => (
     <a
@@ -142,6 +145,17 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
                 <StatusPicker value={task.status} options={STATUSES} onChange={(st) => onStatus(task.id, st)} className="border-l-0" />
               )}
             </div>
+            {noteCount > 0 && (hasSummary ? (
+              <button
+                type="button"
+                onClick={() => setExpanded(true)}
+                className={cn(notesPillClass, 'cursor-pointer hover:border-primary/60 hover:text-foreground transition-colors')}
+              >
+                {notesLabel}
+              </button>
+            ) : (
+              <span className={notesPillClass}>{notesLabel}</span>
+            ))}
             {task.externalId && (
               <span title={task.externalId} className={cn(externalIdClass, 'min-w-0 max-w-48')}>{task.externalId}</span>
             )}
@@ -241,30 +255,6 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
             }
             <span>{expanded ? 'Hide details' : 'Show details'}</span>
           </button>
-          {!expanded && noteCount > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              <span className="text-xs tracking-widest uppercase border border-border px-2 py-1 text-muted-foreground">
-                {noteCount} {noteCount === 1 ? 'note' : 'notes'}
-              </span>
-            </div>
-          )}
-          {task.refs && task.refs.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {task.refs.map((ref) => (
-                <button
-                  key={ref.id}
-                  type="button"
-                  onClick={() => onRefClick?.(ref.id)}
-                  className={cn(
-                    'text-xs tracking-widest border border-border px-2 py-1 text-muted-foreground transition-colors',
-                    onRefClick && 'hover:border-primary/60 hover:text-foreground cursor-pointer',
-                  )}
-                >
-                  #{ref.id}<span className="text-muted-foreground/50 ml-1 normal-case tracking-normal">{ref.relation}</span>
-                </button>
-              ))}
-            </div>
-          )}
         </div>
       ) : (
         <div className="px-3 pb-2">
@@ -276,28 +266,32 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, highl
             <span className="text-sm text-muted-foreground/40 italic">No description.</span>
           )}
           {notes.length > 0 && <NotesSection notes={notes} />}
-          {task.refs && task.refs.length > 0 && (
-            <div className="flex flex-wrap gap-2 mt-2">
-              {task.refs.map((ref) => (
+        </div>
+      )}
+
+      <div className="flex items-end gap-6 px-3 pb-3 border-t border-border/50 pt-2">
+        {task.refs && task.refs.length > 0 && (
+          <div className="flex-1 min-w-0 flex flex-wrap gap-2">
+            {task.refs.map((ref) => {
+              const target = refTargets?.get(ref.id);
+              return (
                 <button
                   key={ref.id}
                   type="button"
                   onClick={() => onRefClick?.(ref.id)}
+                  title={target && `${STATUS_LABELS[target.status]} | ${target.title}`}
                   className={cn(
                     'text-xs tracking-widest border border-border px-2 py-1 text-muted-foreground transition-colors',
                     onRefClick && 'hover:border-primary/60 hover:text-foreground cursor-pointer',
                   )}
                 >
-                  #{ref.id}<span className="text-muted-foreground/50 ml-1 normal-case tracking-normal">{ref.relation}</span>
+                  <span className={REF_STATUS_CLASSES[target?.status ?? 'todo']}>#{ref.id}</span><span className="text-muted-foreground/50 ml-1 normal-case tracking-normal">{ref.relation}</span>
                 </button>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="flex items-center gap-2 px-3 pb-3 border-t border-border/50 pt-2">
-        <div className="ml-auto flex gap-2">
+              );
+            })}
+          </div>
+        )}
+        <div className="ml-auto flex gap-2 shrink-0">
           {onAddChild && task.type === 'epic' && task.status !== 'done' && (
             <Button size="sm" variant="outline" onClick={() => onAddChild(task)}>
               + Task

@@ -202,6 +202,7 @@ export default function TaskManager() {
   const counts: Record<Tab, number> = { active: active.length, done: done.length };
 
   const progress = epicProgress([...allActive, ...allDone]);
+  const refTargets = new Map([...allActive, ...allDone].map((t) => [t.id, { title: t.title, status: t.status }]));
 
   function renderCards(list: Task[], showReopen: boolean) {
     const { roots, childrenByEpic } = nestEpicChildren(list);
@@ -217,6 +218,7 @@ export default function TaskManager() {
             onEdit={openEdit}
             onAddChild={openAddChild}
             onRefClick={navigateToRef}
+            refTargets={refTargets}
             highlighted={highlightedId === task.id}
             showReopen={showReopen}
             progress={task.type === 'epic' ? progress.get(task.id) : undefined}
@@ -231,6 +233,7 @@ export default function TaskManager() {
                 onStatus={handleStatus}
                 onEdit={openEdit}
                 onRefClick={navigateToRef}
+                refTargets={refTargets}
                 highlighted={highlightedId === child.id}
                 showReopen={showReopen}
                 nested
