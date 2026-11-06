@@ -249,6 +249,57 @@ function runMigrations(db: DB): Set<string> {
   return knownNames;
 }
 
+// ── Schema ────────────────────────────────────────────────────────────────────
+// Current shape after every migration in ./migrations/ (last: 20261106120000_add-task-prs).
+// Hand-kept: update it in the same commit as any migration. Timestamps are TEXT
+// datetime('now') (UTC), booleans INTEGER 0/1. Behaviour: docs/claude/storage-and-migrations.md.
+//
+// tasks — one row per task, epics included
+//   id INTEGER PK AUTOINCREMENT; title TEXT NOT NULL
+//   type TEXT NOT NULL CHECK IN (bug, feature, idea, tool, other, epic)
+//   status TEXT NOT NULL CHECK IN (refinement, plan, todo, in_progress, done)
+//   priority TEXT NOT NULL CHECK IN (low, medium, high, critical)
+//   scope, summary, description, plan, external_id TEXT NULL
+//   parent_id INTEGER NULL FK tasks(id) ON DELETE SET NULL — the task's epic
+//   project TEXT NOT NULL COLLATE NOCASE FK projects(name) ON UPDATE CASCADE — no default, on purpose
+//   created_at, updated_at TEXT NOT NULL DEFAULT now
+//   indexes: status, type, scope, project, parent_id, lower(external_id)
+//   widening a CHECK needs a table rebuild (see 20260519010000_add-plan-status)
+//
+// refs — task links; a canonical ref is stored on both sides (A→B + its inverse B→A)
+//   from_id, to_id INTEGER NOT NULL FK tasks(id) ON DELETE CASCADE; PK (from_id, to_id)
+//   relation TEXT NOT NULL — no CHECK, validated against RELATIONS by zod
+//   non_canonical INTEGER NOT NULL DEFAULT 0 — 1 = not mirrored, no inverse row kept
+//   index: to_id
+//
+// notes — a task's notes, read oldest first
+//   id INTEGER PK AUTOINCREMENT; task_id INTEGER NOT NULL FK tasks(id) ON DELETE CASCADE
+//   body TEXT NOT NULL; created_at, updated_at TEXT NOT NULL DEFAULT now
+//   index: task_id
+//
+// task_prs — a task's pull requests (#516), listed by created_at
+//   task_id INTEGER NOT NULL FK tasks(id) ON DELETE CASCADE; url TEXT NOT NULL; PK (task_id, url)
+//   number INTEGER NOT NULL CHECK > 0
+//   status TEXT NOT NULL CHECK IN (draft, open, closed, merged)
+//   created_at, updated_at TEXT NOT NULL DEFAULT now
+//
+// projects
+//   name TEXT PK COLLATE NOCASE; created_at TEXT NOT NULL DEFAULT now
+//   track_prs INTEGER NOT NULL DEFAULT 0 — only decides whether agents are told to record PRs
+//
+// api_keys — HTTP MCP keys (docs/claude/mcp-over-http.md)
+//   id INTEGER PK AUTOINCREMENT; label TEXT NOT NULL
+//   hash TEXT NOT NULL UNIQUE — SHA-256 of the key; the plaintext is never stored
+//   created_at TEXT NOT NULL DEFAULT now; last_used_at, revoked_at TEXT NULL (revoked_at set = revoked)
+//   project TEXT NULL FK projects(name), no ON UPDATE/DELETE action; NULL for keys before 20261029120000
+//
+// schema_migrations — the migration gate
+//   version INTEGER PK — 1-based ordinal, backward compat only; name TEXT NOT NULL — authoritative key
+//   applied_at TEXT NOT NULL DEFAULT now
+//
+// sqlite_sequence (SQLite-internal) — AUTOINCREMENT high-water marks; a tasks rebuild must
+//   restore its row or deleted ids get reused.
+
 // ── Row mapping ───────────────────────────────────────────────────────────────
 type TaskRow = {
   id: number;

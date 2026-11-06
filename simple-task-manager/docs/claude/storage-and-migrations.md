@@ -1,6 +1,6 @@
 # Storage and migrations
 
-Read before touching `tasks.ts`, `migrations/`, a schema change, or a `Store` method. Tables, columns and indexes are in `migrations/`; this file holds only what the code doesn't say.
+Read before touching `tasks.ts`, `migrations/`, a schema change, or a `Store` method. The current tables, columns and indexes are in the `// ── Schema` block of `tasks.ts`; this file holds the store's behaviour and invariants.
 
 ## Store
 
@@ -31,7 +31,8 @@ Tasks live in a single SQLite database; the path comes from the `TASKS_DB` env v
 1. New file `migrations/YYYYMMDDHHMMSS_kebab-slug.ts`.
 2. `export const name = 'YYYYMMDDHHMMSS_kebab-slug'` — must match the filename stem exactly (the runner enforces this).
 3. `export function up(db: Database): void` with forward-only SQL.
-4. Run `npm run verify` in both `simple-task-manager` and `task-manager-ui` before committing.
+4. Update the `// ── Schema` block in `tasks.ts` to the new shape in the same commit.
+5. Run `npm run verify` in both `simple-task-manager` and `task-manager-ui` before committing.
 
 Never squash or delete applied migrations: the downgrade guard rejects a DB whose applied names are missing on disk.
 
