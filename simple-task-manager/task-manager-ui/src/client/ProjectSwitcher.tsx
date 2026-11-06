@@ -15,6 +15,7 @@ interface Props {
   current: string | null;
   onSelect: (id: string) => void;
   onNewProject: () => void;
+  onEditProject: () => void;
 }
 
 const Badge = ({ children }: { children: React.ReactNode }) => (
@@ -23,10 +24,10 @@ const Badge = ({ children }: { children: React.ReactNode }) => (
   </span>
 );
 
-export function ProjectSwitcher({ projects, current, onSelect, onNewProject }: Props) {
+export function ProjectSwitcher({ projects, current, onSelect, onNewProject, onEditProject }: Props) {
   const active = projects.find((p) => p.id === current);
-  // Opening the dialog while the menu is still closing leaves the page pointer-locked; defer it until the menu has closed.
-  const newProjectPending = useRef(false);
+  // Opening a dialog while the menu is still closing leaves the page pointer-locked; defer it until the menu has closed.
+  const pendingDialog = useRef<'new' | 'edit' | null>(null);
   return (
     <>
       {projects.length > 1 && (
@@ -61,10 +62,12 @@ export function ProjectSwitcher({ projects, current, onSelect, onNewProject }: P
             align="start"
             className="w-[var(--radix-dropdown-menu-trigger-width)]"
             onCloseAutoFocus={(e) => {
-              if (!newProjectPending.current) return;
-              newProjectPending.current = false;
+              const pending = pendingDialog.current;
+              if (!pending) return;
+              pendingDialog.current = null;
               e.preventDefault();
-              onNewProject();
+              if (pending === 'new') onNewProject();
+              else onEditProject();
             }}
           >
             {projects.map((p) => (
@@ -78,7 +81,8 @@ export function ProjectSwitcher({ projects, current, onSelect, onNewProject }: P
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => { newProjectPending.current = true; }}>+ Project</DropdownMenuItem>
+            {active && <DropdownMenuItem onSelect={() => { pendingDialog.current = 'edit'; }}>Edit project</DropdownMenuItem>}
+            <DropdownMenuItem onSelect={() => { pendingDialog.current = 'new'; }}>+ Project</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>

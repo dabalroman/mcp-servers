@@ -59,12 +59,15 @@ async function dispatchProjects(
   method: string,
   api: TaskApi,
 ): Promise<void> {
+  const projectMatch = pathname.match(/^\/([^/]+)$/);
   let result: unknown;
   try {
     if (method === 'GET' && pathname === '/') {
       result = api.projects();
     } else if (method === 'POST' && pathname === '/') {
       result = await api.createProject(req.body as { name?: unknown });
+    } else if (method === 'PATCH' && projectMatch) {
+      result = await api.updateProject(decodeURIComponent(projectMatch[1]!), req.body as { name?: unknown; trackPrs?: unknown });
     } else {
       if (next) return next();
       res.statusCode = 404;

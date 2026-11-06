@@ -106,7 +106,8 @@ Claude calls the tools itself: `add`, `update`, `setStatus`, `getNext`, `getAll`
 ## Web UI
 
 A small Express + React app that shows the tasks Claude sees and pushes changes live. You can add,
-edit, re-prioritise, link and delete tasks, and switch projects from a tab strip (a dropdown menu on phones); the URL
+edit, re-prioritise, link and delete tasks, switch projects from a tab strip (a dropdown menu on phones), and
+rename a project or turn on its PR tracking from **Edit project**; the URL
 (`http://<host>:7374/<project>`) opens a project directly. The UI and `health` both say when a
 newer version is published. Epic cards and scope headers have quick-add buttons that pre-fill
 the project, epic and scope.

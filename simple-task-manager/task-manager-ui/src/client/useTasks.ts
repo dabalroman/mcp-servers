@@ -160,10 +160,19 @@ export function useTasks() {
     return json.id;
   }, []);
 
+  const updateProject = useCallback(async (id: string, settings: { name?: string; trackPrs?: boolean }) => {
+    const res = await fetch(`/api/projects/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(settings),
+    });
+    if (!res.ok) throw await httpError(res);
+  }, []);
+
   const remove = useCallback(async (id: number) => {
     const res = await fetch(`/api/tasks/${id}`, { method: 'DELETE' });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }, []);
 
-  return { data, loading, error, refresh, add, update, remove, createProject };
+  return { data, loading, error, refresh, add, update, remove, createProject, updateProject };
 }

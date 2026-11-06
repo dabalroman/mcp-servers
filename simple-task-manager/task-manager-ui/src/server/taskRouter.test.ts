@@ -92,6 +92,22 @@ describe('/api/projects', () => {
     const list = await request(app).get('/api/projects/');
     expect(list.body.map((p: { id: string }) => p.id)).toEqual(['default', 'example-project']);
   });
+
+  it('PATCH /:id renames and toggles trackPrs, keeping the id', async () => {
+    await request(app).post('/api/projects/').send({ name: 'example-project' });
+    const res = await request(app).patch('/api/projects/example-project').send({ name: 'Example Project', trackPrs: true });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ id: 'example-project', name: 'Example Project', trackPrs: true });
+    const list = await request(app).get('/api/projects/');
+    expect(list.body.find((p: { id: string }) => p.id === 'example-project')).toMatchObject({ name: 'Example Project', trackPrs: true });
+  });
+
+  it('PATCH /:id is a 400 for a duplicate name, an empty patch or an unknown id', async () => {
+    await request(app).post('/api/projects/').send({ name: 'example-project' });
+    expect((await request(app).patch('/api/projects/example-project').send({ name: 'DEFAULT' })).status).toBe(400);
+    expect((await request(app).patch('/api/projects/example-project').send({})).status).toBe(400);
+    expect((await request(app).patch('/api/projects/nope').send({ name: 'Nope' })).status).toBe(400);
+  });
 });
 
 describe('DB migrated past this build mid-session', () => {

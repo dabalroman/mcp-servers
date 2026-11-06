@@ -454,7 +454,7 @@ export type Store = {
   getAll(project: string, filter?: ListFilter): Task[];
   getProjects(): ProjectEntry[];
   createProject(name: string): { id: string; name: string };
-  updateProject(id: string, settings: { trackPrs: boolean }): { id: string; name: string; trackPrs: boolean };
+  updateProject(id: string, settings: ProjectSettings): { id: string; name: string; trackPrs: boolean };
   projectTracksPrs(id: string): boolean;
   hasProject(id: string): boolean;
   adoptDefaultProject(id: string): boolean;
@@ -472,6 +472,8 @@ export type Store = {
 export type SchemaStatus = { last: { name: string; appliedAt: string } | null; unknown: string[] };
 
 export const PROJECT_NAME_MAX = 64;
+
+export type ProjectSettings = { name?: string; trackPrs?: boolean };
 
 export type ApiKey = { id: number; label: string; project: string | null; createdAt: string; lastUsedAt: string | null; revokedAt: string | null };
 export type VerifiedKey = { id: number; project: string | null };
@@ -606,6 +608,8 @@ export function createStore(dbPath: string): Store {
   const stmtSelectProject   = db.prepare('SELECT id, name FROM projects WHERE id = ?');
   const stmtProjectTrackPrs = db.prepare('SELECT track_prs FROM projects WHERE id = ?');
   const stmtSetTrackPrs     = db.prepare('UPDATE projects SET track_prs = ? WHERE id = ?');
+  const stmtSetProjectName  = db.prepare('UPDATE projects SET name = ? WHERE id = ?');
+  const stmtProjectNamedAs  = db.prepare('SELECT id, name FROM projects WHERE name = ? AND id != ?');
   const stmtPrsFor          = db.prepare('SELECT url, number, status FROM task_prs WHERE task_id = ? ORDER BY created_at, rowid');
   const stmtPrCreatedAt     = db.prepare('SELECT url, created_at FROM task_prs WHERE task_id = ?');
   const stmtDeletePrsFor    = db.prepare('DELETE FROM task_prs WHERE task_id = ?');
@@ -1160,12 +1164,29 @@ export function createStore(dbPath: string): Store {
     return row?.track_prs === 1;
   }
 
-  function updateProject(id: string, settings: { trackPrs: boolean }): { id: string; name: string; trackPrs: boolean } {
+  // Only the display name changes; the id (and everything bound to it) stays.
+  function updateProject(id: string, settings: ProjectSettings): { id: string; name: string; trackPrs: boolean } {
     assertSchemaCurrent();
-    const canonical = canonicalProject(id);
-    stmtSetTrackPrs.run(settings.trackPrs ? 1 : 0, canonical);
-    const { name } = stmtSelectProject.get(canonical) as { name: string };
-    return { id: canonical, name, trackPrs: settings.trackPrs };
+    if (settings.name === undefined && settings.trackPrs === undefined) {
+      throw new Error('Validation failed: pass name or trackPrs to change.');
+    }
+    return db.transaction(() => {
+      const canonical = canonicalProject(id);
+      if (settings.name !== undefined) {
+        const name = validProjectName(settings.name);
+        assertNameFree(name, canonical);
+        stmtSetProjectName.run(name, canonical);
+      }
+      if (settings.trackPrs !== undefined) stmtSetTrackPrs.run(settings.trackPrs ? 1 : 0, canonical);
+      const { name } = stmtSelectProject.get(canonical) as { name: string };
+      return { id: canonical, name, trackPrs: projectTracksPrs(canonical) };
+    }).immediate();
+  }
+
+  // name is COLLATE NOCASE, so the lookup is case-insensitive.
+  function assertNameFree(name: string, exceptId: string): void {
+    const taken = stmtProjectNamedAs.get(name, exceptId) as { id: string; name: string } | undefined;
+    if (taken) throw new Error(`Validation failed: project "${taken.id}" is already named "${taken.name}".`);
   }
 
   function hasProject(id: string): boolean {
@@ -1179,6 +1200,7 @@ export function createStore(dbPath: string): Store {
     const id = slugifyProjectId(trimmed);
     const existing = stmtSelectProject.get(id) as { id: string; name: string } | undefined;
     if (existing) throw new Error(`Validation failed: id "${id}" is already taken by project "${existing.name}".`);
+    assertNameFree(trimmed, id);
     db.prepare('INSERT INTO projects (id, name) VALUES (?, ?)').run(id, trimmed);
     return { id, name: trimmed };
   }

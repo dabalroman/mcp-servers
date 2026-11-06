@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createTaskStore, type AddInput, type UpdatePatch } from './taskStore.js';
+import { createTaskStore, type AddInput, type ProjectSettings, type UpdatePatch } from './taskStore.js';
 import type { TaskStatus } from '@/types/task';
 
 export type TaskApiOptions = { dbPath: string };
@@ -76,6 +76,16 @@ export function createTaskApi({ dbPath }: TaskApiOptions) {
 
     async createProject(body: { name?: unknown }) {
       const project = await store.createProject(String(body?.name ?? ''));
+      broadcast();
+      return project;
+    },
+
+    // Ignores anything but a string name and a boolean trackPrs.
+    async updateProject(id: string, body: { name?: unknown; trackPrs?: unknown }) {
+      const settings: ProjectSettings = {};
+      if (typeof body?.name === 'string') settings.name = body.name;
+      if (typeof body?.trackPrs === 'boolean') settings.trackPrs = body.trackPrs;
+      const project = await store.updateProject(id, settings);
       broadcast();
       return project;
     },

@@ -45,10 +45,10 @@ function failureReason(err: unknown): string {
 const EPIC_RAIL = 'relative ml-2 pl-5 before:absolute before:left-0 before:-top-2 before:bottom-0 before:border-l before:border-primary/40 after:absolute after:left-0 after:top-6 after:w-4 after:border-t after:border-primary/40 last:before:bottom-auto last:before:h-8';
 
 export default function TaskManager() {
-  const { data, loading, error, add, update, remove, createProject } = useTasks();
+  const { data, loading, error, add, update, remove, createProject, updateProject } = useTasks();
   const [tab, setTab] = useState<Tab>('active');
   const [formOpen, setFormOpen] = useState(false);
-  const [projectDialogOpen, setProjectDialogOpen] = useState(false);
+  const [projectDialog, setProjectDialog] = useState<'new' | 'edit' | null>(null);
   const [editing, setEditing] = useState<Task | null>(null);
   const [prefill, setPrefill] = useState<TaskPrefill | undefined>(undefined);
   const [view, setView] = useState<ViewState>(loadViewState);
@@ -56,6 +56,7 @@ export default function TaskManager() {
 
   const { active: allActive, done: allDone, projects } = data;
   const project = pickProject(projects.map((p) => p.id), rememberedProject);
+  const currentProject = projects.find((p) => p.id === project);
   const active = project === null ? [] : filterByProject(allActive, project);
   const done = project === null ? [] : filterByProject(allDone, project);
 
@@ -122,7 +123,18 @@ export default function TaskManager() {
     openAdd({ project: epic.project, parentId: epic.id, scope: epic.scope ?? '' });
   }
 
-  async function handleCreateProject(name: string): Promise<boolean> {
+  async function handleEditProject(settings: { name: string; trackPrs: boolean }): Promise<boolean> {
+    if (!currentProject) return false;
+    try {
+      await updateProject(currentProject.id, settings);
+      return true;
+    } catch (err) {
+      toast.error(`Failed to save project.${failureReason(err)}`);
+      return false;
+    }
+  }
+
+  async function handleCreateProject({ name }: { name: string }): Promise<boolean> {
     try {
       selectProject(await createProject(name));
       return true;
@@ -320,7 +332,8 @@ export default function TaskManager() {
         projects={projects}
         current={project}
         onSelect={selectProject}
-        onNewProject={() => setProjectDialogOpen(true)}
+        onNewProject={() => setProjectDialog('new')}
+        onEditProject={() => setProjectDialog('edit')}
       />
 
       <div className="flex items-center justify-between border-b border-border">
@@ -344,7 +357,8 @@ export default function TaskManager() {
           ))}
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialogOpen(true)}>+ Project</Button>
+          <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialog('edit')} disabled={!currentProject}>Edit project</Button>
+          <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialog('new')}>+ Project</Button>
           <Button size="sm" onClick={() => openAdd()} disabled={project === null}>+ New</Button>
         </div>
       </div>
@@ -368,10 +382,11 @@ export default function TaskManager() {
       />
 
       <ProjectDialog
-        key={String(projectDialogOpen)}
-        open={projectDialogOpen}
-        onOpenChange={setProjectDialogOpen}
-        onSubmit={handleCreateProject}
+        key={projectDialog ?? 'closed'}
+        open={projectDialog !== null}
+        onOpenChange={(open) => { if (!open) setProjectDialog(null); }}
+        initial={projectDialog === 'edit' ? currentProject : undefined}
+        onSubmit={projectDialog === 'edit' ? handleEditProject : handleCreateProject}
       />
     </div>
   );

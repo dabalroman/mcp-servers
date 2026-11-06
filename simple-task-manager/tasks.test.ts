@@ -1377,6 +1377,50 @@ describe('project PR tracking', () => {
   });
 });
 
+describe('project rename', () => {
+  test('changes only the display name; the id and its tasks stay', () => {
+    store.createProject('example-project');
+    store.add({ type: 'feature', priority: 'low', title: 'Do a thing', project: 'example-project' });
+    assert.deepEqual(store.updateProject('Example-Project', { name: '  Example Project  ' }), { id: 'example-project', name: 'Example Project', trackPrs: false });
+    const entry = store.getProjects().find((p) => p.id === 'example-project');
+    assert.equal(entry?.name, 'Example Project');
+    assert.equal(entry?.total, 1);
+  });
+
+  test('can set the name and trackPrs together, or either alone', () => {
+    store.createProject('example-project');
+    assert.deepEqual(store.updateProject('example-project', { name: 'Example', trackPrs: true }), { id: 'example-project', name: 'Example', trackPrs: true });
+    assert.deepEqual(store.updateProject('example-project', { trackPrs: false }), { id: 'example-project', name: 'Example', trackPrs: false });
+  });
+
+  test('may change the case of its own name', () => {
+    store.createProject('example-project');
+    assert.equal(store.updateProject('example-project', { name: 'EXAMPLE-PROJECT' }).name, 'EXAMPLE-PROJECT');
+  });
+
+  test('rejects a name another project already has, case-insensitively', () => {
+    store.createProject('example-project');
+    store.createProject('other-project');
+    assert.throws(() => store.updateProject('other-project', { name: 'Example-Project' }), /project "example-project" is already named "example-project"/);
+    assert.equal(store.getProjects().find((p) => p.id === 'other-project')?.name, 'other-project');
+  });
+
+  test('rejects an empty or too-long name, an empty patch and an unknown project', () => {
+    store.createProject('example-project');
+    assert.throws(() => store.updateProject('example-project', { name: '   ' }), /1–64 characters/);
+    assert.throws(() => store.updateProject('example-project', { name: 'x'.repeat(65) }), /1–64 characters/);
+    assert.throws(() => store.updateProject('example-project', {}), /pass name or trackPrs/);
+    assert.throws(() => store.updateProject('nope', { name: 'Nope' }), /does not exist/);
+  });
+
+  test('createProject rejects a name another project already has', () => {
+    store.createProject('example-project');
+    store.updateProject('example-project', { name: 'Shared Name' });
+    assert.throws(() => store.createProject('shared NAME'), /project "example-project" is already named "Shared Name"/);
+    assert.equal(store.getProjects().some((p) => p.id === 'shared-name'), false);
+  });
+});
+
 describe('projects', () => {
   test('a fresh DB has only the default project', () => {
     assert.deepEqual(store.getProjects(), [{ id: 'default', name: 'default', total: 0, open: 0, trackPrs: false }]);
