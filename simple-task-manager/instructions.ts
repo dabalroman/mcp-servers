@@ -1,5 +1,5 @@
 const PR_RULE = `
-- This project tracks PRs: when you open a PR/MR for a task, record it in prs on update(); update its status whenever you see it change (e.g. gh pr view).`;
+- This project tracks PRs: when you open a PR/MR for a task, record it in prs on update(); update its status whenever you see it change (e.g. gh pr view). On a PR event or a PR url/number the user names, call getByPr to find its tasks.`;
 
 // Built per session from the bound project: the PR rule reaches only projects
 // with track_prs on, so other workflows never hear about PRs.

@@ -17,7 +17,7 @@ Read before touching project binding, project-aware handlers, `PROJECT_NAME`, or
 - Server instructions are per session: `buildInstructions(store.projectTracksPrs(project))` at McpServer construction (`server.ts` resolves and adopts the project *before* building the server; `mcp/http.ts` per request). Clients read them once at `initialize`, so a `trackPrs` change applies from the next session. Both variants must fit the 4,096-char cap (`server.test.ts`).
 - `ctx.transport === 'http'` skips `ui-start`/`ui-stop`, makes health collapse Config/Plugin into one `–` line (process.env is the UI server's, not the client's), and points the unknown-project hint at the header.
 - Project-aware handlers (`getNext`, `getAll`, `getScopes`, `getOverview`, `add`) call `resolveProject(store, ctx, args.project)` in `mcp/shared.ts`, which returns the name or an `errorText`.
-- Global on purpose (IDs are global): `getById`, `getRelated`, `getByExternalId` (a ticket ID is an identifier lookup), `setStatus`, `delete`, notes, refs, epic links, and `load()`/`loadWithNotes()`. Reads only: new refs and epic links must stay in one project (#499).
+- Global on purpose (IDs are global): `getById`, `getRelated`, `getByExternalId` (a ticket ID is an identifier lookup), `getByPr`, `setStatus`, `delete`, notes, refs, epic links, and `load()`/`loadWithNotes()`. Reads only: new refs and epic links must stay in one project (#499).
 - Only the session-binding note lives in `plugin/RULES.md` (Projects); never-invent and global ids live in the `project` param, `getProjects` and `createProject` descriptions, so plugin-less sessions get them too.
 
 ## UI

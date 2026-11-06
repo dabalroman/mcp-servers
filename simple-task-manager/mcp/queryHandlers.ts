@@ -4,9 +4,10 @@ import { fileURLToPath } from 'node:url';
 import * as http from 'node:http';
 import { networkInterfaces, homedir } from 'node:os';
 import Database from 'better-sqlite3';
-import { text, toListTask, notFoundError, resolveProject, type MCPContent, type SessionContext } from './shared.js';
+import { text, errorText, toListTask, notFoundError, resolveProject, type MCPContent, type SessionContext } from './shared.js';
 import { ALL_TYPES, staleSchemaMessage } from '../tasks.js';
 import { ENV_ORDER, LEGACY_ENV_KEYS, pm2AppName } from '../mcpConfig.js';
+import { resolvePrLookup } from '../prUrl.js';
 import { PACKAGE_DIR } from '../packageDir.js';
 import { checkForUpdate } from '../updateCheck.js';
 import { VERSION } from '../version.js';
@@ -45,6 +46,17 @@ export async function handleGetById(store: Store, { id }: { id: number }): Promi
 
 export async function handleGetByExternalId(store: Store, { externalId }: { externalId: string }): Promise<MCPContent> {
   return text({ externalId, tasks: store.getByExternalId(externalId).map(toListTask) });
+}
+
+export async function handleGetByPr(store: Store, args: { url?: string; repo?: string; number?: number }): Promise<MCPContent> {
+  try {
+    const pr = resolvePrLookup(args);
+    const tasks = store.getByPr(args.url !== undefined ? { url: args.url } : { repo: args.repo, number: args.number })
+      .map(({ task, epic }) => ({ ...toListTask(task), ...(epic ? { epic } : {}) }));
+    return text({ pr, tasks });
+  } catch (err) {
+    return errorText({ error: err instanceof Error ? err.message : String(err) });
+  }
 }
 
 export async function handleGetRelated(store: Store, { id, status }: { id: number; status?: StatusFilter }): Promise<MCPContent> {

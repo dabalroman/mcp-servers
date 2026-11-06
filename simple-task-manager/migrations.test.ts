@@ -428,6 +428,17 @@ describe('add-task-prs migration', () => {
   });
 });
 
+describe('add-task-prs-number-index migration', () => {
+  test('creates task_prs_number and the PR lookup uses it', () => {
+    const store = createStore(dbPath);
+    const idx = store.db.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND name = 'task_prs_number'").get() as { sql: string };
+    assert.match(idx.sql, /ON task_prs\(number\)/);
+    const plan = store.db.prepare('EXPLAIN QUERY PLAN SELECT task_id, url FROM task_prs WHERE number = ?').all(1) as { detail: string }[];
+    assert.match(plan.map((p) => p.detail).join('\n'), /task_prs_number/);
+    store.close();
+  });
+});
+
 describe('pre-migration backup', () => {
   const backups = () => readdirSync(dir).filter((f) => f.startsWith('tasks.db.backup-'));
   const last = loadMigrations().at(-1)!.name;

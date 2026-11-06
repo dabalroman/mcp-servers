@@ -23,6 +23,7 @@ import {
   handleGetAll,
   handleGetById,
   handleGetByExternalId,
+  handleGetByPr,
   handleGetRelated,
   handleGetOverview,
   handleGetScopes,
@@ -1178,6 +1179,33 @@ describe('externalId — MCP layer', () => {
   });
 });
 
+describe('getByPr handler', () => {
+  test('returns the parsed pr and matching tasks, with a slim epic on children', async () => {
+    const epic = addTask({ type: 'epic', title: 'Big' }).id;
+    const { id } = addTask({ parentId: epic, prs: [{ url: 'https://github.com/Acme/Widgets/pull/9', number: 9, status: 'merged' }] });
+    const r = decode(await handleGetByPr(store, { url: 'https://github.com/acme/widgets/pull/9/files' })) as {
+      pr: unknown; tasks: { id: number; prs: unknown[]; epic?: { id: number; title: string }; plan?: string }[];
+    };
+    assert.deepEqual(r.pr, { host: 'github.com', repo: 'acme/widgets', number: 9 });
+    assert.deepEqual(r.tasks.map((t) => t.id), [id]);
+    assert.equal(r.tasks[0]?.prs.length, 1);
+    assert.deepEqual(r.tasks[0]?.epic, { id: epic, title: 'Big', status: 'refinement' });
+    const byRepo = decode(await handleGetByPr(store, { repo: 'Acme/Widgets', number: 9 })) as { pr: unknown; tasks: unknown[] };
+    assert.deepEqual(byRepo.pr, { repo: 'acme/widgets', number: 9 });
+    assert.equal(byRepo.tasks.length, 1);
+  });
+
+  test('no match gives an empty list; bad input is a tool error', async () => {
+    const miss = decode(await handleGetByPr(store, { repo: 'a/b', number: 1 })) as { tasks: unknown[] };
+    assert.deepEqual(miss.tasks, []);
+    for (const args of [{ number: 1 }, { repo: 'a/b' }, { url: 'nope' }]) {
+      const res = await handleGetByPr(store, args);
+      assert.equal(res.isError, true);
+      assert.match(JSON.stringify(decode(res)), /Validation failed/);
+    }
+  });
+});
+
 const PLUGIN_DIR = join(PACKAGE_DIR, 'plugin');
 const RULES = readFileSync(join(PLUGIN_DIR, 'RULES.md'), 'utf8');
 
@@ -1192,6 +1220,7 @@ describe('instructions size limits', () => {
   test('the PR rule appears only when the project tracks PRs', () => {
     assert.doesNotMatch(buildInstructions(false), /PR/);
     assert.match(buildInstructions(true), /This project tracks PRs/);
+    assert.match(buildInstructions(true), /getByPr/);
   });
 
   test('plugin RULES.md fits the 10,000-char SessionStart hook cap', () => {

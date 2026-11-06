@@ -8,6 +8,7 @@ import {
   handleGetAll,
   handleGetById,
   handleGetByExternalId,
+  handleGetByPr,
   handleGetRelated,
   handleGetScopes,
   handleGetProjects,
@@ -213,6 +214,19 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     'Find tasks by external tracker ticket ID — call this first whenever the user asks about a JIRA/Asana/other ticket ID (e.g. "what is the status of OPXPIQ-6532?"). Case-insensitive exact match across all statuses, including done. Returns { externalId, tasks } — an array, since several tasks (e.g. an epic and its children) may share one ID; sorted by id; empty when none match.',
     getByExternalIdSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getByExternalIdSchema>>): Promise<MCPContent> => handleGetByExternalId(store, args))
+  );
+
+  // ── getByPr ───────────────────────────────────────────────────────────────────
+  const getByPrSchema = {
+    url: z.string().min(1).optional().describe('PR/MR url (GitHub .../pull/N or GitLab .../-/merge_requests/N). Suffixes like /files, query and #fragment are ignored.'),
+    repo: z.string().min(1).optional().describe('Repository as owner/name (GitLab: group/subgroup/name), case-insensitive. Use together with number instead of url.'),
+    number: z.coerce.number().int().positive().optional().describe('PR/MR number. Use together with repo instead of url.'),
+  };
+  server.tool(
+    'getByPr',
+    'Find the tasks that track a pull/merge request — call this whenever you handle a PR event or a PR url/number the user names. Pass url, or repo + number. Searches all statuses (done included) and all projects. Returns { pr, tasks } — pr is the parsed { host?, repo, number }; tasks are list entries (with prs) sorted by id, each with a slim epic { id, title, status, summary? } when it belongs to one; empty when none match.',
+    getByPrSchema,
+    withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getByPrSchema>>): Promise<MCPContent> => handleGetByPr(store, args))
   );
 
   // ── getRelated ────────────────────────────────────────────────────────────────

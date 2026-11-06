@@ -32,6 +32,7 @@ const MIGRATION_NAMES = [
   '20261028120000_add-api-keys',
   '20261029120000_add-api-key-project',
   '20261106120000_add-task-prs',
+  '20261106130000_add-task-prs-number-index',
 ];
 
 let dir: string;
@@ -1236,6 +1237,59 @@ describe('externalId', () => {
     makeTask({ externalId: 'X-1' });
     assert.deepEqual(store.getByExternalId('X-2'), []);
     assert.deepEqual(store.getByExternalId('  '), []);
+  });
+});
+
+describe('getByPr', () => {
+  const gh = (repo: string, n: number, suffix = '') => `https://github.com/${repo}/pull/${n}${suffix}`;
+  const prOf = (url: string, n: number, status: PullRequest['status'] = 'open'): PullRequest => ({ url, number: n, status });
+
+  test('finds a done task in another project, any url variant of the same PR', () => {
+    store.createProject('other');
+    const { id } = makeTask({ project: 'other', prs: [prOf(gh('Acme/Widgets', 7), 7, 'merged')] });
+    store.setStatus(id, 'done');
+    for (const input of [
+      { url: gh('acme/widgets', 7) },
+      { url: gh('ACME/WIDGETS', 7, '/files') },
+      { url: gh('acme/widgets', 7, '/') },
+      { url: gh('acme/widgets', 7, '#issuecomment-1') },
+      { repo: 'Acme/Widgets', number: 7 },
+    ]) {
+      assert.deepEqual(store.getByPr(input).map((m) => m.task.id), [id], JSON.stringify(input));
+    }
+    assert.equal(store.getByPr({ repo: 'acme/widgets', number: 7 })[0]?.task.status, 'done');
+    assert.deepEqual(store.getByPr({ repo: 'acme/widgets', number: 7 })[0]?.task.prs, [prOf(gh('Acme/Widgets', 7), 7, 'merged')]);
+  });
+
+  test('same number in another repo or host does not match; several tasks sort by id', () => {
+    const a = makeTask({ prs: [prOf(gh('acme/widgets', 7), 7)] }).id;
+    makeTask({ prs: [prOf(gh('acme/gadgets', 7), 7)] });
+    const c = makeTask({ prs: [prOf(gh('acme/widgets', 7, '/files'), 7)] }).id;
+    makeTask({ prs: [prOf('https://gitlab.example.com/acme/widgets/-/merge_requests/7', 7)] });
+    assert.deepEqual(store.getByPr({ repo: 'acme/widgets', number: 7 }).map((m) => m.task.id).slice(0, 2), [a, c]);
+    assert.deepEqual(store.getByPr({ url: gh('acme/widgets', 7) }).map((m) => m.task.id), [a, c]);
+  });
+
+  test('an epic child carries a slim epic, other tasks do not', () => {
+    const epic = makeTask({ type: 'epic', title: 'Big', summary: 'Sum', description: 'long body' }).id;
+    const child = makeTask({ parentId: epic, prs: [prOf(gh('a/b', 1), 1)] }).id;
+    const loose = makeTask({ prs: [prOf(gh('a/b', 1, '/files'), 1)] }).id;
+    const found = store.getByPr({ url: gh('a/b', 1) });
+    assert.deepEqual(found.map((m) => m.task.id), [child, loose]);
+    assert.deepEqual(found[0]?.epic, { id: epic, title: 'Big', status: 'refinement', summary: 'Sum' });
+    assert.equal(found[1]?.epic, undefined);
+  });
+
+  test('returns [] on no match', () => {
+    makeTask({ prs: [prOf(gh('a/b', 1), 1)] });
+    assert.deepEqual(store.getByPr({ repo: 'a/b', number: 2 }), []);
+    assert.deepEqual(store.getByPr({ repo: 'a/c', number: 1 }), []);
+  });
+
+  test('rejects bad input', () => {
+    for (const input of [{ url: 'nope' }, { number: 1 }, { repo: 'a/b' }, { repo: 'solo', number: 1 }, { repo: 'a/b', number: 0 }]) {
+      assert.throws(() => store.getByPr(input), /^Error: Validation failed: /, JSON.stringify(input));
+    }
   });
 });
 

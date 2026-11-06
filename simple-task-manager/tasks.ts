@@ -7,6 +7,7 @@ import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import type { Database as DB } from 'better-sqlite3';
+import { parsePrUrl, resolvePrLookup } from './prUrl.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -65,6 +66,10 @@ export type EpicContext = {
   description: string;
   notes?: Note[];
 };
+
+export type PrQuery = { url: string } | { repo?: string; number?: number };
+
+export type PrMatch = { task: Task; epic?: { id: number; title: string; status: TaskStatus; summary?: string } };
 
 export type EpicChild = { id: number; title: string; status: TaskStatus; type: TaskType; priority: TaskPriority };
 
@@ -282,6 +287,7 @@ function runMigrations(db: DB): Set<string> {
 //   number INTEGER NOT NULL CHECK > 0
 //   status TEXT NOT NULL CHECK IN (draft, open, closed, merged)
 //   created_at, updated_at TEXT NOT NULL DEFAULT now
+//   index: number (getByPr)
 //
 // projects
 //   name TEXT PK COLLATE NOCASE; created_at TEXT NOT NULL DEFAULT now
@@ -438,6 +444,7 @@ export type Store = {
   delete(id: number): boolean;
   getByStatus(project: string, status: TaskStatus, scope?: string): Task[];
   getByExternalId(externalId: string): Task[];
+  getByPr(input: PrQuery): PrMatch[];
   getNext(project: string, type?: TaskType): Task | null;
   getOverview(project: string, status?: StatusFilter): OverviewEntry[];
   getRelated(id: number, status?: StatusFilter): RelatedResult | null;
@@ -944,6 +951,31 @@ export function createStore(dbPath: string): Store {
     return attachRefs(rows);
   }
 
+  // All statuses and projects: the PR watcher must also find done work. Rows are
+  // picked by the indexed number, the repo/host comparison is done on parsed urls.
+  function getByPr(input: PrQuery): PrMatch[] {
+    const want = resolvePrLookup(input);
+    const prRows = db.prepare('SELECT task_id, url FROM task_prs WHERE number = ?').all(want.number) as { task_id: number; url: string }[];
+    const ids = [...new Set(prRows.filter((r) => {
+      const ref = parsePrUrl(r.url);
+      return ref !== null && ref.repo === want.repo && (want.host === undefined || ref.host === want.host);
+    }).map((r) => r.task_id))];
+    if (ids.length === 0) return [];
+    const rows = db.prepare(`SELECT * FROM tasks WHERE id IN (${ids.map(() => '?').join(', ')}) ORDER BY id`).all(...ids) as TaskRow[];
+    const parentIds = [...new Set(rows.flatMap((r) => (r.parent_id !== null ? [r.parent_id] : [])))];
+    const epics = new Map<number, NonNullable<PrMatch['epic']>>();
+    if (parentIds.length) {
+      const epicRows = db.prepare(
+        `SELECT id, title, status, summary FROM tasks WHERE id IN (${parentIds.map(() => '?').join(', ')})`
+      ).all(...parentIds) as { id: number; title: string; status: TaskStatus; summary: string | null }[];
+      for (const e of epicRows) epics.set(e.id, { id: e.id, title: e.title, status: e.status, ...(e.summary ? { summary: e.summary } : {}) });
+    }
+    return attachRefs(rows).map((task) => {
+      const epic = task.parentId !== undefined ? epics.get(task.parentId) : undefined;
+      return epic ? { task, epic } : { task };
+    });
+  }
+
   function getNext(project: string, type?: TaskType): Task | null {
     let rows: TaskRow[];
     if (type) {
@@ -1264,6 +1296,7 @@ export function createStore(dbPath: string): Store {
     delete: deleteTask,
     getByStatus,
     getByExternalId,
+    getByPr,
     getNext,
     getOverview,
     getRelated,
