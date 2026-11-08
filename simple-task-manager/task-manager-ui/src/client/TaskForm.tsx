@@ -366,6 +366,7 @@ export function TaskForm({ open, onOpenChange, initial, prefill, allTasks, proje
                     onBlur={() => { scopeCloseTimer.current = setTimeout(() => { setScopeOpen(false); setScopeHighlight(-1); }, 150); }}
                     onKeyDown={onScopeKeyDown}
                     placeholder="(none)"
+                    autoComplete="off"
                     className="bg-background border border-border pl-3 pr-8 h-9 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-full disabled:opacity-60 disabled:cursor-not-allowed"
                   />
                   {!scopeLocked && (form.scope === '' ? (
