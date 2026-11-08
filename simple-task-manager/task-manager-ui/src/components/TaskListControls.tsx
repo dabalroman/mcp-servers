@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { ArrowUp, ArrowDown, ChevronDown } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
@@ -7,6 +8,7 @@ import { DEFAULT_VIEW } from '@/lib/taskView';
 type Props = {
   value: ViewState;
   onChange: (v: ViewState) => void;
+  children?: ReactNode;
 };
 
 const STORAGE_KEY = 'task-manager-ui:view';
@@ -81,7 +83,7 @@ function ValuePicker<T extends string>({ value, options, onChange }: {
   );
 }
 
-export function TaskListControls({ value, onChange }: Props) {
+export function TaskListControls({ value, onChange, children }: Props) {
   function set(patch: Partial<ViewState>) {
     const next = { ...value, ...patch };
     saveViewState(next);
@@ -89,41 +91,48 @@ export function TaskListControls({ value, onChange }: Props) {
   }
 
   return (
-    <div className="flex flex-row gap-2">
+    <div className="flex flex-wrap items-center gap-2">
 
-      {/* Group block */}
-      <div className="flex flex-1 items-stretch border border-border overflow-hidden">
-        <span className={KEY_CELL}>Group</span>
-        <ValuePicker value={value.groupBy} options={GROUP_OPTIONS} onChange={(groupBy) => set({ groupBy })} />
-        <button
-          type="button"
-          onClick={() => set({ groupDir: value.groupDir === 'asc' ? 'desc' : 'asc' })}
-          title={value.groupDir === 'asc' ? 'Groups ascending' : 'Groups descending'}
-          className={`${DIR_BTN} border-l border-border`}
-        >
-          {value.groupDir === 'asc'
-            ? <ArrowUp className="w-4 h-4 shrink-0" strokeWidth={1.5} />
-            : <ArrowDown className="w-4 h-4 shrink-0" strokeWidth={1.5} />
-          }
-        </button>
+      {/* Full-width below sm so the actions wrap beneath; min width keeps the blocks usable beside the buttons */}
+      <div className="flex flex-[1_1_100%] sm:flex-1 sm:min-w-[20rem] gap-2 min-w-0">
+
+        {/* Group block */}
+        <div className="flex flex-1 min-w-0 items-stretch border border-border overflow-hidden">
+          <span className={KEY_CELL}>Group</span>
+          <ValuePicker value={value.groupBy} options={GROUP_OPTIONS} onChange={(groupBy) => set({ groupBy })} />
+          <button
+            type="button"
+            onClick={() => set({ groupDir: value.groupDir === 'asc' ? 'desc' : 'asc' })}
+            title={value.groupDir === 'asc' ? 'Groups ascending' : 'Groups descending'}
+            className={`${DIR_BTN} border-l border-border`}
+          >
+            {value.groupDir === 'asc'
+              ? <ArrowUp className="w-4 h-4 shrink-0" strokeWidth={1.5} />
+              : <ArrowDown className="w-4 h-4 shrink-0" strokeWidth={1.5} />
+            }
+          </button>
+        </div>
+
+        {/* Sort block */}
+        <div className="flex flex-1 min-w-0 items-stretch border border-border overflow-hidden">
+          <span className={KEY_CELL}>Sort</span>
+          <ValuePicker value={value.sortBy} options={SORT_OPTIONS} onChange={(sortBy) => set({ sortBy })} />
+          <button
+            type="button"
+            onClick={() => set({ sortDir: value.sortDir === 'asc' ? 'desc' : 'asc' })}
+            title={value.sortDir === 'asc' ? 'Tasks ascending' : 'Tasks descending'}
+            className={`${DIR_BTN} border-l border-border`}
+          >
+            {value.sortDir === 'asc'
+              ? <ArrowUp className="w-4 h-4 shrink-0" strokeWidth={1.5} />
+              : <ArrowDown className="w-4 h-4 shrink-0" strokeWidth={1.5} />
+            }
+          </button>
+        </div>
+
       </div>
 
-      {/* Sort block */}
-      <div className="flex flex-1 items-stretch border border-border overflow-hidden">
-        <span className={KEY_CELL}>Sort</span>
-        <ValuePicker value={value.sortBy} options={SORT_OPTIONS} onChange={(sortBy) => set({ sortBy })} />
-        <button
-          type="button"
-          onClick={() => set({ sortDir: value.sortDir === 'asc' ? 'desc' : 'asc' })}
-          title={value.sortDir === 'asc' ? 'Tasks ascending' : 'Tasks descending'}
-          className={`${DIR_BTN} border-l border-border`}
-        >
-          {value.sortDir === 'asc'
-            ? <ArrowUp className="w-4 h-4 shrink-0" strokeWidth={1.5} />
-            : <ArrowDown className="w-4 h-4 shrink-0" strokeWidth={1.5} />
-          }
-        </button>
-      </div>
+      {children && <div className="flex gap-2">{children}</div>}
 
     </div>
   );

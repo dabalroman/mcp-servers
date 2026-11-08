@@ -336,7 +336,7 @@ export default function TaskManager() {
         onEditProject={() => setProjectDialog('edit')}
       />
 
-      <div className="flex items-center justify-between border-b border-border">
+      <div className="flex border-b border-border">
         <div className="flex">
           {tabs.map((t) => (
             <button
@@ -356,14 +356,13 @@ export default function TaskManager() {
             </button>
           ))}
         </div>
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialog('edit')} disabled={!currentProject}>Edit project</Button>
-          <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialog('new')}>New project</Button>
-          <Button size="sm" variant="outline" onClick={() => openAdd()} disabled={project === null}>New task</Button>
-        </div>
       </div>
 
-      <TaskListControls value={view} onChange={setView} />
+      <TaskListControls value={view} onChange={setView}>
+        <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialog('edit')} disabled={!currentProject}>Edit project</Button>
+        <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialog('new')}>New project</Button>
+        <Button size="sm" variant="outline" onClick={() => openAdd()} disabled={project === null}>New task</Button>
+      </TaskListControls>
 
       {renderTaskList(grouped, tab === 'active' ? 'No active tasks. Add one to get started.' : 'No done tasks yet.')}
 
