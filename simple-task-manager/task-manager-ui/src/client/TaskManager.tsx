@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TaskListControls, loadViewState } from '@/components/TaskListControls';
 import { cn } from '@/lib/utils';
-import { sortTasks, groupTasks, nestEpicChildren, epicProgress, filterByProject, pickProject, projectFromPath, projectPath } from '@/lib/taskView';
+import { groupTasks, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, pickProject, projectFromPath, projectPath } from '@/lib/taskView';
 import type { ViewState } from '@/lib/taskView';
 import { useTasks } from './useTasks';
 import { TaskCard } from './TaskCard';
@@ -205,10 +205,11 @@ export default function TaskManager() {
     }
   }, [error]);
 
-  const sortedActive = sortTasks(active, view.sortBy, view.sortDir);
-  const sortedDone   = sortTasks(done,   view.sortBy, view.sortDir);
-  const groupedActive = groupTasks(sortedActive, view.groupBy, view.groupDir);
-  const groupedDone   = groupTasks(sortedDone,   view.groupBy, view.groupDir);
+  // Done children appear under their active epic; the Done tab pulls in nothing yet.
+  const own = tab === 'active' ? active : done;
+  const tree = nestEpicChildren(own, tab === 'active' ? done : [], view.sortBy, view.sortDir);
+  const ownIds = new Set(own.map((t) => t.id));
+  const grouped = groupTasks(tree.roots, view.groupBy, view.groupDir);
 
   const tabs: Tab[] = ['active', 'done'];
   const counts: Record<Tab, number> = { active: active.length, done: done.length };
@@ -216,10 +217,9 @@ export default function TaskManager() {
   const progress = epicProgress([...allActive, ...allDone]);
   const refTargets = new Map([...allActive, ...allDone].map((t) => [t.id, { title: t.title, status: t.status }]));
 
-  function renderCards(list: Task[], showReopen: boolean) {
-    const { roots, childrenByEpic } = nestEpicChildren(list);
+  function renderCards(roots: Task[], showReopen: boolean) {
     return roots.map((task) => {
-      const kids = childrenByEpic.get(task.id);
+      const kids = tree.childrenByEpic.get(task.id);
       const collapseKey = `epic:${task.id}`;
       const collapsed = kids !== undefined && isCollapsed(localStorage, COLLAPSE_KEY, collapseKey);
       return (
@@ -298,7 +298,7 @@ export default function TaskManager() {
                     {label}
                   </span>
                   <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
-                    {sectionTasks.length}
+                    {countOwnTasks(sectionTasks, tree.childrenByEpic, ownIds)}
                   </span>
                   <div className="tick-rule flex-1" />
                 </button>
@@ -367,8 +367,7 @@ export default function TaskManager() {
 
       <TaskListControls value={view} onChange={setView} />
 
-      {tab === 'active' && renderTaskList(groupedActive, 'No active tasks. Add one to get started.', false)}
-      {tab === 'done'   && renderTaskList(groupedDone,   'No done tasks yet.', true)}
+      {renderTaskList(grouped, tab === 'active' ? 'No active tasks. Add one to get started.' : 'No done tasks yet.', tab === 'done')}
 
       <TaskForm
         key={`${String(formOpen)}:${editing?.id ?? 'new'}:${JSON.stringify(prefill ?? null)}`}

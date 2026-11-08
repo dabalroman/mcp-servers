@@ -71,4 +71,12 @@ describe('findTaskLocation', () => {
     const result = findTaskLocation(active, done, 1, 'none');
     expect(result).toEqual({ tab: 'active', sectionValue: '' });
   });
+
+  it('uses the epic\'s section for a child nested under an epic in the same tab', () => {
+    const epic = makeTask({ id: 10, title: 'Epic', type: 'epic', status: 'in_progress' });
+    const child = makeTask({ id: 11, title: 'Child', parentId: 10, status: 'todo' });
+    expect(findTaskLocation([epic, child], [], 11, 'status')).toEqual({ tab: 'active', sectionValue: 'in_progress' });
+    const doneChild = makeTask({ id: 12, title: 'Done child', parentId: 10, status: 'done' });
+    expect(findTaskLocation([epic], [doneChild], 12, 'status')).toEqual({ tab: 'done', sectionValue: 'done' });
+  });
 });

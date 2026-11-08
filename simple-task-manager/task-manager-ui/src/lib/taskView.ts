@@ -111,21 +111,33 @@ export function groupTasks(tasks: Task[], groupBy: GroupBy, groupDir: SortDir = 
 
 export type EpicProgress = { done: number; total: number };
 
-// A child nests only when its epic is in the same list; otherwise it stays a root.
-export function nestEpicChildren(tasks: Task[]): { roots: Task[]; childrenByEpic: Map<number, Task[]> } {
-  const epicIds = new Set(tasks.filter((t) => t.type === 'epic').map((t) => t.id));
-  const roots: Task[] = [];
+export type EpicTree = { roots: Task[]; childrenByEpic: Map<number, Task[]> };
+
+// Nests over the whole tab, before grouping, so a child sits under its epic whatever the Group by.
+// Roots come only from `own` (the tab's tasks); an epic's children are drawn from `own` + `others`
+// (the other tab), all ordered by the current sort. A child whose epic is not in `own` stays a root.
+export function nestEpicChildren(own: Task[], others: Task[], sortBy: SortBy, sortDir: SortDir): EpicTree {
+  const epicIds = new Set(own.filter((t) => t.type === 'epic').map((t) => t.id));
+  const isNested = (t: Task) => t.parentId !== undefined && epicIds.has(t.parentId);
+  const roots = sortTasks(own.filter((t) => !isNested(t)), sortBy, sortDir);
   const childrenByEpic = new Map<number, Task[]>();
-  for (const task of tasks) {
-    if (task.parentId !== undefined && epicIds.has(task.parentId)) {
-      const bucket = childrenByEpic.get(task.parentId);
-      if (bucket) bucket.push(task);
-      else childrenByEpic.set(task.parentId, [task]);
-    } else {
-      roots.push(task);
-    }
+  for (const task of sortTasks([...own, ...others].filter(isNested), sortBy, sortDir)) {
+    if (task.parentId === undefined) continue;
+    const bucket = childrenByEpic.get(task.parentId);
+    if (bucket) bucket.push(task);
+    else childrenByEpic.set(task.parentId, [task]);
   }
   return { roots, childrenByEpic };
+}
+
+// Section badge: the tab's own tasks in these blocks; children pulled in from the other tab don't count.
+export function countOwnTasks(roots: Task[], childrenByEpic: Map<number, Task[]>, ownIds: Set<number>): number {
+  let n = 0;
+  for (const root of roots) {
+    if (ownIds.has(root.id)) n += 1;
+    for (const child of childrenByEpic.get(root.id) ?? []) if (ownIds.has(child.id)) n += 1;
+  }
+  return n;
 }
 
 // Pass active + done together so the count is independent of the current tab.
