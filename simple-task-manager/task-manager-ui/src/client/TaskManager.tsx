@@ -218,8 +218,7 @@ export default function TaskManager() {
   const progress = epicProgress([...allActive, ...allDone]);
   const refTargets = new Map([...allActive, ...allDone].map((t) => [t.id, { title: t.title, status: t.status }]));
 
-  // Re-open only fits done cards; open tasks pulled into the Done tab keep the status picker.
-  function renderCards(roots: Task[], showReopen: boolean) {
+  function renderCards(roots: Task[]) {
     return roots.map((task) => {
       const kids = tree.childrenByEpic.get(task.id);
       const collapseKey = `epic:${task.id}`;
@@ -235,7 +234,6 @@ export default function TaskManager() {
             onRefClick={navigateToRef}
             refTargets={refTargets}
             highlighted={highlightedId === task.id}
-            showReopen={showReopen && task.status === 'done'}
             progress={task.type === 'epic' ? progress.get(task.id) : undefined}
             collapsed={collapsed}
             onToggleCollapse={kids ? () => toggleCollapse(collapseKey) : undefined}
@@ -251,7 +249,6 @@ export default function TaskManager() {
                 onRefClick={navigateToRef}
                 refTargets={refTargets}
                 highlighted={highlightedId === child.id}
-                showReopen={showReopen && child.status === 'done'}
                 nested
               />
             </div>
@@ -261,7 +258,7 @@ export default function TaskManager() {
     });
   }
 
-  function renderTaskList(groups: ReturnType<typeof groupTasks>, noTasksMsg: string, showReopen: boolean) {
+  function renderTaskList(groups: ReturnType<typeof groupTasks>, noTasksMsg: string) {
     if (loading) {
       return <p className="text-muted-foreground text-base">loading…</p>;
     }
@@ -273,7 +270,7 @@ export default function TaskManager() {
     if (view.groupBy === 'none') {
       return (
         <div className="flex flex-col gap-2">
-          {renderCards(tasks, showReopen)}
+          {renderCards(tasks)}
         </div>
       );
     }
@@ -320,7 +317,7 @@ export default function TaskManager() {
               </div>
               {!collapsed && (
                 <div hidden={collapsed} className="flex flex-col gap-2">
-                  {renderCards(sectionTasks, showReopen)}
+                  {renderCards(sectionTasks)}
                 </div>
               )}
             </section>
@@ -369,7 +366,7 @@ export default function TaskManager() {
 
       <TaskListControls value={view} onChange={setView} />
 
-      {renderTaskList(grouped, tab === 'active' ? 'No active tasks. Add one to get started.' : 'No done tasks yet.', tab === 'done')}
+      {renderTaskList(grouped, tab === 'active' ? 'No active tasks. Add one to get started.' : 'No done tasks yet.')}
 
       <TaskForm
         key={`${String(formOpen)}:${editing?.id ?? 'new'}:${JSON.stringify(prefill ?? null)}`}

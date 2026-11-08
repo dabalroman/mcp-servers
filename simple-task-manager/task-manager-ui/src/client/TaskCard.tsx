@@ -49,7 +49,6 @@ export type TaskCardProps = {
   onRefClick?: (id: number) => void;
   refTargets?: Map<number, { title: string; status: TaskStatus }>;
   highlighted?: boolean;
-  showReopen?: boolean;
   progress?: EpicProgress;
   collapsed?: boolean;
   onToggleCollapse?: () => void;
@@ -57,7 +56,7 @@ export type TaskCardProps = {
   sticky?: boolean;
 };
 
-export function TaskCard({ task, tab, onStatus, onEdit, onAddChild, onRefClick, refTargets, highlighted = false, showReopen = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false }: TaskCardProps) {
+export function TaskCard({ task, tab, onStatus, onEdit, onAddChild, onRefClick, refTargets, highlighted = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false }: TaskCardProps) {
   const [viewState, setViewState] = useState(() => ({ status: task.status, view: defaultView(task.status, tab) }));
   let view = viewState.view;
   // Adjusted during render (not in an effect) so a status change never paints the stale view.
@@ -158,14 +157,7 @@ export function TaskCard({ task, tab, onStatus, onEdit, onAddChild, onRefClick, 
               >
                 #{task.id}
               </button>
-              {showReopen ? (
-                <Button size="sm" variant="outline" onClick={() => onStatus(task.id, 'todo')}
-                  className={cn('text-xs h-auto px-2 py-1 border-l-0', STATUS_CLASSES[task.status])}>
-                  Re-open
-                </Button>
-              ) : (
-                <StatusPicker value={task.status} options={STATUSES} onChange={(st) => onStatus(task.id, st)} className="border-l-0" />
-              )}
+              <StatusPicker value={task.status} options={STATUSES} onChange={(st) => onStatus(task.id, st)} className="border-l-0" />
             </div>
             {noteCount > 0 && (
               <button
