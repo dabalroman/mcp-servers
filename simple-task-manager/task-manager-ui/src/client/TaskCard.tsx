@@ -57,14 +57,15 @@ export type TaskCardProps = {
 };
 
 export function TaskCard({ task, tab, onStatus, onEdit, onAddChild, onRefClick, refTargets, highlighted = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false }: TaskCardProps) {
-  const [viewState, setViewState] = useState(() => ({ status: task.status, view: defaultView(task.status, tab) }));
+  const [viewState, setViewState] = useState(() => ({ status: task.status, tab, view: defaultView(task.status, tab) }));
   let view = viewState.view;
-  // Adjusted during render (not in an effect) so a status change never paints the stale view.
-  if (viewState.status !== task.status) {
+  // Adjusted during render (not in an effect) so a status change never paints the stale view. The
+  // tab counts too: an epic shown in both tabs keeps its card instance across a tab switch.
+  if (viewState.status !== task.status || viewState.tab !== tab) {
     view = defaultView(task.status, tab);
-    setViewState({ status: task.status, view });
+    setViewState({ status: task.status, tab, view });
   }
-  const setView = (v: CardView) => setViewState({ status: task.status, view: v });
+  const setView = (v: CardView) => setViewState({ status: task.status, tab, view: v });
   const next = nextView(view);
   const ViewIcon = VIEW_ICONS[view];
   const [planOpen, setPlanOpen] = useState(false);

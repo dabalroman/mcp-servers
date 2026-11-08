@@ -77,7 +77,9 @@ describe('findTaskLocation', () => {
     const child = makeTask({ id: 11, title: 'Child', parentId: 10, status: 'todo' });
     expect(findTaskLocation([epic, child], [], 11, 'status', 'priority', 'desc')).toEqual({ tab: 'active', sectionValue: 'in_progress' });
     const doneChild = makeTask({ id: 12, title: 'Done child', parentId: 10, status: 'done' });
-    expect(findTaskLocation([epic], [doneChild], 12, 'status', 'priority', 'desc')).toEqual({ tab: 'done', sectionValue: 'done' });
+    expect(findTaskLocation([epic], [doneChild], 12, 'status', 'priority', 'desc', 'done')).toEqual({ tab: 'done', sectionValue: 'done' });
+    // Visible under its open epic in the Active tab, so navigating from there stays put.
+    expect(findTaskLocation([epic], [doneChild], 12, 'status', 'priority', 'desc', 'active')).toEqual({ tab: 'active', sectionValue: 'in_progress' });
   });
 
   it('resolves a done child of an open epic, and the epic itself, against the Done tab\'s pulled-in block', () => {
@@ -87,13 +89,19 @@ describe('findTaskLocation', () => {
     const doneFeature = makeTask({ id: 23, title: 'Done feature', parentId: 20, type: 'feature', priority: 'low', status: 'done', scope: 'example-scope' });
     const a = [epic, openChild];
     const d = [doneBug, doneFeature];
-    expect(findTaskLocation(a, d, 23, 'status', 'priority', 'desc')).toEqual({ tab: 'done', sectionValue: 'done' });
+    expect(findTaskLocation(a, d, 23, 'status', 'priority', 'desc', 'done')).toEqual({ tab: 'done', sectionValue: 'done' });
     // The block follows its first done child by the current sort.
-    expect(findTaskLocation(a, d, 23, 'type', 'priority', 'desc')).toEqual({ tab: 'done', sectionValue: 'bug' });
-    expect(findTaskLocation(a, d, 23, 'type', 'priority', 'asc')).toEqual({ tab: 'done', sectionValue: 'feature' });
-    expect(findTaskLocation(a, d, 22, 'scope', 'priority', 'desc')).toEqual({ tab: 'done', sectionValue: 'example-scope' });
-    // Open epic and open children belong to the Active tab.
-    expect(findTaskLocation(a, d, 20, 'status', 'priority', 'desc')).toEqual({ tab: 'active', sectionValue: 'in_progress' });
-    expect(findTaskLocation(a, d, 21, 'status', 'priority', 'desc')).toEqual({ tab: 'active', sectionValue: 'in_progress' });
+    expect(findTaskLocation(a, d, 23, 'type', 'priority', 'desc', 'done')).toEqual({ tab: 'done', sectionValue: 'bug' });
+    expect(findTaskLocation(a, d, 23, 'type', 'priority', 'asc', 'done')).toEqual({ tab: 'done', sectionValue: 'feature' });
+    expect(findTaskLocation(a, d, 22, 'scope', 'priority', 'desc', 'done')).toEqual({ tab: 'done', sectionValue: 'example-scope' });
+    // From the Active tab, the open epic and its open child resolve there.
+    expect(findTaskLocation(a, d, 20, 'status', 'priority', 'desc', 'active')).toEqual({ tab: 'active', sectionValue: 'in_progress' });
+    expect(findTaskLocation(a, d, 21, 'status', 'priority', 'desc', 'active')).toEqual({ tab: 'active', sectionValue: 'in_progress' });
+    // From the Done tab they're visible in the pulled-in block, so navigation stays there.
+    expect(findTaskLocation(a, d, 20, 'status', 'priority', 'desc', 'done')).toEqual({ tab: 'done', sectionValue: 'done' });
+    expect(findTaskLocation(a, d, 21, 'status', 'priority', 'desc', 'done')).toEqual({ tab: 'done', sectionValue: 'done' });
+    // A task the current tab doesn't show falls back to the other tab.
+    const loneDone = makeTask({ id: 24, title: 'Lone done', status: 'done' });
+    expect(findTaskLocation(a, [...d, loneDone], 24, 'status', 'priority', 'desc', 'active')).toEqual({ tab: 'done', sectionValue: 'done' });
   });
 });

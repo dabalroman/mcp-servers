@@ -24,7 +24,7 @@ const PRIORITY_ORDER: TaskPriority[] = ['critical', 'high', 'medium', 'low'];
 const STATUS_ORDER: TaskStatus[] = ['in_progress', 'todo', 'plan', 'refinement', 'done'];
 const TYPE_ORDER: TaskType[] = ['bug', 'tool', 'feature', 'idea', 'other', 'epic'];
 
-const NO_SCOPE = '(no scope)';
+export const NO_SCOPE = '(no scope)';
 
 export const DEFAULT_VIEW: ViewState = { groupBy: 'scope', groupDir: 'asc', sortBy: 'priority', sortDir: 'desc' };
 

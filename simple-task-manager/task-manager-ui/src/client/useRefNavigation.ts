@@ -64,7 +64,7 @@ export function useRefNavigation(
 
   const navigateToRef = useCallback(
     (targetId: number) => {
-      const location = findTaskLocation(active, done, targetId, groupBy, sortBy, sortDir);
+      const location = findTaskLocation(active, done, targetId, groupBy, sortBy, sortDir, tab);
       const targetTab: Tab = location?.tab ?? 'active';
       const key = sectionKey(location?.sectionValue ?? '');
 

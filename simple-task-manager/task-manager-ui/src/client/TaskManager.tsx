@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TaskListControls, loadViewState } from '@/components/TaskListControls';
 import { cn } from '@/lib/utils';
-import { groupTasks, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, pickProject, projectFromPath, projectPath } from '@/lib/taskView';
+import { NO_SCOPE, groupTasks, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, pickProject, projectFromPath, projectPath } from '@/lib/taskView';
 import type { ViewState } from '@/lib/taskView';
 import { useTasks } from './useTasks';
 import { TaskCard } from './TaskCard';
@@ -301,14 +301,14 @@ export default function TaskManager() {
                   </span>
                   <div className="tick-rule flex-1" />
                 </button>
-                {/* Sections are never empty; the no-scope one yields ''. */}
+                {/* The section's own value: its first card may be an epic pulled in from the other tab. */}
                 {view.groupBy === 'scope' && tab === 'active' && project !== null && (
                   <Button
                     size="sm"
                     variant="outline"
                     aria-label={`Add task to ${label}`}
                     title={`Add task to ${label}`}
-                    onClick={() => openAdd({ project, scope: sectionTasks[0]?.scope ?? '' })}
+                    onClick={() => openAdd({ project, scope: value === NO_SCOPE ? '' : value })}
                   >
                     New task
                   </Button>
