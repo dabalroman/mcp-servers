@@ -235,7 +235,7 @@ export function TaskCard({ task, tab, onStatus, onEdit, onAddChild, onRefClick, 
               onClick={() => setView(next)}
               aria-label={VIEW_LABELS[next]}
               title={VIEW_LABELS[next]}
-              className="inline-flex items-center text-muted-foreground hover:text-primary cursor-pointer transition-colors shrink-0"
+              className="inline-flex items-center border border-border px-2 py-1 text-muted-foreground hover:border-primary/60 hover:text-foreground cursor-pointer transition-colors shrink-0"
             >
               <ViewIcon className="w-4 h-4" strokeWidth={1.5} />
             </button>
