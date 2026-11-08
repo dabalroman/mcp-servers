@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { sortTasks, groupTasks, getSectionValue, nestEpicChildren, epicProgress, filterByProject, matchesTaskQuery, pickProject, projectFromPath, projectPath } from './taskView';
-import type { SortDir } from './taskView';
-import type { Task } from '@/types/task';
+import { sortTasks, groupTasks, getSectionValue, nestEpicChildren, epicProgress, filterByProject, matchesTaskQuery, pickProject, projectFromPath, projectPath, defaultView, nextView } from './taskView';
+import type { CardView, SortDir } from './taskView';
+import type { Task, TaskStatus } from '@/types/task';
 
 function makeTask(partial: Partial<Task> & { id: number }): Task {
   return {
@@ -284,5 +284,39 @@ describe('projectFromPath / projectPath', () => {
 
   it('returns null for malformed percent-encoding', () => {
     expect(projectFromPath('/%E2')).toBeNull();
+  });
+});
+
+describe('defaultView', () => {
+  const open: TaskStatus[] = ['refinement', 'plan', 'todo', 'in_progress'];
+
+  it.each(open)('active tab: %s is collapsed', (status) => {
+    expect(defaultView(status, 'active')).toBe('collapsed');
+  });
+
+  it('active tab: done is compact', () => {
+    expect(defaultView('done', 'active')).toBe('compact');
+  });
+
+  it.each(open)('done tab: %s is compact', (status) => {
+    expect(defaultView(status, 'done')).toBe('compact');
+  });
+
+  it('done tab: done is collapsed', () => {
+    expect(defaultView('done', 'done')).toBe('collapsed');
+  });
+});
+
+describe('nextView', () => {
+  it('cycles compact -> collapsed -> full -> compact', () => {
+    expect(nextView('compact')).toBe('collapsed');
+    expect(nextView('collapsed')).toBe('full');
+    expect(nextView('full')).toBe('compact');
+  });
+
+  it('returns to the start after three steps from any view', () => {
+    for (const v of ['compact', 'collapsed', 'full'] as CardView[]) {
+      expect(nextView(nextView(nextView(v)))).toBe(v);
+    }
   });
 });

@@ -226,6 +226,7 @@ export default function TaskManager() {
         <div key={task.id} className="flex flex-col gap-2">
           <TaskCard
             task={task}
+            tab={tab}
             onStatus={handleStatus}
             onEdit={openEdit}
             onAddChild={openAddChild}
@@ -242,6 +243,7 @@ export default function TaskManager() {
             <div key={child.id} className={EPIC_RAIL}>
               <TaskCard
                 task={child}
+                tab={tab}
                 onStatus={handleStatus}
                 onEdit={openEdit}
                 onRefClick={navigateToRef}

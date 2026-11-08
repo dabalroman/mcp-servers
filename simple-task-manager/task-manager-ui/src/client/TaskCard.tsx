@@ -2,16 +2,20 @@ import { useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
-import { Check, ChevronDown, ChevronRight, ChevronUp, FileText, Rocket } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, ChevronUp, Equal, FileText, Rocket, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { TYPE_LABELS, PRIORITY_CLASSES, PR_STATUS_CLASSES, REF_STATUS_CLASSES, STATUS_CLASSES, STATUS_LABELS } from './constants';
 import { StatusPicker } from './StatusPicker';
-import type { EpicProgress } from '@/lib/taskView';
+import { defaultView, nextView } from '@/lib/taskView';
+import type { CardTab, CardView, EpicProgress } from '@/lib/taskView';
 import type { Note, Task, TaskStatus } from '@/types/task';
 
 const STATUSES: TaskStatus[] = ['refinement', 'plan', 'todo', 'in_progress', 'done'];
+
+const VIEW_ICONS: Record<CardView, LucideIcon> = { compact: ChevronDown, collapsed: Equal, full: ChevronUp };
+const VIEW_LABELS: Record<CardView, string> = { compact: 'Compact view', collapsed: 'Collapsed view', full: 'Full view' };
 
 function formatSqliteUtc(ts: string): string {
   return new Date(ts.replace(' ', 'T') + 'Z').toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
@@ -38,6 +42,7 @@ function NotesSection({ notes }: { notes: Note[] }) {
 
 export type TaskCardProps = {
   task: Task;
+  tab: CardTab;
   onStatus: (id: number, status: TaskStatus) => void;
   onEdit: (task: Task) => void;
   onAddChild?: (epic: Task) => void;
@@ -52,8 +57,17 @@ export type TaskCardProps = {
   sticky?: boolean;
 };
 
-export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, refTargets, highlighted = false, showReopen = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false }: TaskCardProps) {
-  const [expanded, setExpanded] = useState(false);
+export function TaskCard({ task, tab, onStatus, onEdit, onAddChild, onRefClick, refTargets, highlighted = false, showReopen = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false }: TaskCardProps) {
+  const [viewState, setViewState] = useState(() => ({ status: task.status, view: defaultView(task.status, tab) }));
+  let view = viewState.view;
+  // Adjusted during render (not in an effect) so a status change never paints the stale view.
+  if (viewState.status !== task.status) {
+    view = defaultView(task.status, tab);
+    setViewState({ status: task.status, view });
+  }
+  const setView = (v: CardView) => setViewState({ status: task.status, view: v });
+  const next = nextView(view);
+  const ViewIcon = VIEW_ICONS[view];
   const [planOpen, setPlanOpen] = useState(false);
   const hasSummary = Boolean(task.summary);
   const notes = task.notes ?? [];
@@ -111,18 +125,26 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, refTa
     }
   };
 
+  const renderDescription = (clamped: boolean) => task.description ? (
+    <div className={cn('text-sm text-muted-foreground leading-relaxed prose-task', clamped && 'line-clamp-3')}>
+      <Markdown remarkPlugins={[remarkGfm]}>{task.description}</Markdown>
+    </div>
+  ) : (
+    <span className="text-sm text-muted-foreground/40 italic">No description.</span>
+  );
+
   return (
     <div
       data-task-id={task.id}
       className={cn(
         'border bg-card flex flex-col gap-0 transition-[border-color,box-shadow] duration-500 overflow-hidden',
         task.status === 'done' && 'opacity-60',
-        // An expanded card can be taller than the viewport; only pin the compact one.
-        sticky && !expanded && 'sticky top-0 z-10',
+        // A full card can be taller than the viewport; don't pin it.
+        sticky && view !== 'full' && 'sticky top-0 z-10',
         highlighted ? 'border-primary shadow-[0_0_0_1px_hsl(var(--primary)/0.4)]' : 'border-border',
       )}
     >
-      <div className="flex flex-col gap-3 px-3 pt-3 pb-2">
+      <div className={cn('flex flex-col gap-3 px-3 pt-3', view === 'compact' ? 'pb-3' : 'pb-2')}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
             <div className="flex items-stretch shrink-0">
@@ -145,17 +167,15 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, refTa
                 <StatusPicker value={task.status} options={STATUSES} onChange={(st) => onStatus(task.id, st)} className="border-l-0" />
               )}
             </div>
-            {noteCount > 0 && (hasSummary ? (
+            {noteCount > 0 && (
               <button
                 type="button"
-                onClick={() => setExpanded(true)}
+                onClick={() => setView('full')}
                 className={cn(notesPillClass, 'cursor-pointer hover:border-primary/60 hover:text-foreground transition-colors')}
               >
                 {notesLabel}
               </button>
-            ) : (
-              <span className={notesPillClass}>{notesLabel}</span>
-            ))}
+            )}
             {task.externalId && (
               <span title={task.externalId} className={cn(externalIdClass, 'min-w-0 max-w-48')}>{task.externalId}</span>
             )}
@@ -209,6 +229,16 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, refTa
             )}>
               {task.priority.toUpperCase()}
             </span>
+
+            <button
+              type="button"
+              onClick={() => setView(next)}
+              aria-label={VIEW_LABELS[next]}
+              title={VIEW_LABELS[next]}
+              className="inline-flex items-center text-muted-foreground hover:text-primary cursor-pointer transition-colors shrink-0"
+            >
+              <ViewIcon className="w-4 h-4" strokeWidth={1.5} />
+            </button>
           </div>
         </div>
 
@@ -231,77 +261,56 @@ export function TaskCard({ task, onStatus, onEdit, onAddChild, onRefClick, refTa
         </div>
       </div>
 
-      {hasSummary ? (
+      {view === 'collapsed' && (
         <div className="px-3 pb-2">
-          {!expanded && (
-            <div className="text-sm text-muted-foreground leading-relaxed">
-              {task.summary}
-            </div>
-          )}
-          {expanded && (
-            <div className="text-sm text-muted-foreground leading-relaxed prose-task">
-              <Markdown remarkPlugins={[remarkGfm]}>{task.description ?? ''}</Markdown>
-            </div>
-          )}
-          {expanded && notes.length > 0 && <NotesSection notes={notes} />}
-          <button
-            type="button"
-            onClick={() => setExpanded((e) => !e)}
-            className="flex items-center gap-1 mt-1 text-xs text-muted-foreground/50 hover:text-muted-foreground transition-colors"
-          >
-            {expanded
-              ? <ChevronUp className="w-3 h-3 shrink-0" strokeWidth={1.5} />
-              : <ChevronDown className="w-3 h-3 shrink-0" strokeWidth={1.5} />
-            }
-            <span>{expanded ? 'Hide details' : 'Show details'}</span>
-          </button>
+          {hasSummary
+            ? <div className="text-sm text-muted-foreground leading-relaxed">{task.summary}</div>
+            : renderDescription(true)}
         </div>
-      ) : (
+      )}
+
+      {view === 'full' && (
         <div className="px-3 pb-2">
-          {task.description ? (
-            <div className="text-sm text-muted-foreground leading-relaxed prose-task">
-              <Markdown remarkPlugins={[remarkGfm]}>{task.description}</Markdown>
-            </div>
-          ) : (
-            <span className="text-sm text-muted-foreground/40 italic">No description.</span>
-          )}
+          {renderDescription(false)}
           {notes.length > 0 && <NotesSection notes={notes} />}
         </div>
       )}
 
-      <div className="flex items-end gap-6 px-3 pb-3 border-t border-border/50 pt-2">
-        {task.refs && task.refs.length > 0 && (
-          <div className="flex-1 min-w-0 flex flex-wrap gap-2">
-            {task.refs.map((ref) => {
-              const target = refTargets?.get(ref.id);
-              return (
-                <button
-                  key={ref.id}
-                  type="button"
-                  onClick={() => onRefClick?.(ref.id)}
-                  title={target && `${STATUS_LABELS[target.status]} | ${target.title}`}
-                  className={cn(
-                    'text-xs tracking-widest border border-border px-2 py-1 text-muted-foreground transition-colors',
-                    onRefClick && 'hover:border-primary/60 hover:text-foreground cursor-pointer',
-                  )}
-                >
-                  <span className={REF_STATUS_CLASSES[target?.status ?? 'todo']}>#{ref.id}</span><span className="text-muted-foreground/50 ml-1 normal-case tracking-normal">{ref.relation}</span>
-                </button>
-              );
-            })}
-          </div>
-        )}
-        <div className="ml-auto flex gap-2 shrink-0">
-          {onAddChild && task.type === 'epic' && task.status !== 'done' && (
-            <Button size="sm" variant="outline" onClick={() => onAddChild(task)}>
-              + Task
-            </Button>
+      {view !== 'compact' && (
+        <div className="flex items-end gap-6 px-3 pb-3 border-t border-border/50 pt-2">
+          {task.refs && task.refs.length > 0 && (
+            <div className="flex-1 min-w-0 flex flex-wrap gap-2">
+              {task.refs.map((ref) => {
+                const target = refTargets?.get(ref.id);
+                return (
+                  <button
+                    key={ref.id}
+                    type="button"
+                    onClick={() => onRefClick?.(ref.id)}
+                    title={target && `${STATUS_LABELS[target.status]} | ${target.title}`}
+                    className={cn(
+                      'text-xs tracking-widest border border-border px-2 py-1 text-muted-foreground transition-colors',
+                      onRefClick && 'hover:border-primary/60 hover:text-foreground cursor-pointer',
+                    )}
+                  >
+                    <span className={REF_STATUS_CLASSES[target?.status ?? 'todo']}>#{ref.id}</span><span className="text-muted-foreground/50 ml-1 normal-case tracking-normal">{ref.relation}</span>
+                  </button>
+                );
+              })}
+            </div>
           )}
-          <Button size="sm" variant="outline" onClick={() => onEdit(task)}>
-            Edit
-          </Button>
+          <div className="ml-auto flex gap-2 shrink-0">
+            {onAddChild && task.type === 'epic' && task.status !== 'done' && (
+              <Button size="sm" variant="outline" onClick={() => onAddChild(task)}>
+                + Task
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={() => onEdit(task)}>
+              Edit
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {task.plan && (
         <Dialog open={planOpen} onOpenChange={setPlanOpen}>

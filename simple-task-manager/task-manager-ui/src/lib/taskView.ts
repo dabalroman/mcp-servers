@@ -176,3 +176,17 @@ export function projectFromPath(pathname: string): string | null {
 export function projectPath(name: string): string {
   return `/${encodeURIComponent(name)}`;
 }
+
+export type CardView = 'compact' | 'collapsed' | 'full';
+export type CardTab = 'active' | 'done';
+
+// Each tab shows its own tasks collapsed; tasks pulled in from the other tab start compact.
+export function defaultView(status: TaskStatus, tab: CardTab): CardView {
+  return (status === 'done') === (tab === 'done') ? 'collapsed' : 'compact';
+}
+
+const NEXT_VIEW: Record<CardView, CardView> = { compact: 'collapsed', collapsed: 'full', full: 'compact' };
+
+export function nextView(view: CardView): CardView {
+  return NEXT_VIEW[view];
+}
