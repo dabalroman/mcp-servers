@@ -4,8 +4,8 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TaskListControls, loadViewState } from '@/components/TaskListControls';
 import { cn } from '@/lib/utils';
-import { NO_SCOPE, groupTasks, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, pickProject, projectFromPath, projectPath } from '@/lib/taskView';
-import type { ViewState } from '@/lib/taskView';
+import { NO_SCOPE, groupTasks, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, pickProject, projectFromPath, projectPath, defaultView, resolveCardViews } from '@/lib/taskView';
+import type { CardView, CardViewEntry, ViewState } from '@/lib/taskView';
 import { useTasks } from './useTasks';
 import { TaskCard } from './TaskCard';
 import { TaskForm, type TaskPrefill } from './TaskForm';
@@ -52,6 +52,7 @@ export default function TaskManager() {
   const [editing, setEditing] = useState<Task | null>(null);
   const [prefill, setPrefill] = useState<TaskPrefill | undefined>(undefined);
   const [view, setView] = useState<ViewState>(loadViewState);
+  const [cardViews, setCardViews] = useState<ReadonlyMap<number, CardViewEntry>>(() => new Map());
   const [rememberedProject, setRememberedProject] = useState<string | null>(() => projectFromPath(window.location.pathname) ?? loadProject());
 
   const { active: allActive, done: allDone, projects } = data;
@@ -212,6 +213,22 @@ export default function TaskManager() {
   const ownIds = new Set(own.map((t) => t.id));
   const grouped = groupTasks(tree.roots, view.groupBy, view.groupDir, tree.anchors);
 
+  // Resolved during render (not in an effect) so a status change never paints the stale view.
+  const shown = tree.roots.flatMap((t) => [t, ...(tree.childrenByEpic.get(t.id) ?? [])]);
+  const resolvedViews = resolveCardViews(cardViews, shown, tab);
+  if (resolvedViews !== cardViews) setCardViews(resolvedViews);
+
+  function cardViewProps(task: Task) {
+    const entry = resolvedViews.get(task.id);
+    return {
+      view: entry?.view ?? defaultView(task.status, tab),
+      onViewChange: (next: CardView) => setCardViews((m) => {
+        const cur = m.get(task.id);
+        return cur ? new Map(m).set(task.id, { ...cur, view: next }) : m;
+      }),
+    };
+  }
+
   const tabs: Tab[] = ['active', 'done'];
   const counts: Record<Tab, number> = { active: active.length, done: done.length };
 
@@ -227,7 +244,7 @@ export default function TaskManager() {
         <div key={task.id} className="flex flex-col gap-2">
           <TaskCard
             task={task}
-            tab={tab}
+            {...cardViewProps(task)}
             onStatus={handleStatus}
             onEdit={openEdit}
             onAddChild={openAddChild}
@@ -243,7 +260,7 @@ export default function TaskManager() {
             <div key={child.id} className={EPIC_RAIL}>
               <TaskCard
                 task={child}
-                tab={tab}
+                {...cardViewProps(child)}
                 onStatus={handleStatus}
                 onEdit={openEdit}
                 onRefClick={navigateToRef}

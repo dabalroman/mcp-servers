@@ -207,6 +207,38 @@ export function defaultView(status: TaskStatus, tab: CardTab): CardView {
   return tab === 'active' && status !== 'done' ? 'collapsed' : 'compact';
 }
 
+export type CardViewEntry = { status: TaskStatus; tab: CardTab; view: CardView };
+
+// A card keeps its view across status changes (UI or MCP); only a first sight, a tab switch or
+// entering done picks the default.
+export function resolveView(prev: CardViewEntry | undefined, status: TaskStatus, tab: CardTab): CardView {
+  if (!prev || prev.tab !== tab || (status === 'done' && prev.status !== 'done')) return defaultView(status, tab);
+  return prev.view;
+}
+
+// Held above the cards so a view survives a remount (a section move under Group by status, an epic
+// child leaving its block). Cards not shown are dropped, so one that comes back starts fresh.
+// Returns `prev` itself when nothing changed, so it can be set during render without looping.
+export function resolveCardViews(
+  prev: ReadonlyMap<number, CardViewEntry>,
+  shown: ReadonlyArray<Pick<Task, 'id' | 'status'>>,
+  tab: CardTab,
+): ReadonlyMap<number, CardViewEntry> {
+  const next = new Map<number, CardViewEntry>();
+  let changed = false;
+  for (const { id, status } of shown) {
+    const old = prev.get(id);
+    const view = resolveView(old, status, tab);
+    if (old && old.status === status && old.tab === tab && old.view === view) {
+      next.set(id, old);
+    } else {
+      next.set(id, { status, tab, view });
+      changed = true;
+    }
+  }
+  return changed || next.size !== prev.size ? next : prev;
+}
+
 const NEXT_VIEW: Record<CardView, CardView> = { compact: 'collapsed', collapsed: 'full', full: 'compact' };
 
 export function nextView(view: CardView): CardView {

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { sortTasks, groupTasks, getSectionValue, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, matchesTaskQuery, pickProject, projectFromPath, projectPath, defaultView, nextView } from './taskView';
-import type { CardView, SortDir } from './taskView';
+import { sortTasks, groupTasks, getSectionValue, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, matchesTaskQuery, pickProject, projectFromPath, projectPath, defaultView, resolveView, resolveCardViews, nextView } from './taskView';
+import type { CardView, CardViewEntry, SortDir } from './taskView';
 import type { Task, TaskStatus } from '@/types/task';
 
 function makeTask(partial: Partial<Task> & { id: number }): Task {
@@ -399,6 +399,63 @@ describe('defaultView', () => {
 
   it('done tab: done is compact', () => {
     expect(defaultView('done', 'done')).toBe('compact');
+  });
+});
+
+describe('resolveView', () => {
+  const entry = (status: TaskStatus, view: CardView, tab: 'active' | 'done' = 'active'): CardViewEntry => ({ status, tab, view });
+
+  it('starts at the default without a previous entry', () => {
+    expect(resolveView(undefined, 'todo', 'active')).toBe('collapsed');
+  });
+
+  it('keeps the view across an open-to-open status change', () => {
+    expect(resolveView(entry('todo', 'full'), 'in_progress', 'active')).toBe('full');
+    expect(resolveView(entry('refinement', 'compact'), 'plan', 'active')).toBe('compact');
+  });
+
+  it('folds to compact when the task enters done', () => {
+    expect(resolveView(entry('in_progress', 'full'), 'done', 'active')).toBe('compact');
+  });
+
+  it('keeps a view chosen while already done', () => {
+    expect(resolveView(entry('done', 'full'), 'done', 'active')).toBe('full');
+  });
+
+  it('keeps the view when reopened from done', () => {
+    expect(resolveView(entry('done', 'compact'), 'todo', 'active')).toBe('compact');
+  });
+
+  it('resets to the default on a tab switch', () => {
+    expect(resolveView(entry('todo', 'full', 'done'), 'todo', 'active')).toBe('collapsed');
+  });
+});
+
+describe('resolveCardViews', () => {
+  it('returns the same map when nothing changed', () => {
+    const prev = new Map([[1, { status: 'todo' as const, tab: 'active' as const, view: 'full' as const }]]);
+    expect(resolveCardViews(prev, [{ id: 1, status: 'todo' }], 'active')).toBe(prev);
+  });
+
+  it('adds new cards at the default and drops ones no longer shown', () => {
+    const prev = new Map([[1, { status: 'todo' as const, tab: 'active' as const, view: 'full' as const }]]);
+    const next = resolveCardViews(prev, [{ id: 2, status: 'todo' }], 'active');
+    expect([...next.keys()]).toEqual([2]);
+    expect(next.get(2)?.view).toBe('collapsed');
+  });
+
+  it('records the new status so a later reopen keeps the folded view', () => {
+    const start = new Map([[1, { status: 'in_progress' as const, tab: 'active' as const, view: 'full' as const }]]);
+    const folded = resolveCardViews(start, [{ id: 1, status: 'done' }], 'active');
+    expect(folded.get(1)).toEqual({ status: 'done', tab: 'active', view: 'compact' });
+    const reopened = resolveCardViews(folded, [{ id: 1, status: 'todo' }], 'active');
+    expect(reopened.get(1)?.view).toBe('compact');
+    expect(resolveCardViews(reopened, [{ id: 1, status: 'todo' }], 'active')).toBe(reopened);
+  });
+
+  it('settles with duplicate ids', () => {
+    const once = resolveCardViews(new Map(), [{ id: 1, status: 'todo' }, { id: 1, status: 'todo' }], 'active');
+    expect(resolveCardViews(once, [{ id: 1, status: 'todo' }, { id: 1, status: 'todo' }], 'active')).toBe(once);
   });
 });
 

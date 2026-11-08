@@ -8,8 +8,8 @@ import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
 import { TYPE_LABELS, PRIORITY_CLASSES, PR_STATUS_CLASSES, REF_STATUS_CLASSES, STATUS_CLASSES, STATUS_LABELS } from './constants';
 import { StatusPicker } from './StatusPicker';
-import { defaultView, nextView } from '@/lib/taskView';
-import type { CardTab, CardView, EpicProgress } from '@/lib/taskView';
+import { nextView } from '@/lib/taskView';
+import type { CardView, EpicProgress } from '@/lib/taskView';
 import type { Note, Task, TaskStatus } from '@/types/task';
 
 const STATUSES: TaskStatus[] = ['refinement', 'plan', 'todo', 'in_progress', 'done'];
@@ -42,7 +42,8 @@ function NotesSection({ notes }: { notes: Note[] }) {
 
 export type TaskCardProps = {
   task: Task;
-  tab: CardTab;
+  view: CardView;
+  onViewChange: (view: CardView) => void;
   onStatus: (id: number, status: TaskStatus) => void;
   onEdit: (task: Task) => void;
   onAddChild?: (epic: Task) => void;
@@ -56,16 +57,7 @@ export type TaskCardProps = {
   sticky?: boolean;
 };
 
-export function TaskCard({ task, tab, onStatus, onEdit, onAddChild, onRefClick, refTargets, highlighted = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false }: TaskCardProps) {
-  const [viewState, setViewState] = useState(() => ({ status: task.status, tab, view: defaultView(task.status, tab) }));
-  let view = viewState.view;
-  // Adjusted during render (not in an effect) so a status change never paints the stale view. The
-  // tab counts too: an epic shown in both tabs keeps its card instance across a tab switch.
-  if (viewState.status !== task.status || viewState.tab !== tab) {
-    view = defaultView(task.status, tab);
-    setViewState({ status: task.status, tab, view });
-  }
-  const setView = (v: CardView) => setViewState({ status: task.status, tab, view: v });
+export function TaskCard({ task, view, onViewChange, onStatus, onEdit, onAddChild, onRefClick, refTargets, highlighted = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false }: TaskCardProps) {
   const next = nextView(view);
   const ViewIcon = VIEW_ICONS[view];
   const [planOpen, setPlanOpen] = useState(false);
@@ -163,7 +155,7 @@ export function TaskCard({ task, tab, onStatus, onEdit, onAddChild, onRefClick, 
             {noteCount > 0 && (
               <button
                 type="button"
-                onClick={() => setView('full')}
+                onClick={() => onViewChange('full')}
                 className={cn(notesPillClass, 'cursor-pointer hover:border-primary/60 hover:text-foreground transition-colors')}
               >
                 {notesLabel}
@@ -225,7 +217,7 @@ export function TaskCard({ task, tab, onStatus, onEdit, onAddChild, onRefClick, 
 
             <button
               type="button"
-              onClick={() => setView(next)}
+              onClick={() => onViewChange(next)}
               aria-label={VIEW_LABELS[next]}
               title={VIEW_LABELS[next]}
               className="inline-flex items-center justify-center border border-border p-1 text-muted-foreground hover:border-primary/60 hover:text-foreground cursor-pointer transition-colors shrink-0"
