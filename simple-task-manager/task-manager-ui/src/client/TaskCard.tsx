@@ -294,7 +294,7 @@ export function TaskCard({ task, tab, onStatus, onEdit, onAddChild, onRefClick, 
           <div className="ml-auto flex gap-2 shrink-0">
             {onAddChild && task.type === 'epic' && task.status !== 'done' && (
               <Button size="sm" variant="outline" onClick={() => onAddChild(task)}>
-                + Task
+                New task
               </Button>
             )}
             <Button size="sm" variant="outline" onClick={() => onEdit(task)}>

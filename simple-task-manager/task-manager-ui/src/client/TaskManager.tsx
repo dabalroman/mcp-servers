@@ -306,12 +306,11 @@ export default function TaskManager() {
                   <Button
                     size="sm"
                     variant="outline"
-                    className="h-7 px-2"
                     aria-label={`Add task to ${label}`}
                     title={`Add task to ${label}`}
                     onClick={() => openAdd({ project, scope: sectionTasks[0]?.scope ?? '' })}
                   >
-                    +
+                    New task
                   </Button>
                 )}
               </div>
@@ -359,8 +358,8 @@ export default function TaskManager() {
         </div>
         <div className="flex gap-2">
           <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialog('edit')} disabled={!currentProject}>Edit project</Button>
-          <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialog('new')}>+ Project</Button>
-          <Button size="sm" onClick={() => openAdd()} disabled={project === null}>+ New</Button>
+          <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialog('new')}>New project</Button>
+          <Button size="sm" variant="outline" onClick={() => openAdd()} disabled={project === null}>New task</Button>
         </div>
       </div>
 

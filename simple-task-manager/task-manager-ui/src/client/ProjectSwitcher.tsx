@@ -82,7 +82,7 @@ export function ProjectSwitcher({ projects, current, onSelect, onNewProject, onE
             ))}
             <DropdownMenuSeparator />
             {active && <DropdownMenuItem onSelect={() => { pendingDialog.current = 'edit'; }}>Edit project</DropdownMenuItem>}
-            <DropdownMenuItem onSelect={() => { pendingDialog.current = 'new'; }}>+ Project</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => { pendingDialog.current = 'new'; }}>New project</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       </div>
