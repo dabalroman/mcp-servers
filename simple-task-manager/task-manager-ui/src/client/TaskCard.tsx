@@ -293,7 +293,7 @@ export function TaskCard({ task, tab, onStatus, onEdit, onAddChild, onRefClick, 
                       onRefClick && 'hover:border-primary/60 hover:text-foreground cursor-pointer',
                     )}
                   >
-                    <span className={REF_STATUS_CLASSES[target?.status ?? 'todo']}>#{ref.id}</span><span className="text-muted-foreground/50 ml-1 normal-case tracking-normal">{ref.relation}</span>
+                    <span className="text-muted-foreground/50 mr-1 normal-case tracking-normal">{ref.relation}</span><span className={REF_STATUS_CLASSES[target?.status ?? 'todo']}>#{ref.id}</span>
                   </button>
                 );
               })}
