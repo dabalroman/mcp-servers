@@ -73,14 +73,15 @@ function sectionOrder(groupBy: GroupBy, value: string): number {
   return 0;
 }
 
-export function groupTasks(tasks: Task[], groupBy: GroupBy, groupDir: SortDir = 'desc'): GroupSection[] {
+// `anchors` maps a task id to the task whose group value it takes (see EpicTree).
+export function groupTasks(tasks: Task[], groupBy: GroupBy, groupDir: SortDir = 'desc', anchors?: Map<number, Task>): GroupSection[] {
   if (groupBy === 'none') {
     return [{ label: '', value: '', tasks }];
   }
 
   const map = new Map<string, Task[]>();
   for (const task of tasks) {
-    const value = getSectionValue(task, groupBy);
+    const value = getSectionValue(anchors?.get(task.id) ?? task, groupBy);
     const bucket = map.get(value);
     if (bucket) bucket.push(task);
     else map.set(value, [task]);
@@ -111,23 +112,32 @@ export function groupTasks(tasks: Task[], groupBy: GroupBy, groupDir: SortDir = 
 
 export type EpicProgress = { done: number; total: number };
 
-export type EpicTree = { roots: Task[]; childrenByEpic: Map<number, Task[]> };
+// `anchors`: an epic pulled in from `others` is grouped by its first own child (by the current sort),
+// so the block lands in the group of the children the tab is about (e.g. Done under Group by = status).
+export type EpicTree = { roots: Task[]; childrenByEpic: Map<number, Task[]>; anchors: Map<number, Task> };
 
 // Nests over the whole tab, before grouping, so a child sits under its epic whatever the Group by.
-// Roots come only from `own` (the tab's tasks); an epic's children are drawn from `own` + `others`
-// (the other tab), all ordered by the current sort. A child whose epic is not in `own` stays a root.
+// Roots are `own` (the tab's tasks) plus any epic from `others` (the other tab) with an own child;
+// an epic's children are drawn from `own` + `others`, all ordered by the current sort.
+// A child whose epic is in neither list stays a root.
 export function nestEpicChildren(own: Task[], others: Task[], sortBy: SortBy, sortDir: SortDir): EpicTree {
-  const epicIds = new Set(own.filter((t) => t.type === 'epic').map((t) => t.id));
+  const ownEpicIds = new Set(own.filter((t) => t.type === 'epic').map((t) => t.id));
+  const ownParentIds = new Set(own.map((t) => t.parentId));
+  const pulledIn = others.filter((t) => t.type === 'epic' && !ownEpicIds.has(t.id) && ownParentIds.has(t.id));
+  const epicIds = new Set([...ownEpicIds, ...pulledIn.map((t) => t.id)]);
   const isNested = (t: Task) => t.parentId !== undefined && epicIds.has(t.parentId);
-  const roots = sortTasks(own.filter((t) => !isNested(t)), sortBy, sortDir);
+  const roots = sortTasks([...own.filter((t) => !isNested(t)), ...pulledIn], sortBy, sortDir);
+  const ownIds = new Set(own.map((t) => t.id));
   const childrenByEpic = new Map<number, Task[]>();
+  const anchors = new Map<number, Task>();
   for (const task of sortTasks([...own, ...others].filter(isNested), sortBy, sortDir)) {
     if (task.parentId === undefined) continue;
     const bucket = childrenByEpic.get(task.parentId);
     if (bucket) bucket.push(task);
     else childrenByEpic.set(task.parentId, [task]);
+    if (!ownEpicIds.has(task.parentId) && ownIds.has(task.id) && !anchors.has(task.parentId)) anchors.set(task.parentId, task);
   }
-  return { roots, childrenByEpic };
+  return { roots, childrenByEpic, anchors };
 }
 
 // Section badge: the tab's own tasks in these blocks; children pulled in from the other tab don't count.

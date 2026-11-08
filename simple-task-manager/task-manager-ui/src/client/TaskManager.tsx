@@ -81,7 +81,7 @@ export default function TaskManager() {
   }, []);
 
   const { navigateToRef, highlightedId, collapseVersion, toggleCollapse } =
-    useRefNavigation(allActive, allDone, tab, setTab, view.groupBy, project, selectProject);
+    useRefNavigation(allActive, allDone, tab, setTab, view.groupBy, view.sortBy, view.sortDir, project, selectProject);
 
   void collapseVersion;
 
@@ -205,11 +205,12 @@ export default function TaskManager() {
     }
   }, [error]);
 
-  // Done children appear under their active epic; the Done tab pulls in nothing yet.
+  // Each tab nests over the other: done children under an open epic in Active; in Done, an open
+  // epic with a done child is pulled in as a container with all its children.
   const own = tab === 'active' ? active : done;
-  const tree = nestEpicChildren(own, tab === 'active' ? done : [], view.sortBy, view.sortDir);
+  const tree = nestEpicChildren(own, tab === 'active' ? done : active, view.sortBy, view.sortDir);
   const ownIds = new Set(own.map((t) => t.id));
-  const grouped = groupTasks(tree.roots, view.groupBy, view.groupDir);
+  const grouped = groupTasks(tree.roots, view.groupBy, view.groupDir, tree.anchors);
 
   const tabs: Tab[] = ['active', 'done'];
   const counts: Record<Tab, number> = { active: active.length, done: done.length };
@@ -217,6 +218,7 @@ export default function TaskManager() {
   const progress = epicProgress([...allActive, ...allDone]);
   const refTargets = new Map([...allActive, ...allDone].map((t) => [t.id, { title: t.title, status: t.status }]));
 
+  // Re-open only fits done cards; open tasks pulled into the Done tab keep the status picker.
   function renderCards(roots: Task[], showReopen: boolean) {
     return roots.map((task) => {
       const kids = tree.childrenByEpic.get(task.id);
@@ -233,7 +235,7 @@ export default function TaskManager() {
             onRefClick={navigateToRef}
             refTargets={refTargets}
             highlighted={highlightedId === task.id}
-            showReopen={showReopen}
+            showReopen={showReopen && task.status === 'done'}
             progress={task.type === 'epic' ? progress.get(task.id) : undefined}
             collapsed={collapsed}
             onToggleCollapse={kids ? () => toggleCollapse(collapseKey) : undefined}
@@ -249,7 +251,7 @@ export default function TaskManager() {
                 onRefClick={navigateToRef}
                 refTargets={refTargets}
                 highlighted={highlightedId === child.id}
-                showReopen={showReopen}
+                showReopen={showReopen && child.status === 'done'}
                 nested
               />
             </div>

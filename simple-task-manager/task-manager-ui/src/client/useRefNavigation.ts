@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { isCollapsed, setCollapsed, toggleCollapsed } from './collapseState';
 import { findTaskLocation } from './taskNavigation';
 import type { Task } from '@/types/task';
-import type { GroupBy } from '@/lib/taskView';
+import type { GroupBy, SortBy, SortDir } from '@/lib/taskView';
 
 type Tab = 'active' | 'done';
 type PendingNav = { id: number; sectionKey: string } | null;
@@ -17,6 +17,8 @@ export function useRefNavigation(
   tab: Tab,
   setTab: (tab: Tab) => void,
   groupBy: GroupBy,
+  sortBy: SortBy,
+  sortDir: SortDir,
   project: string | null,
   setProject: (project: string) => void,
 ) {
@@ -62,7 +64,7 @@ export function useRefNavigation(
 
   const navigateToRef = useCallback(
     (targetId: number) => {
-      const location = findTaskLocation(active, done, targetId, groupBy);
+      const location = findTaskLocation(active, done, targetId, groupBy, sortBy, sortDir);
       const targetTab: Tab = location?.tab ?? 'active';
       const key = sectionKey(location?.sectionValue ?? '');
 
@@ -87,7 +89,7 @@ export function useRefNavigation(
       }
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [active, done, tab, setTab, groupBy, project, setProject],
+    [active, done, tab, setTab, groupBy, sortBy, sortDir, project, setProject],
   );
 
   const toggleCollapse = useCallback((key: string) => {

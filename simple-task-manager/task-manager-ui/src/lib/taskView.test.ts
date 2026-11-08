@@ -239,6 +239,63 @@ describe('nestEpicChildren', () => {
   });
 });
 
+describe('nestEpicChildren — Done tab', () => {
+  const epic = makeTask({ id: 30, type: 'epic', status: 'in_progress', priority: 'high', scope: 'example-scope' });
+  const openChild = makeTask({ id: 31, parentId: 30, priority: 'critical', type: 'feature', scope: 'example-scope' });
+  const doneBug = makeTask({ id: 32, parentId: 30, status: 'done', priority: 'medium', type: 'bug', scope: 'example-scope' });
+  const doneFeature = makeTask({ id: 33, parentId: 30, status: 'done', priority: 'low', type: 'feature', scope: 'example-scope' });
+  const lonelyEpic = makeTask({ id: 34, type: 'epic', status: 'todo' });
+  const lonelyChild = makeTask({ id: 35, parentId: 34 });
+  const plainDone = makeTask({ id: 36, status: 'done', priority: 'critical', type: 'tool', scope: 'other-scope' });
+  const doneEpic = makeTask({ id: 40, type: 'epic', status: 'done', scope: 'other-scope' });
+  const doneEpicChild = makeTask({ id: 41, parentId: 40, status: 'done', scope: 'other-scope' });
+  const active = [epic, openChild, lonelyEpic, lonelyChild];
+  const done = [doneBug, doneFeature, plainDone, doneEpic, doneEpicChild];
+  const ids = (ts: Task[] | undefined) => (ts ?? []).map((t) => t.id);
+
+  it('pulls in an open epic with a done child, with all its children by the current sort', () => {
+    const { roots, childrenByEpic, anchors } = nestEpicChildren(done, active, 'priority', 'desc');
+    expect(ids(roots)).toEqual([36, 30, 40]);
+    expect(ids(childrenByEpic.get(30))).toEqual([31, 32, 33]);
+    expect(childrenByEpic.has(34)).toBe(false);
+    expect(anchors.get(30)?.id).toBe(32);
+  });
+
+  it('keeps a done epic unchanged', () => {
+    const { childrenByEpic, anchors } = nestEpicChildren(done, active, 'priority', 'desc');
+    expect(ids(childrenByEpic.get(40))).toEqual([41]);
+    expect(anchors.has(40)).toBe(false);
+  });
+
+  it('Group by = status: the pulled-in block sits in Done and no other status group appears', () => {
+    const tree = nestEpicChildren(done, active, 'priority', 'desc');
+    const sections = groupTasks(tree.roots, 'status', 'desc', tree.anchors);
+    expect(sections.map((s) => [s.value, ids(s.tasks)])).toEqual([['done', [36, 30, 40]]]);
+  });
+
+  it('Group by = scope / none: the block sits with its done children', () => {
+    const tree = nestEpicChildren(done, active, 'priority', 'desc');
+    const byScope = groupTasks(tree.roots, 'scope', 'asc', tree.anchors);
+    expect(byScope.map((s) => [s.value, ids(s.tasks)])).toEqual([['example-scope', [30]], ['other-scope', [36, 40]]]);
+    expect(ids(groupTasks(tree.roots, 'none', 'asc', tree.anchors)[0]?.tasks)).toEqual([36, 30, 40]);
+  });
+
+  it('Group by = type: done children that disagree put the block with the first done child by sort', () => {
+    const desc = nestEpicChildren(done, active, 'priority', 'desc');
+    expect(groupTasks(desc.roots, 'type', 'desc', desc.anchors).find((s) => ids(s.tasks).includes(30))?.value).toBe('bug');
+    const asc = nestEpicChildren(done, active, 'priority', 'asc');
+    expect(groupTasks(asc.roots, 'type', 'desc', asc.anchors).find((s) => ids(s.tasks).includes(30))?.value).toBe('feature');
+  });
+
+  it('section badges count only done tasks', () => {
+    const tree = nestEpicChildren(done, active, 'priority', 'desc');
+    const doneIds = new Set(done.map((t) => t.id));
+    expect(countOwnTasks(tree.roots, tree.childrenByEpic, doneIds)).toBe(done.length);
+    const byScope = groupTasks(tree.roots, 'scope', 'asc', tree.anchors);
+    expect(byScope.map((s) => countOwnTasks(s.tasks, tree.childrenByEpic, doneIds))).toEqual([2, 3]);
+  });
+});
+
 describe('countOwnTasks', () => {
   it('counts own roots and own children, not ones pulled in from the other tab', () => {
     const epic = makeTask({ id: 10, type: 'epic' });
