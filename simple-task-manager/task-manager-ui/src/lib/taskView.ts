@@ -202,9 +202,9 @@ export function projectPath(name: string): string {
 export type CardView = 'compact' | 'collapsed' | 'full';
 export type CardTab = 'active' | 'done';
 
-// Each tab shows its own tasks collapsed; tasks pulled in from the other tab start compact.
+// Only open tasks in the Active tab start collapsed; the Done tab is skimmed one line per card.
 export function defaultView(status: TaskStatus, tab: CardTab): CardView {
-  return (status === 'done') === (tab === 'done') ? 'collapsed' : 'compact';
+  return tab === 'active' && status !== 'done' ? 'collapsed' : 'compact';
 }
 
 const NEXT_VIEW: Record<CardView, CardView> = { compact: 'collapsed', collapsed: 'full', full: 'compact' };

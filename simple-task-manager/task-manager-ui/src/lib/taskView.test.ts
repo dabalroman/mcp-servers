@@ -397,8 +397,8 @@ describe('defaultView', () => {
     expect(defaultView(status, 'done')).toBe('compact');
   });
 
-  it('done tab: done is collapsed', () => {
-    expect(defaultView('done', 'done')).toBe('collapsed');
+  it('done tab: done is compact', () => {
+    expect(defaultView('done', 'done')).toBe('compact');
   });
 });
 
