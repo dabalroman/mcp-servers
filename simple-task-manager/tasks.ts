@@ -558,14 +558,16 @@ export function createStore(dbPath: string): Store {
   db.pragma('busy_timeout = 5000');
 
   // runMigrations disables FKs internally (table-rebuild migrations need it);
-  // we re-enable after so normal operation enforces them. try/finally so a
-  // thrown migration can't leave the connection with FKs off for its lifetime
-  // — that would silently break ON DELETE CASCADE on `refs`.
+  // we re-enable after so normal operation enforces them. A thrown migration
+  // closes the connection: nothing wraps it yet, and a handle left open keeps
+  // the file locked on Windows (EBUSY when a caller removes the DB).
   let knownMigrations: Set<string>;
   try {
     knownMigrations = runMigrations(db);
-  } finally {
     db.pragma('foreign_keys = ON');
+  } catch (err) {
+    db.close();
+    throw err;
   }
 
   // Prepared statements
