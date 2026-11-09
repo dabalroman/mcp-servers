@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sortByPriority, TYPES, TYPE_ORDER, TYPE_LABELS, STATUS_LABELS, STATUS_CLASSES, STATUS_NEXT, PR_STATUS_CLASSES } from './constants';
+import { sortByPriority, TYPES, TYPE_ORDER, TYPE_LABELS, STATUS_LABELS, STATUS_CLASSES, STATUS_NEXT, PR_STATUS_CLASSES, PR_STATUS_ICONS } from './constants';
 import { PR_STATUSES } from '../../../tasks.js';
 import type { Task } from '@/types/task';
 
@@ -77,5 +77,12 @@ describe('epic type', () => {
 describe('PR_STATUS_CLASSES', () => {
   it('covers every PR status the store accepts', () => {
     expect(Object.keys(PR_STATUS_CLASSES).sort()).toEqual([...PR_STATUSES].sort());
+  });
+});
+
+describe('PR_STATUS_ICONS', () => {
+  it('gives every PR status its own distinct icon', () => {
+    expect(Object.keys(PR_STATUS_ICONS).sort()).toEqual([...PR_STATUSES].sort());
+    expect(new Set(Object.values(PR_STATUS_ICONS)).size).toBe(PR_STATUSES.length);
   });
 });

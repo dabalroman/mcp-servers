@@ -1,3 +1,4 @@
+import { PenLine, GitPullRequest, CircleCheck, ThumbsUp, GitMerge, Rocket, CircleX, type LucideIcon } from 'lucide-react';
 import { CANONICAL_RELATIONS } from '@/types/task';
 import type { TaskType, TaskPriority, TaskStatus, PrStatus } from '@/types/task';
 
@@ -57,9 +58,22 @@ export const REF_STATUS_CLASSES: Record<TaskStatus, string> = {
 export const PR_STATUS_CLASSES: Record<PrStatus, string> = {
   draft:  'border-dashed border-border text-muted-foreground',
   open:   'border-primary text-primary',
+  pipeline_pass: 'border-border text-muted-foreground',
+  approved: 'border-border text-muted-foreground',
   merged: 'border-border text-muted-foreground',
   deployed: 'border-border text-muted-foreground',
   closed: 'border-border text-muted-foreground/60 line-through',
+};
+
+// Statuses are told apart by icon, not colour — the card already carries enough colour.
+export const PR_STATUS_ICONS: Record<PrStatus, LucideIcon> = {
+  draft: PenLine,
+  open: GitPullRequest,
+  pipeline_pass: CircleCheck,
+  approved: ThumbsUp,
+  merged: GitMerge,
+  deployed: Rocket,
+  closed: CircleX,
 };
 
 export const TYPES: TaskType[] = ['bug', 'feature', 'idea', 'tool', 'other', 'epic'];

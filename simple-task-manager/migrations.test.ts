@@ -17,6 +17,7 @@ const PROJECTS_MIGRATION = '20261027130000_add-projects';
 const TASK_PRS_MIGRATION = '20261106120000_add-task-prs';
 const PR_DEPLOYED_MIGRATION = '20261106140000_add-pr-deployed-status';
 const SPLIT_PROJECT_MIGRATION = '20261106150000_split-project-id-name';
+const PR_PIPELINE_APPROVED_MIGRATION = '20261109120000_add-pr-pipeline-approved-status';
 
 let dir: string;
 let dbPath: string;
@@ -569,6 +570,35 @@ describe('split-project-id-name migration', () => {
     db.exec('DROP TABLE tasks; CREATE TABLE tasks (id INTEGER PRIMARY KEY, project TEXT REFERENCES projects(id));');
     assertProjectFks(db);
     db.close();
+  });
+});
+
+describe('add-pr-pipeline-approved-status migration', () => {
+  test('keeps existing rows, accepts pipeline_pass and approved, rejects an unknown status', () => {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    const earlier = loadMigrations().filter((m) => m.name < PR_PIPELINE_APPROVED_MIGRATION);
+    earlier.forEach((m, i) => {
+      m.up(db);
+      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(i + 1, m.name);
+    });
+    db.pragma(`user_version = ${earlier.length}`);
+    db.prepare("INSERT INTO tasks (title, type, status, priority, project, description) VALUES ('Old', 'bug', 'todo', 'high', 'default', '')").run();
+    db.prepare("INSERT INTO task_prs (task_id, url, number, status, created_at) VALUES (1, 'https://example.com/pr/1', 1, 'open', '2026-01-01 00:00:00')").run();
+    db.close();
+
+    const store = createStore(dbPath);
+    const sdb = store.db;
+    assert.deepEqual(sdb.prepare('SELECT task_id, url, number, status, created_at FROM task_prs').all(), [
+      { task_id: 1, url: 'https://example.com/pr/1', number: 1, status: 'open', created_at: '2026-01-01 00:00:00' },
+    ]);
+    const ins = sdb.prepare('INSERT INTO task_prs (task_id, url, number, status) VALUES (?, ?, ?, ?)');
+    ins.run(1, 'https://example.com/pr/2', 2, 'pipeline_pass');
+    ins.run(1, 'https://example.com/pr/3', 3, 'approved');
+    assert.throws(() => ins.run(1, 'https://example.com/pr/4', 4, 'rejected'), /CHECK constraint failed/);
+    assert.ok(sdb.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'task_prs_number'").get());
+    store.close();
   });
 });
 

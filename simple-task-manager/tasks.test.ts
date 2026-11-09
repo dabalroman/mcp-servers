@@ -36,6 +36,7 @@ const MIGRATION_NAMES = [
   '20261106130000_add-task-prs-number-index',
   '20261106140000_add-pr-deployed-status',
   '20261106150000_split-project-id-name',
+  '20261109120000_add-pr-pipeline-approved-status',
 ];
 
 let dir: string;

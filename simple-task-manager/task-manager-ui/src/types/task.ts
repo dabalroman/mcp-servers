@@ -33,7 +33,7 @@ export type Note = {
 // id is the identity (URLs, task.project, API keys); name is display only.
 export type Project = { id: string; name: string; total: number; open: number; trackPrs: boolean };
 
-export type PrStatus = 'draft' | 'open' | 'closed' | 'merged' | 'deployed';
+export type PrStatus = 'draft' | 'open' | 'pipeline_pass' | 'approved' | 'merged' | 'deployed' | 'closed';
 
 export type PullRequest = {
   url: string;

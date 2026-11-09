@@ -1,5 +1,5 @@
 const PR_RULE = `
-- This project tracks PRs: record each PR/MR you open in prs on update() and keep its status current (gh pr view): draft -> open -> merged -> deployed (merged, and its automatic deploy succeeded), or closed. For a PR event or a PR url/number the user names, call getByPr.`;
+- This project tracks PRs: record each PR/MR you open in prs on update() and keep its status current (gh pr view): draft -> open -> pipeline_pass (CI passed) -> approved (review ok) -> merged -> deployed (auto-deploy ok), or closed. For a PR event or a PR url/number the user names, call getByPr.`;
 
 // Built per session from the bound project: the PR rule reaches only projects
 // with track_prs on, so other workflows never hear about PRs.

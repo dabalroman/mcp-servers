@@ -24,7 +24,7 @@ export type Ref = {
   title?: string;
 };
 
-export const PR_STATUSES = ['draft', 'open', 'closed', 'merged', 'deployed'] as const;
+export const PR_STATUSES = ['draft', 'open', 'pipeline_pass', 'approved', 'merged', 'deployed', 'closed'] as const;
 export type PrStatus = typeof PR_STATUSES[number];
 
 export type PullRequest = {
@@ -255,7 +255,7 @@ function runMigrations(db: DB): Set<string> {
 }
 
 // ── Schema ────────────────────────────────────────────────────────────────────
-// Current shape after every migration in ./migrations/ (last: 20261106120000_add-task-prs).
+// Current shape after every migration in ./migrations/ (last: 20261109120000_add-pr-pipeline-approved-status).
 // Hand-kept: update it in the same commit as any migration. Timestamps are TEXT
 // datetime('now') (UTC), booleans INTEGER 0/1. Behaviour: docs/claude/storage-and-migrations.md.
 //
@@ -285,7 +285,7 @@ function runMigrations(db: DB): Set<string> {
 // task_prs — a task's pull requests (#516), listed by created_at
 //   task_id INTEGER NOT NULL FK tasks(id) ON DELETE CASCADE; url TEXT NOT NULL; PK (task_id, url)
 //   number INTEGER NOT NULL CHECK > 0
-//   status TEXT NOT NULL CHECK IN (draft, open, closed, merged, deployed)
+//   status TEXT NOT NULL CHECK IN (draft, open, pipeline_pass, approved, merged, deployed, closed)
 //   created_at, updated_at TEXT NOT NULL DEFAULT now
 //   index: number (getByPr)
 //

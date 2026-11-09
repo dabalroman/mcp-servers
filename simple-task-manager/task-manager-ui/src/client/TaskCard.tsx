@@ -2,11 +2,11 @@ import { useState } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
-import { Check, ChevronDown, ChevronRight, ChevronUp, Equal, FileText, Rocket, type LucideIcon } from 'lucide-react';
+import { ChevronDown, ChevronRight, ChevronUp, Equal, FileText, type LucideIcon } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog';
 import { cn } from '@/lib/utils';
-import { TYPE_LABELS, PRIORITY_CLASSES, PR_STATUS_CLASSES, REF_STATUS_CLASSES, STATUS_CLASSES, STATUS_LABELS } from './constants';
+import { TYPE_LABELS, PRIORITY_CLASSES, PR_STATUS_CLASSES, PR_STATUS_ICONS, REF_STATUS_CLASSES, STATUS_CLASSES, STATUS_LABELS } from './constants';
 import { StatusPicker } from './StatusPicker';
 import { nextView } from '@/lib/taskView';
 import type { CardView, EpicProgress } from '@/lib/taskView';
@@ -69,23 +69,25 @@ export function TaskCard({ task, view, onViewChange, onStatus, onEdit, onAddChil
   const notesPillClass = 'text-xs tracking-widest uppercase border border-border px-2 py-1 shrink-0 text-muted-foreground';
   const notesLabel = `${noteCount} ${noteCount === 1 ? 'note' : 'notes'}`;
 
-  const prTags = task.prs?.map((pr) => (
-    <a
-      key={pr.url}
-      href={pr.url}
-      target="_blank"
-      rel="noopener noreferrer"
-      title={`${pr.status} — ${pr.url}`}
-      className={cn(
-        'inline-flex items-center gap-1 text-xs tracking-widest border px-2 py-1 shrink-0 hover:text-foreground transition-colors',
-        PR_STATUS_CLASSES[pr.status],
-      )}
-    >
-      PR #{pr.number}
-      {pr.status === 'merged' && <Check className="w-3 h-3" strokeWidth={1.5} />}
-      {pr.status === 'deployed' && <Rocket className="w-3 h-3" strokeWidth={1.5} />}
-    </a>
-  ));
+  const prTags = task.prs?.map((pr) => {
+    const PrIcon = PR_STATUS_ICONS[pr.status];
+    return (
+      <a
+        key={pr.url}
+        href={pr.url}
+        target="_blank"
+        rel="noopener noreferrer"
+        title={`${pr.status} — ${pr.url}`}
+        className={cn(
+          'inline-flex items-center gap-1 text-xs tracking-widest border px-2 py-1 shrink-0 hover:text-foreground transition-colors',
+          PR_STATUS_CLASSES[pr.status],
+        )}
+      >
+        PR #{pr.number}
+        <PrIcon className="w-3 h-3" strokeWidth={1.5} />
+      </a>
+    );
+  });
 
   const copyIdCommand = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
