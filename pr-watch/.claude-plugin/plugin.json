@@ -1,0 +1,20 @@
+{
+  "name": "pr-watch",
+  "version": "0.1.0",
+  "description": "Watches the PRs of the session's task-manager tasks: keeps their PR statuses, writes the deploy note and starts a turn on failed checks, comments and deploy results",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "deployWorkflow": {
+      "type": "string",
+      "title": "Deploy workflow",
+      "description": "Workflow file under .github/workflows whose run on the merge commit counts as the deploy",
+      "default": "deploy-dev.yml"
+    },
+    "deployFollowUp": {
+      "type": "string",
+      "title": "Deploy follow-up",
+      "description": "What to propose after a successful deploy (e.g. a logs audit); empty for nothing",
+      "default": ""
+    }
+  }
+}

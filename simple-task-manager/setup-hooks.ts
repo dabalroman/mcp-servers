@@ -23,8 +23,10 @@ const lines = [
   'set -e',
   `cd "${__dirname}" && npx tsx bump-version.ts && npm test && npm run build`,
 ];
-const activeModel = resolve(__dirname, '..', 'active-model');
-if (existsSync(activeModel)) lines.push(`cd "${__dirname}" && npx tsx bump-plugin.ts "${activeModel}"`);
+for (const plugin of ['active-model', 'pr-watch']) {
+  const dir = resolve(__dirname, '..', plugin);
+  if (existsSync(dir)) lines.push(`cd "${__dirname}" && npx tsx bump-plugin.ts "${dir}"`);
+}
 if (existsSync(siblingUi)) {
   lines.push(`cd "${siblingUi}" && npm test && npm run build`);
   // The UI bundle is checked into git; stage the freshly-rebuilt assets so

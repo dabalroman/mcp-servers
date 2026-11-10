@@ -16,6 +16,11 @@
       "name": "active-model",
       "source": "./active-model",
       "description": "Shows the active model, context fill and current task in a band above the prompt"
+    },
+    {
+      "name": "pr-watch",
+      "source": "./pr-watch",
+      "description": "Watches the PRs of the session's task-manager tasks: keeps their PR statuses, writes the deploy note and starts a turn on failed checks, comments and deploy results"
     }
   ]
 }
