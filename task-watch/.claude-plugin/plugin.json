@@ -1,0 +1,6 @@
+{
+  "name": "task-watch",
+  "version": "0.1.1",
+  "description": "Watches the session's task-manager tasks and their epics: toasts each change another session or the UI makes and tells the agent",
+  "types": "./types/index.d.ts"
+}

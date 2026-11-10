@@ -21,6 +21,11 @@
       "name": "pr-watch",
       "source": "./pr-watch",
       "description": "Watches the PRs of the session's task-manager tasks: keeps their PR statuses, writes the deploy note and starts a turn on failed checks, comments and deploy results"
+    },
+    {
+      "name": "task-watch",
+      "source": "./task-watch",
+      "description": "Watches the session's task-manager tasks and their epics: toasts each change another session or the UI makes and tells the agent"
     }
   ]
 }
