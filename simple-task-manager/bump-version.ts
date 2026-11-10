@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync } from 'fs';
-import { execSync } from 'child_process';
 import { fileURLToPath } from 'url';
 import { join, dirname } from 'path';
 
@@ -31,5 +30,4 @@ writeFileSync(versionFile, `export const VERSION = '${version}';\n`);
 // A git-installed plugin only updates when this changes, so it moves with every commit.
 const { name, version: _old, ...rest } = JSON.parse(readFileSync(pluginFile, 'utf8')) as Record<string, unknown>;
 writeFileSync(pluginFile, `${JSON.stringify({ name, version, ...rest }, null, 2)}\n`);
-execSync(`git add "${versionFile}" "${pluginFile}"`);
 console.log(`version → ${version}`);

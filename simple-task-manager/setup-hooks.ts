@@ -1,43 +1,44 @@
 #!/usr/bin/env node
 import { execSync } from 'child_process';
-import { writeFileSync, chmodSync, mkdirSync, existsSync } from 'fs';
+import { writeFileSync, chmodSync, mkdirSync } from 'fs';
 import { join, dirname, resolve } from 'path';
 import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// task-manager-ui sub-package — optional; the hook builds it only when present.
-const siblingUi = resolve(__dirname, 'task-manager-ui');
 
-let gitDir: string;
+let topLevel: string;
+let commonDir: string;
 try {
-  gitDir = execSync('git rev-parse --git-dir', { encoding: 'utf8' }).trim();
+  const git = (args: string) => execSync(`git ${args}`, { cwd: __dirname, encoding: 'utf8' }).trim();
+  topLevel = git('rev-parse --show-toplevel');
+  commonDir = resolve(__dirname, git('rev-parse --git-common-dir'));
 } catch {
   process.exit(0); // not a git repo, skip
 }
+// The hook assumes the mcp-servers layout; skip when this package sits in some other repo.
+if (join(topLevel, 'simple-task-manager') !== __dirname) process.exit(0);
 
-const hooksDir = join(gitDir, 'hooks');
+// Git runs the hook from the root of the committing tree, so relative paths act on that worktree.
+// Stage only from that root: in a worktree commit git exports GIT_DIR, so a `git add` from a subdir
+// treats the subdir as the tree root and stages files at the wrong paths.
+const hook = `#!/bin/sh
+set -e
+(cd simple-task-manager && npx tsx bump-version.ts && npm test && npm run build)
+git add simple-task-manager/version.ts simple-task-manager/plugin/.claude-plugin/plugin.json
+for m in */.claude-plugin/plugin.json; do
+  [ -f "$m" ] || continue
+  p=\${m%%/*}
+  (cd simple-task-manager && npx tsx bump-plugin.ts "../$p")
+  git add "$m"
+  claude plugin test "$p"
+done
+(cd simple-task-manager/task-manager-ui && npm test && npm run build)
+git add simple-task-manager/task-manager-ui/dist
+`;
+
+const hooksDir = join(commonDir, 'hooks');
 mkdirSync(hooksDir, { recursive: true });
-
-const lines = [
-  '#!/bin/sh',
-  'set -e',
-  `cd "${__dirname}" && npx tsx bump-version.ts && npm test && npm run build`,
-];
-for (const plugin of ['active-model', 'pr-watch']) {
-  const dir = resolve(__dirname, '..', plugin);
-  if (existsSync(dir)) lines.push(`cd "${__dirname}" && npx tsx bump-plugin.ts "${dir}"`);
-}
-if (existsSync(siblingUi)) {
-  lines.push(`cd "${siblingUi}" && npm test && npm run build`);
-  // The UI bundle is checked into git; stage the freshly-rebuilt assets so
-  // the commit always reflects current source. The repo root is the
-  // mcp-servers checkout, not this package.
-  const repoRoot = resolve(__dirname, '..');
-  lines.push(`git -C "${repoRoot}" add "${siblingUi.replace(repoRoot + '/', '')}"/dist`);
-}
-lines.push('');
-
-const hook = join(hooksDir, 'pre-commit');
-writeFileSync(hook, lines.join('\n'));
-chmodSync(hook, 0o755);
+const hookFile = join(hooksDir, 'pre-commit');
+writeFileSync(hookFile, hook);
+chmodSync(hookFile, 0o755);
 console.log('pre-commit hook installed');
