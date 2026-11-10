@@ -11,6 +11,11 @@
       "name": "tm",
       "source": "./simple-task-manager/plugin",
       "description": "Skills and full usage rules for the simple-task-manager MCP"
+    },
+    {
+      "name": "active-model",
+      "source": "./active-model",
+      "description": "Shows the active model, context fill and current task in a band above the prompt"
     }
   ]
 }
