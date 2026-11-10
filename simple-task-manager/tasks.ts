@@ -355,6 +355,10 @@ function refRowToObj(r: RefRow): Ref {
   return out;
 }
 
+function refsKey(refs: Ref[]): string {
+  return refs.map((r) => `${r.id}:${r.relation}:${r.nonCanonical ? 1 : 0}`).sort().join(',');
+}
+
 // ── Helpers (pure) ────────────────────────────────────────────────────────────
 export function sortByPriority<T extends { priority: TaskPriority; id: number }>(tasks: T[]): T[] {
   return [...tasks].sort((a, b) => {
@@ -897,19 +901,31 @@ export function createStore(dbPath: string): Store {
       if (linkChanged) parent = assertParent(next.type, next.parentId, next.project, { id, type: existing.type, project: existing.project });
       else if (next.parentId !== null) parent = stmtSelectTask.get(next.parentId) as TaskRow | undefined;
       if (parent) next.scope = parent.scope;
-      stmtUpdateTask.run(next.title, next.type, next.priority, next.project, next.scope, next.summary, next.description, next.plan, next.parentId, next.externalId, id);
+      const current = {
+        title: existing.title, type: existing.type, priority: existing.priority, project: existing.project, scope: existing.scope,
+        summary: existing.summary, description: existing.description, plan: existing.plan, parentId: existing.parent_id, externalId: existing.external_id,
+      };
+      const columnsChanged = (Object.keys(next) as (keyof typeof next)[]).some((k) => next[k] !== current[k]);
+      if (columnsChanged) stmtUpdateTask.run(next.title, next.type, next.priority, next.project, next.scope, next.summary, next.description, next.plan, next.parentId, next.externalId, id);
       if (next.parentId !== existing.parent_id) {
         if (existing.parent_id !== null) syncEpicStatus(existing.parent_id, null);
         if (next.parentId !== null) syncEpicStatus(next.parentId, existing.status);
       }
       if (next.type === 'epic' && next.scope !== existing.scope) stmtRescopeChildren.run({ scope: next.scope, id });
 
+      let linksChanged = false;
       if (patch.refs !== undefined) {
         const oldRefs = readRefsFor(id);
         const nextRefs: Ref[] = patch.refs === null || patch.refs.length === 0 ? [] : patch.refs;
         applyRefsImpl(id, next.project, oldRefs, nextRefs);
+        linksChanged = refsKey(oldRefs) !== refsKey(readRefsFor(id));
       }
-      if (nextPrs !== undefined) applyPrs(id, nextPrs);
+      if (nextPrs !== undefined) {
+        const oldPrs = JSON.stringify(stmtPrsFor.all(id));
+        applyPrs(id, nextPrs);
+        linksChanged ||= oldPrs !== JSON.stringify(stmtPrsFor.all(id));
+      }
+      if (linksChanged && !columnsChanged) stmtTouchTask.run(id);
 
       const task = readTask(id);
       return task ? { task } : null;
@@ -921,8 +937,9 @@ export function createStore(dbPath: string): Store {
     return db.transaction(() => {
       const existing = stmtSelectTask.get(id) as TaskRow | undefined;
       if (!existing) return false;
+      if (existing.status === status) return true;
       stmtSetTaskStatus.run(status, id);
-      if (existing.parent_id !== null && existing.status !== status) syncEpicStatus(existing.parent_id, status);
+      if (existing.parent_id !== null) syncEpicStatus(existing.parent_id, status);
       return true;
     })();
   }
@@ -1247,6 +1264,7 @@ export function createStore(dbPath: string): Store {
     return db.transaction(() => {
       const existing = stmtSelectNote.get(noteId) as Note | undefined;
       if (!existing) return null;
+      if (existing.body === trimmed) return existing;
       stmtUpdateNote.run(trimmed, noteId);
       stmtTouchTask.run(existing.task_id);
       return stmtSelectNote.get(noteId) as Note;

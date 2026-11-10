@@ -815,6 +815,35 @@ describe('summary — store always returns complete data', () => {
   });
 });
 
+describe('updated_at', () => {
+  const OLD = '2000-01-01 00:00:00';
+  const pr = (status: 'open' | 'merged') => [{ url: 'https://github.com/example/repo/pull/1', number: 1, status }];
+  function ageTask(id: number): void {
+    store.db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(OLD, id);
+  }
+
+  test('resending unchanged values does not bump it', () => {
+    const { id: other } = makeTask();
+    const { id } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'T', refs: [{ id: other, relation: 'blocks' }], prs: pr('open') });
+    store.setStatus(id, 'todo');
+    ageTask(id);
+    store.update(id, { title: 'T', priority: 'medium', refs: [{ id: other, relation: 'blocks' }], prs: pr('open') });
+    store.setStatus(id, 'todo');
+    assert.equal(store.getById(id)?.updated_at, OLD);
+  });
+
+  test('a PR status change or a new ref bumps it', () => {
+    const { id: other } = makeTask();
+    const { id } = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'T', prs: pr('open') });
+    ageTask(id);
+    store.update(id, { prs: pr('merged') });
+    assert.notEqual(store.getById(id)?.updated_at, OLD);
+    ageTask(id);
+    store.update(id, { refs: [{ id: other, relation: 'blocks' }] });
+    assert.notEqual(store.getById(id)?.updated_at, OLD);
+  });
+});
+
 describe('notes', () => {
   function ageTask(id: number): void {
     store.db.prepare(`UPDATE tasks SET updated_at = '2000-01-01 00:00:00' WHERE id = ?`).run(id);
