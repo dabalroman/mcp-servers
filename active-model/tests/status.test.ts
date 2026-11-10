@@ -2,7 +2,7 @@ import type { On } from 'claude-code'
 import type { Engine } from 'claude-code/testing'
 import { expect, test } from 'claude-code/testing'
 
-type Row = { id: number; type: string; updated_at: string }
+type Row = { id: number; type: string; updated_at: string; parentId?: number; epicTitle?: string }
 
 type State = { open: number; rows: Row[] }
 
@@ -104,6 +104,23 @@ test('several in progress: the newest, and how many others', async ($, on) => {
   const ui = await mountBand($)
   expect((await ui.find({ type: 'Text', text: 'test-model' }))?.text).toBe(
     'test-model · 24.3k/400k 6% · #8 in_progress +1 · 4 open',
+  )
+  await ui.unmount()
+})
+
+test('a task in an epic shows the epic before it, a long title clipped', async ($, on) => {
+  const lines: (string | undefined)[] = []
+  const epicTitle = 'Rebuild the data model so every task carries its epic context'
+  harness(on, lines, () => ({
+    open: 2,
+    rows: [{ id: 8, type: 'feature', updated_at: '2026-01-02 10:00:00', parentId: 3, epicTitle }],
+  }))
+
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: false })
+
+  const ui = await mountBand($)
+  expect((await ui.find({ type: 'Text', text: 'test-model' }))?.text).toBe(
+    `test-model · 24.3k/400k 6% · #3 ${epicTitle.slice(0, 39)}… › #8 in_progress · 2 open`,
   )
   await ui.unmount()
 })

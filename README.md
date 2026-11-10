@@ -19,4 +19,4 @@ Add the marketplace once: `/plugin marketplace add dabalroman/mcp-servers`
 | tm | Skills and full usage rules for the simple-task-manager MCP | `/plugin install tm@dabalroman` |
 | active-model | Shows the active model, context fill and current task in a band above the prompt | `/plugin install active-model@dabalroman` |
 
-`active-model` shows the task line only where the task-manager MCP is connected: it reads the current `in_progress` task and the open count from that server, and follows `setStatus`/`add`/`delete` as the agent makes them.
+`active-model` shows the task line only where the task-manager MCP is connected: it reads the current `in_progress` task and the open count from that server, and follows `setStatus`/`add`/`update`/`delete` as the agent makes them, with the task's epic id and title before it.

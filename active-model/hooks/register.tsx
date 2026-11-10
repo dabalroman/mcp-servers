@@ -3,18 +3,25 @@ import type { EngineInterface, Register, SessionContextUsage, ToolCallResult } f
 const TASK_SERVER = 'task-manager'
 const TASK_PREFIX = 'mcp__task-manager__'
 // The task tools that can move the current task or change how many are open.
-const MUTATORS = new Set(['add', 'setStatus', 'delete'])
+const MUTATORS = new Set(['add', 'setStatus', 'delete', 'update'])
 // The task-manager UI's own colour for an in-progress task (styles.scss --primary).
 const PRIMARY = '#51CDEC'
 
 type Json = Record<string, unknown>
 
 // What the band draws: the model, the context fill and the task.
-type Band = { model: string; context: string; phrase: string | undefined; rest: string | undefined }
+type Band = {
+  model: string
+  context: string
+  epic: string | undefined
+  phrase: string | undefined
+  rest: string | undefined
+}
 
-let band: Band = { model: '', context: '', phrase: undefined, rest: undefined }
+let band: Band = { model: '', context: '', epic: undefined, phrase: undefined, rest: undefined }
 let bandKey = ''
-let active: { id: number; others: number } | undefined
+type Epic = { id: number; title: string }
+let active: { id: number; others: number; epic: Epic | undefined } | undefined
 let open: number | undefined
 let fetchedAt = 0
 let stale = true
@@ -37,15 +44,20 @@ const contextPart = (c: SessionContextUsage | undefined): string => {
   return `${fmtTokens(c.tokens)}/${fmtTokens(c.window)} ${percent}%`
 }
 
-const taskParts = (): { phrase: string | undefined; rest: string | undefined } => {
+const EPIC_TITLE_MAX = 40
+
+const clip = (s: string): string => (s.length > EPIC_TITLE_MAX ? `${s.slice(0, EPIC_TITLE_MAX - 1)}…` : s)
+
+const taskParts = (): Pick<Band, 'epic' | 'phrase' | 'rest'> => {
+  const epic = active?.epic === undefined ? undefined : `#${active.epic.id} ${clip(active.epic.title)}`
   const phrase =
     active === undefined ? undefined : `#${active.id} in_progress${active.others > 0 ? ` +${active.others}` : ''}`
   const rest = open !== undefined && open > 0 ? `${open} open` : undefined
 
-  return { phrase, rest }
+  return { epic, phrase, rest }
 }
 
-const keyOf = (b: Band): string => [b.model, b.context, b.phrase ?? '', b.rest ?? ''].join('\u0000')
+const keyOf = (b: Band): string => [b.model, b.context, b.epic ?? '', b.phrase ?? '', b.rest ?? ''].join('\u0000')
 
 const parseJson = (text: unknown): Json | undefined => {
   if (typeof text !== 'string') return undefined
@@ -86,7 +98,7 @@ async function seedActive($: EngineInterface): Promise<void> {
   const groups = answer?.tasks
   active = undefined
   if (typeof groups !== 'object' || groups === null) return
-  let newest: { id: number; at: string } | undefined
+  let newest: { id: number; at: string; epic: Epic | undefined } | undefined
   let count = 0
   for (const list of Object.values(groups as Record<string, unknown>)) {
     if (!Array.isArray(list)) continue
@@ -97,10 +109,14 @@ async function seedActive($: EngineInterface): Promise<void> {
       if (id === undefined) continue
       count += 1
       const at = typeof task.updated_at === 'string' ? task.updated_at : ''
-      if (newest === undefined || at > newest.at) newest = { id, at }
+      if (newest !== undefined && at <= newest.at) continue
+      const epicId = taskId(task.parentId)
+      const epic =
+        epicId !== undefined && typeof task.epicTitle === 'string' ? { id: epicId, title: task.epicTitle } : undefined
+      newest = { id, at, epic }
     }
   }
-  if (newest !== undefined) active = { id: newest.id, others: count - 1 }
+  if (newest !== undefined) active = { id: newest.id, others: count - 1, epic: newest.epic }
 }
 
 async function syncTasks($: EngineInterface, force = false): Promise<void> {
@@ -201,7 +217,8 @@ export const register: Register = on => {
         <Text dimColor>
           {drawn.model}
           {drawn.context === '' ? '' : ` · ${drawn.context}`}
-          {drawn.phrase === undefined ? '' : ' · '}
+          {drawn.epic === undefined ? '' : ` · ${drawn.epic}`}
+          {drawn.phrase === undefined ? '' : drawn.epic === undefined ? ' · ' : ' › '}
           {drawn.phrase === undefined ? null : (
             <Text color={PRIMARY} bold>
               {drawn.phrase}
