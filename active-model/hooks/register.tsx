@@ -211,9 +211,11 @@ export const register: Register = on => {
     const drawn = band
     if (drawn.model === '' || e.props.hasSurvey) return next(e)
     const { Box, Text } = $.ui.resolve(e)
+    // The band is one instance for every plugin: keep what the plugins beneath draw.
+    const below = await next(e)
 
     return (
-      <Box>
+      <Box flexDirection="column">
         <Text dimColor>
           {drawn.model}
           {drawn.context === '' ? '' : ` · ${drawn.context}`}
@@ -226,6 +228,7 @@ export const register: Register = on => {
           )}
           {drawn.rest === undefined ? '' : ` · ${drawn.rest}`}
         </Text>
+        {below}
       </Box>
     )
   })

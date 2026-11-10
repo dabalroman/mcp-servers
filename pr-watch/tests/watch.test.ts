@@ -34,16 +34,11 @@ function world(on: On, tasks: Task[], branch = 'main') {
   const notes: { taskId: number; body: string }[] = []
   const prompts: string[] = []
   const failing = { notes: 0 }
-  const status: (string | undefined)[] = []
   const byId = new Map(tasks.map(t => [t.id, t]))
   const epicOf = (t: Task) => (t.parentId === undefined ? {} : { epic: { id: t.parentId } })
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('ui.toast', () => ({ value: undefined }))
-  on('ui.status', (_, e) => {
-    status.push(e.text)
-    return { value: undefined }
-  })
   on('prompt.submit', (_, e) => {
     prompts.push(e.text)
     return { text: e.text }
@@ -83,7 +78,24 @@ function world(on: On, tasks: Task[], branch = 'main') {
     }
   })
 
-  return { gh, ghCalls, notes, prompts, byId, failing, status }
+  return { gh, ghCalls, notes, prompts, byId, failing }
+}
+
+const BAND_PROPS = {
+  hasSurvey: false,
+  isCollapsed: false,
+  isWorking: false,
+  maxRows: 5,
+  bodyColumns: 80,
+  scroll: { offset: 0, bodyRows: 4 },
+  view: {},
+} as const
+
+async function bandText($: Engine) {
+  const ui = await $.ui.mount({ plugin: 'pr-watch', component: 'AbovePrompt', props: BAND_PROPS, surface: 'terminal' })
+  const text = (await ui.find({ type: 'Text', text: /pr-watch/ }))?.text
+  await ui.unmount()
+  return text
 }
 
 async function start($: Engine, on: On) {
@@ -117,13 +129,14 @@ test('green checks and an approval write approved; a new push with pending check
   const { poll } = await start($, on)
   await poll()
   expect(w.byId.get(1)!.prs).toEqual([pr(5, 'approved')])
+  expect(await bandText($)).toBe('pr-watch · #5 approved')
 
   w.gh['pr view 5'] = { out: view('OPEN', { headRefOid: 'bbbbbbbb22', reviewDecision: 'APPROVED' }) }
   w.gh['pr checks 5'] = { exitCode: 8, out: [{ name: 'build', bucket: 'pending', link: 'l2' }] }
   await poll()
   expect(w.byId.get(1)!.prs).toEqual([pr(5, 'open')])
   expect(w.prompts).toEqual([])
-  expect(w.status).toEqual(['pr-watch: #5 approved', 'pr-watch: #5 open'])
+  expect(await bandText($)).toBe('pr-watch · #5 open')
 })
 
 test('a failed check starts one turn, and the next poll does not report it again', async ($, on) => {

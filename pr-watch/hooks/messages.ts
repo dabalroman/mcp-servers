@@ -9,7 +9,7 @@ export const eventLine = (pr: PrRef, task: TaskLabel | undefined, event: PrEvent
 
 export const shortLine = (pr: PrRef, event: PrEvent): string => `PR #${pr.number} ${event.line}`
 
-export const BACKOFF_LINE = 'pr-watch: gh failing, retry in 10 min'
+export const BACKOFF_LABEL = 'gh failing, retry in 10 min'
 
 // A finished PR (deployed, closed, deploy over) has no label: it drops off the line.
 export function watchLabel(pr: PrRef, status: PrStatus | undefined, ledger: Ledger, workflow: string): string | undefined {
@@ -21,9 +21,6 @@ export function watchLabel(pr: PrRef, status: PrStatus | undefined, ledger: Ledg
 
   return ledger.failed === true ? `${label}, checks failing` : label
 }
-
-export const statusLine = (labels: string[]): string =>
-  `pr-watch: ${labels.length === 0 ? 'idle' : labels.join(' · ')}`
 
 export function promptText(lines: string[]): string {
   return ['pr-watch:', ...lines.map(line => `- ${line}`)].join('\n')

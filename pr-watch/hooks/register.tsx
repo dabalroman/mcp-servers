@@ -4,7 +4,7 @@ import type { PrRef } from './gh.ts'
 import { ghOf, prRefOf } from './gh.ts'
 import { commit, ledgerKey, loadLedger, pruneLedgers, unseen } from './ledger.ts'
 import type { TaskLabel } from './messages.ts'
-import { BACKOFF_LINE, errorText, eventLine, promptText, rulesSection, shortLine, statusLine, watchLabel } from './messages.ts'
+import { BACKOFF_LABEL, errorText, eventLine, promptText, rulesSection, shortLine, watchLabel } from './messages.ts'
 import type { PollConfig } from './poll.ts'
 import { newLedger, pollPr } from './poll.ts'
 import type { TaskCall } from './taskWrites.ts'
@@ -15,6 +15,7 @@ import { jiraIdOf, parseJson, taskId, touchedTaskIds } from './watchSet.ts'
 const TASK_SERVER = 'task-manager'
 const TASK_PREFIX = 'mcp__task-manager__'
 const WATCH = { plugin: 'pr-watch', key: 'watch' } as const
+const BAND = { plugin: 'pr-watch', key: 'band' } as const
 const POLL_MS = 60_000
 const BACKOFF_MS = 10 * 60_000
 const FAIL_LIMIT = 6
@@ -51,6 +52,11 @@ async function addToWatch($: EngineInterface, ids: number[]): Promise<void> {
   const watch = await readWatch($)
   const fresh = ids.filter(id => !watch.taskIds.includes(id))
   if (fresh.length > 0) await $.state.set(WATCH, { taskIds: [...watch.taskIds, ...fresh] })
+}
+
+async function setBand($: EngineInterface, labels: string[]): Promise<void> {
+  const { value = [] } = await $.state.get(BAND)
+  if (value.join('\n') !== labels.join('\n')) await $.state.set(BAND, labels)
 }
 
 async function branchTaskIds($: EngineInterface, call: TaskCall): Promise<number[]> {
@@ -126,7 +132,7 @@ async function cycle($: EngineInterface, cfg: Config): Promise<void> {
   } catch (error) {
     // No task-manager in this session: nothing to watch, and nothing to report.
     if (error instanceof TaskManagerAbsent) {
-      $.ui.status(undefined)
+      await setBand($, [])
       return
     }
     throw error
@@ -143,7 +149,7 @@ async function cycle($: EngineInterface, cfg: Config): Promise<void> {
       labels.push(`#${entry.pr.number} poll failed`)
     }
   }
-  $.ui.status(statusLine(labels))
+  await setBand($, labels)
   if (lines.length > 0) void $.prompt.submit({ text: promptText(lines) })
   if (failure !== undefined) throw new Error(failure)
 }
@@ -163,7 +169,7 @@ async function tick($: EngineInterface, cfg: Config): Promise<void> {
     fails += 1
     if (fails >= FAIL_LIMIT) {
       nextAt = now + BACKOFF_MS
-      $.ui.status(BACKOFF_LINE)
+      await setBand($, [BACKOFF_LABEL])
       if (!isLoud) {
         isLoud = true
         const reason = error instanceof Error ? error.message : String(error)
@@ -208,6 +214,21 @@ export const register: Register = (on, options) => {
 
     return result
   }).catch(($, e, next) => next(e))
+
+  // One band instance is shared by every plugin: draw this row above whatever the plugins beneath draw.
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
+    const { value: labels = [] } = await $.state.get(BAND)
+    if (labels.length === 0 || e.props.hasSurvey) return next(e)
+    const { Box, Text } = $.ui.resolve(e)
+    const below = await next(e)
+
+    return (
+      <Box flexDirection="column">
+        <Text dimColor>{`pr-watch · ${labels.join(' · ')}`}</Text>
+        {below}
+      </Box>
+    )
+  })
 
   on('prompt.compose', async ($, e, next) => {
     const composed = await next(e)
