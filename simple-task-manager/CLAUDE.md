@@ -53,6 +53,10 @@ Not loaded by default. **Read the file before working on its topic.**
 
 `tsconfig.json` and `tsconfig.test.json` both list `task-manager-ui` in `exclude`. Without that, the MCP's `tsc` walks into the sub-package and tries to compile its `@/*`-aliased / DOM-typed sources with the MCP's NodeNext config, which fails. The sub-package has its own tsconfig (bundler resolution, JSX, DOM lib) and runs its own typecheck in its own `npm run verify`. Keep these worlds separate.
 
+## task-watch (root plugin)
+
+`task-watch/` only reads task-manager (`getById`, `getUpdates`). It suppresses the agent's own writes by applying each call to its snapshot field by field, never by a full `getById` refresh, and ignores `prs` (pr-watch owns them). The live watch sits in module memory mirrored to `$.state`, because every `$.state.get` in one dispatch returns the value from when the dispatch began.
+
 ## Git repo location
 
 The git repository root is `~/.claude/mcp-servers/`, **not** `~/.claude/mcp-servers/simple-task-manager/`. The `simple-task-manager/` directory has no `.git` of its own — it is a subdirectory of the `mcp-servers` repo. Always run git commands from `~/.claude/mcp-servers/` (or pass `-C ~/.claude/mcp-servers`). The pre-commit hook lives at `~/.claude/mcp-servers/.git/hooks/pre-commit` and is installed by `simple-task-manager/setup-hooks.ts`.
