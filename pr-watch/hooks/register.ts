@@ -4,7 +4,7 @@ import type { PrRef } from './gh.ts'
 import { ghOf, prRefOf } from './gh.ts'
 import { commit, ledgerKey, loadLedger, pruneLedgers, unseen } from './ledger.ts'
 import type { TaskLabel } from './messages.ts'
-import { errorText, eventLine, promptText, rulesSection, shortLine } from './messages.ts'
+import { BACKOFF_LINE, errorText, eventLine, promptText, rulesSection, shortLine, statusLine, watchLabel } from './messages.ts'
 import type { PollConfig } from './poll.ts'
 import { newLedger, pollPr } from './poll.ts'
 import type { TaskCall } from './taskWrites.ts'
@@ -95,10 +95,10 @@ async function watchedPrs($: EngineInterface, call: TaskCall): Promise<Watched[]
   return [...prs.values()]
 }
 
-async function watchPr($: EngineInterface, call: TaskCall, cfg: Config, { pr, task }: Watched, lines: string[]): Promise<void> {
+async function watchPr($: EngineInterface, call: TaskCall, cfg: Config, { pr, task }: Watched, lines: string[]): Promise<string | undefined> {
   const key = ledgerKey(pr)
   const stored = await loadLedger($, key)
-  if (stored?.phase === 'done') return
+  if (stored?.phase === 'done') return undefined
   const ledger = stored ?? newLedger()
   const now = await $.clock.now()
   const { status, events } = await pollPr(ghOf($), pr, ledger, now, cfg, stored === undefined)
@@ -114,6 +114,8 @@ async function watchPr($: EngineInterface, call: TaskCall, cfg: Config, { pr, ta
     if (!event.turn || ledger.quiet === true) continue
     lines.push(eventLine(pr, task, event))
   }
+
+  return watchLabel(pr, status, ledger, cfg.workflow)
 }
 
 async function cycle($: EngineInterface, cfg: Config): Promise<void> {
@@ -123,18 +125,25 @@ async function cycle($: EngineInterface, cfg: Config): Promise<void> {
     watched = await watchedPrs($, call)
   } catch (error) {
     // No task-manager in this session: nothing to watch, and nothing to report.
-    if (error instanceof TaskManagerAbsent) return
+    if (error instanceof TaskManagerAbsent) {
+      $.ui.status(undefined)
+      return
+    }
     throw error
   }
   const lines: string[] = []
+  const labels: string[] = []
   let failure: string | undefined
   for (const entry of watched) {
     try {
-      await watchPr($, call, cfg, entry, lines)
+      const label = await watchPr($, call, cfg, entry, lines)
+      if (label !== undefined) labels.push(label)
     } catch (error) {
       failure = error instanceof Error ? error.message : String(error)
+      labels.push(`#${entry.pr.number} poll failed`)
     }
   }
+  $.ui.status(statusLine(labels))
   if (lines.length > 0) void $.prompt.submit({ text: promptText(lines) })
   if (failure !== undefined) throw new Error(failure)
 }
@@ -154,6 +163,7 @@ async function tick($: EngineInterface, cfg: Config): Promise<void> {
     fails += 1
     if (fails >= FAIL_LIMIT) {
       nextAt = now + BACKOFF_MS
+      $.ui.status(BACKOFF_LINE)
       if (!isLoud) {
         isLoud = true
         const reason = error instanceof Error ? error.message : String(error)

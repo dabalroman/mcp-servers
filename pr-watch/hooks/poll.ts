@@ -47,7 +47,7 @@ const snippet = (text: string | null | undefined): string => {
   return t ? `: ${t}` : ''
 }
 
-const workflowName = (file: string): string => file.replace(/\.ya?ml$/, '')
+export const workflowName = (file: string): string => file.replace(/\.ya?ml$/, '')
 
 async function list(gh: Gh, path: string): Promise<unknown[]> {
   const pages = (await gh.json(['api', '--paginate', '--slurp', path])) as unknown[][]

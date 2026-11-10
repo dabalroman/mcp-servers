@@ -34,11 +34,16 @@ function world(on: On, tasks: Task[], branch = 'main') {
   const notes: { taskId: number; body: string }[] = []
   const prompts: string[] = []
   const failing = { notes: 0 }
+  const status: (string | undefined)[] = []
   const byId = new Map(tasks.map(t => [t.id, t]))
   const epicOf = (t: Task) => (t.parentId === undefined ? {} : { epic: { id: t.parentId } })
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('ui.toast', () => ({ value: undefined }))
+  on('ui.status', (_, e) => {
+    status.push(e.text)
+    return { value: undefined }
+  })
   on('prompt.submit', (_, e) => {
     prompts.push(e.text)
     return { text: e.text }
@@ -78,7 +83,7 @@ function world(on: On, tasks: Task[], branch = 'main') {
     }
   })
 
-  return { gh, ghCalls, notes, prompts, byId, failing }
+  return { gh, ghCalls, notes, prompts, byId, failing, status }
 }
 
 async function start($: Engine, on: On) {
@@ -118,6 +123,7 @@ test('green checks and an approval write approved; a new push with pending check
   await poll()
   expect(w.byId.get(1)!.prs).toEqual([pr(5, 'open')])
   expect(w.prompts).toEqual([])
+  expect(w.status).toEqual(['pr-watch: #5 approved', 'pr-watch: #5 open'])
 })
 
 test('a failed check starts one turn, and the next poll does not report it again', async ($, on) => {

@@ -1,5 +1,6 @@
 import type { PrRef } from './gh.ts'
-import type { PrEvent } from './poll.ts'
+import type { Ledger, PrEvent, PrStatus } from './poll.ts'
+import { workflowName } from './poll.ts'
 
 export type TaskLabel = { id: number; title: string }
 
@@ -7,6 +8,22 @@ export const eventLine = (pr: PrRef, task: TaskLabel | undefined, event: PrEvent
   `PR #${pr.number}${task === undefined ? '' : ` (#${task.id} ${task.title})`} ${event.line} ${pr.url}`
 
 export const shortLine = (pr: PrRef, event: PrEvent): string => `PR #${pr.number} ${event.line}`
+
+export const BACKOFF_LINE = 'pr-watch: gh failing, retry in 10 min'
+
+// A finished PR (deployed, closed, deploy over) has no label: it drops off the line.
+export function watchLabel(pr: PrRef, status: PrStatus | undefined, ledger: Ledger, workflow: string): string | undefined {
+  if (ledger.phase === 'done') return undefined
+  if (ledger.phase === 'deploy') {
+    return `#${pr.number} merged, ${workflowName(workflow)} ${ledger.run === undefined ? 'waiting' : 'running'}`
+  }
+  const label = `#${pr.number} ${status ?? 'open'}`
+
+  return ledger.failed === true ? `${label}, checks failing` : label
+}
+
+export const statusLine = (labels: string[]): string =>
+  `pr-watch: ${labels.length === 0 ? 'idle' : labels.join(' · ')}`
 
 export function promptText(lines: string[]): string {
   return ['pr-watch:', ...lines.map(line => `- ${line}`)].join('\n')
