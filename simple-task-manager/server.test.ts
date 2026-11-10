@@ -14,7 +14,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { createStore, type AddInput, type Store, type StatusFilter } from './tasks.js';
+import { createStore, parseSince, type AddInput, type Store, type StatusFilter } from './tasks.js';
 import { buildInstructions } from './instructions.js';
 import { PACKAGE_DIR } from './packageDir.js';
 import { ENV_ORDER } from './mcpConfig.js';
@@ -24,6 +24,7 @@ import {
   handleGetById,
   handleGetByExternalId,
   handleGetByPr,
+  handleGetUpdates,
   handleGetRelated,
   handleGetOverview,
   handleGetScopes,
@@ -1203,6 +1204,79 @@ describe('getByPr handler', () => {
       assert.equal(res.isError, true);
       assert.match(JSON.stringify(decode(res)), /Validation failed/);
     }
+  });
+});
+
+describe('parseSince', () => {
+  test('ISO, SQLite datetime, and epoch seconds/ms all normalize to the same cursor', () => {
+    const d = new Date('2026-01-02T03:04:05Z');
+    const sqlite = '2026-01-02 03:04:05';
+    assert.equal(parseSince('2026-01-02T03:04:05Z'), sqlite);
+    assert.equal(parseSince(sqlite), sqlite);
+    assert.equal(parseSince(Math.floor(d.getTime() / 1000)), sqlite);
+    assert.equal(parseSince(String(Math.floor(d.getTime() / 1000))), sqlite);
+    assert.equal(parseSince(d.getTime()), sqlite);
+  });
+});
+
+describe('getUpdates handler', () => {
+  function setUpdatedAt(id: number, ts: string): void {
+    store.db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(ts, id);
+  }
+
+  test('since is inclusive at the boundary and tasks are sorted by updated_at then id', async () => {
+    const a = addTask({ title: 'A' }).id;
+    const b = addTask({ title: 'B' }).id;
+    setUpdatedAt(a, '2026-01-01 00:00:00');
+    setUpdatedAt(b, '2026-01-01 00:00:00');
+    const resp = decode(await handleGetUpdates(store, { since: '2026-01-01 00:00:00' }, CTX)) as { asOf: string; tasks: { id: number }[] };
+    assert.deepEqual(resp.tasks.map((t) => t.id), [a, b]);
+    assert.match(resp.asOf, /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/);
+  });
+
+  test('epicId returns the epic and its children; an unrelated task is excluded', async () => {
+    const epic = addTask({ type: 'epic', title: 'Epic' }).id;
+    const child = addTask({ type: 'feature', title: 'Child', parentId: epic }).id;
+    addTask({ title: 'Other' });
+    const resp = decode(await handleGetUpdates(store, { since: '2020-01-01 00:00:00', epicId: epic }, CTX)) as { tasks: { id: number }[] };
+    assert.deepEqual(resp.tasks.map((t) => t.id).sort((x, y) => x - y), [epic, child].sort((x, y) => x - y));
+  });
+
+  test('a task moved to done is still reported', async () => {
+    const { id } = addTask();
+    setUpdatedAt(id, '2026-01-01 00:00:00');
+    handleSetStatus(store, { id, status: 'done' });
+    const resp = decode(await handleGetUpdates(store, { since: '2026-01-01 00:00:01' }, CTX)) as { tasks: { id: number; status: string }[] };
+    assert.deepEqual(resp.tasks.map((t) => ({ id: t.id, status: t.status })), [{ id, status: 'done' }]);
+  });
+
+  test('only notes created or edited since the cursor are attached', async () => {
+    const { id } = addTask();
+    const old = store.addNote(id, 'old')!;
+    store.db.prepare('UPDATE notes SET created_at = ?, updated_at = ? WHERE id = ?').run('2020-01-01 00:00:00', '2020-01-01 00:00:00', old.id);
+    setUpdatedAt(id, '2020-01-01 00:00:00');
+    store.addNote(id, 'new');
+    const resp = decode(await handleGetUpdates(store, { since: '2025-01-01 00:00:00' }, CTX)) as { tasks: { id: number; notes?: { body: string }[] }[] };
+    assert.equal(resp.tasks.length, 1);
+    assert.deepEqual(resp.tasks[0]?.notes?.map((n) => n.body), ['new']);
+  });
+
+  test('a deleted requested id lands in missing; the field is omitted when nothing is missing', async () => {
+    const { id: gone } = addTask();
+    const { id: kept } = addTask();
+    store.delete(gone);
+    const since = '2020-01-01 00:00:00';
+    const withMissing = decode(await handleGetUpdates(store, { since, ids: [gone, kept] }, CTX)) as { tasks: { id: number }[]; missing?: number[] };
+    assert.deepEqual(withMissing.missing, [gone]);
+    assert.deepEqual(withMissing.tasks.map((t) => t.id), [kept]);
+    const noMissing = decode(await handleGetUpdates(store, { since, ids: [kept] }, CTX));
+    assert.equal('missing' in noMissing, false);
+  });
+
+  test('an unparseable since is a tool error', async () => {
+    const resp = await handleGetUpdates(store, { since: 'not-a-date' }, CTX);
+    assert.equal(resp.isError, true);
+    assert.match(String(decode(resp)['error']), /Validation failed/);
   });
 });
 

@@ -99,6 +99,9 @@ If another command uses the same name, the namespaced form works too (`/tm:imple
 - **Pull requests** — a task's PRs/MRs show as linked status tags on its card. Ask Claude to "turn
   on PR tracking" for a project and it records them as it opens them. `getByPr` finds the tasks of a PR by url
   or repo + number.
+- **Polling for changes** - `getUpdates` returns tasks (and their new/edited notes) changed since a
+  timestamp, filterable by ids, epic or scope, so a session can notice another session's or the UI's
+  edits without re-polling every task.
 
 Claude calls the tools itself: `add`, `update`, `setStatus`, `getNext`, `getAll`, `getById`,
 `addNote`, `health`, and more. Each describes itself to Claude when it connects.

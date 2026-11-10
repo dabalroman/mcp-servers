@@ -429,6 +429,31 @@ export type ProjectEntry = { id: string; name: string; total: number; open: numb
 export type StatusFilter = TaskStatus | 'open';
 export type ListFilter = { status?: StatusFilter; type?: TaskType; scope?: string };
 
+export type GetUpdatesFilter = { since: string | number; ids?: number[]; epicId?: number; scope?: string };
+export type GetUpdatesResult = { asOf: string; tasks: Task[]; missing: number[] };
+
+const SQLITE_DATETIME_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+const EPOCH_MS_THRESHOLD = 1e11;
+
+export function parseSince(since: string | number): string {
+  const trimmed = typeof since === 'number' ? String(since) : since.trim();
+  if (/^-?\d+$/.test(trimmed)) {
+    const num = Number(trimmed);
+    const ms = Math.abs(num) > EPOCH_MS_THRESHOLD ? num : num * 1000;
+    return toSqliteUtc(new Date(ms));
+  }
+  if (SQLITE_DATETIME_RE.test(trimmed)) return trimmed;
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) {
+    throw new Error(`Validation failed: since "${since}" is not a valid date (expected ISO 8601, 'YYYY-MM-DD HH:MM:SS' UTC, or epoch seconds/ms).`);
+  }
+  return toSqliteUtc(date);
+}
+
+function toSqliteUtc(d: Date): string {
+  return d.toISOString().slice(0, 19).replace('T', ' ');
+}
+
 // Expands 'open' or undefined to the list of non-done statuses.
 // 'open' and undefined both mean non-done; a specific TaskStatus means exact match.
 export function resolveStatusFilter(status?: StatusFilter): TaskStatus[] | TaskStatus {
@@ -456,6 +481,7 @@ export type Store = {
   getScopes(project: string): ScopeEntry[];
   getById(id: number): Task | null;
   getAll(project: string, filter?: ListFilter): Task[];
+  getUpdates(project: string, filter: GetUpdatesFilter): GetUpdatesResult;
   getProjects(): ProjectEntry[];
   createProject(name: string): { id: string; name: string };
   updateProject(id: string, settings: ProjectSettings): { id: string; name: string; trackPrs: boolean };
@@ -1102,6 +1128,34 @@ export function createStore(dbPath: string): Store {
     return sortByPriority(attachRefs(db.prepare(sql).all(...params) as TaskRow[]));
   }
 
+  function getUpdates(project: string, filter: GetUpdatesFilter): GetUpdatesResult {
+    const since = parseSince(filter.since);
+    const asOf = (db.prepare(`SELECT datetime('now') AS now`).get() as { now: string }).now;
+
+    const requestedIds = [...new Set([...(filter.ids ?? []), ...(filter.epicId !== undefined ? [filter.epicId] : [])])];
+    const validIds = requestedIds.length ? getValidIds() : undefined;
+    const missing = validIds ? requestedIds.filter((id) => !validIds.has(id)) : [];
+
+    let sql = 'SELECT * FROM tasks WHERE project = ? AND updated_at >= ?';
+    const params: (string | number)[] = [project, since];
+    if (filter.scope !== undefined) { sql += ' AND scope = ?'; params.push(filter.scope); }
+    if ((filter.ids?.length ?? 0) > 0 || filter.epicId !== undefined) {
+      const clauses: string[] = [];
+      if (filter.ids?.length) {
+        clauses.push(`id IN (${filter.ids.map(() => '?').join(', ')})`);
+        params.push(...filter.ids);
+      }
+      if (filter.epicId !== undefined) {
+        clauses.push('id = ?', 'parent_id = ?');
+        params.push(filter.epicId, filter.epicId);
+      }
+      sql += ` AND (${clauses.join(' OR ')})`;
+    }
+    sql += ' ORDER BY updated_at ASC, id ASC';
+    const rows = db.prepare(sql).all(...params) as TaskRow[];
+    return { asOf, tasks: attachRefs(rows, true), missing };
+  }
+
   function getRelated(id: number, status?: StatusFilter): RelatedResult | null {
     const task = readTask(id);
     if (!task) return null;
@@ -1364,6 +1418,7 @@ export function createStore(dbPath: string): Store {
     getScopes,
     getById,
     getAll,
+    getUpdates,
     getProjects,
     createProject,
     updateProject,

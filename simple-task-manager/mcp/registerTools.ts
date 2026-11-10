@@ -9,6 +9,7 @@ import {
   handleGetById,
   handleGetByExternalId,
   handleGetByPr,
+  handleGetUpdates,
   handleGetRelated,
   handleGetScopes,
   handleGetProjects,
@@ -227,6 +228,22 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     'Find the tasks that track a pull/merge request — call this whenever you handle a PR event or a PR url/number the user names. Pass url, or repo + number. Searches all statuses (done included) and all projects. Returns { pr, tasks } — pr is the parsed { host?, repo, number }; tasks are list entries (with prs) sorted by id, each with a slim epic { id, title, status, summary? } when it belongs to one; empty when none match.',
     getByPrSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getByPrSchema>>): Promise<MCPContent> => handleGetByPr(store, args))
+  );
+
+  // ── getUpdates ────────────────────────────────────────────────────────────────
+  const getUpdatesSchema = {
+    since: z.union([z.string().min(1), z.number()])
+      .describe('Only tasks updated at or after this instant (inclusive). ISO 8601, SQLite \'YYYY-MM-DD HH:MM:SS\' (UTC), or epoch seconds/ms (number or numeric string). Pass the asOf from your previous getUpdates call to poll for the next batch.'),
+    ids: z.array(z.number().int().positive()).optional().describe('Only these task ids (optional). ORed with epicId when both are given; omit both to poll the whole project/scope.'),
+    epicId: z.number().int().positive().optional().describe('Only this epic and its children (optional). ORed with ids when both are given.'),
+    scope: z.string().optional().describe('Only this scope (optional), ANDed with ids/epicId.'),
+    project: projectParam,
+  };
+  server.tool(
+    'getUpdates',
+    'Poll for tasks changed since a timestamp; use this instead of re-calling getById/getAll to check whether a watched task or epic changed. Every status is included (no type/status filter), so a task moving to done is reported; filters are ANDed except ids/epicId which are ORed together. Returns { asOf, tasks, missing? }: asOf is the server\'s current time: store it and pass it as `since` on your next call. tasks are list-shaped (see getAll) plus a `notes` array of only the notes added or edited since `since` (omitted when none). missing lists requested ids/epicId that no longer exist (deleted), omitted when empty. Dedupe on (id, updated_at) across polls: several edits between polls collapse into one entry, and a same-second write can appear in two consecutive polls.',
+    getUpdatesSchema,
+    withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getUpdatesSchema>>): Promise<MCPContent> => handleGetUpdates(store, args, ctx))
   );
 
   // ── getRelated ────────────────────────────────────────────────────────────────

@@ -5,7 +5,7 @@ import * as http from 'node:http';
 import { networkInterfaces, homedir } from 'node:os';
 import Database from 'better-sqlite3';
 import { text, errorText, toListTask, notFoundError, resolveProject, type MCPContent, type SessionContext } from './shared.js';
-import { ALL_TYPES, staleSchemaMessage } from '../tasks.js';
+import { ALL_TYPES, staleSchemaMessage, parseSince } from '../tasks.js';
 import { ENV_ORDER, LEGACY_ENV_KEYS, pm2AppName } from '../mcpConfig.js';
 import { resolvePrLookup } from '../prUrl.js';
 import { PACKAGE_DIR } from '../packageDir.js';
@@ -68,6 +68,26 @@ export async function handleGetRelated(store: Store, { id, status }: { id: numbe
     outbound: result.outbound.map((t) => ({ ...toListTask(t), refRelation: t.refRelation })),
     inbound:  result.inbound.map((t)  => ({ ...toListTask(t), refRelation: t.refRelation })),
   });
+}
+
+export async function handleGetUpdates(
+  store: Store,
+  { since, ids, epicId, scope, project }: { since: string | number; ids?: number[]; epicId?: number; scope?: string; project?: string },
+  ctx: SessionContext
+): Promise<MCPContent> {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
+  try {
+    const normalizedSince = parseSince(since);
+    const result = store.getUpdates(p, { since, ids, epicId, scope });
+    const tasks = result.tasks.map((task) => {
+      const recentNotes = (task.notes ?? []).filter((n) => n.created_at >= normalizedSince || n.updated_at >= normalizedSince);
+      return { ...toListTask(task), ...(recentNotes.length ? { notes: recentNotes } : {}) };
+    });
+    return text({ asOf: result.asOf, tasks, ...(result.missing.length ? { missing: result.missing } : {}) });
+  } catch (err) {
+    return errorText({ error: err instanceof Error ? err.message : String(err) });
+  }
 }
 
 export async function handleGetScopes(store: Store, { project }: { project?: string }, ctx: SessionContext): Promise<MCPContent> {
