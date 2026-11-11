@@ -117,8 +117,18 @@ export type EpicProgress = { done: number; total: number };
 export type EpicTree = { roots: Task[]; childrenByEpic: Map<number, Task[]>; anchors: Map<number, Task> };
 
 // Nests over the whole tab, before grouping, so a child sits under its epic whatever the Group by.
-// Roots are `own` (the tab's tasks) plus any epic from `others` (the other tab) with an own child;
-// an epic's children are drawn from `own` + `others`, all ordered by the current sort.
+// An epic's children in execution order: seq asc (unset last), then id asc. Ignores the list sort.
+export function sortBySeq(tasks: Task[]): Task[] {
+  return [...tasks].sort((a, b) => {
+    const sa = a.seq ?? Infinity;
+    const sb = b.seq ?? Infinity;
+    if (sa !== sb) return sa < sb ? -1 : 1;
+    return a.id - b.id;
+  });
+}
+
+// Roots are `own` (the tab's tasks) plus any epic from `others` (the other tab) with an own child,
+// ordered by the current sort; an epic's children are drawn from `own` + `others` in seq order.
 // A child whose epic is in neither list stays a root.
 export function nestEpicChildren(own: Task[], others: Task[], sortBy: SortBy, sortDir: SortDir): EpicTree {
   const ownEpicIds = new Set(own.filter((t) => t.type === 'epic').map((t) => t.id));
@@ -130,6 +140,7 @@ export function nestEpicChildren(own: Task[], others: Task[], sortBy: SortBy, so
   const ownIds = new Set(own.map((t) => t.id));
   const childrenByEpic = new Map<number, Task[]>();
   const anchors = new Map<number, Task>();
+  // Anchors (which group a pulled-in epic sits in) follow the list sort; the children themselves run in seq order.
   for (const task of sortTasks([...own, ...others].filter(isNested), sortBy, sortDir)) {
     if (task.parentId === undefined) continue;
     const bucket = childrenByEpic.get(task.parentId);
@@ -137,6 +148,7 @@ export function nestEpicChildren(own: Task[], others: Task[], sortBy: SortBy, so
     else childrenByEpic.set(task.parentId, [task]);
     if (!ownEpicIds.has(task.parentId) && ownIds.has(task.id) && !anchors.has(task.parentId)) anchors.set(task.parentId, task);
   }
+  for (const [epicId, kids] of childrenByEpic) childrenByEpic.set(epicId, sortBySeq(kids));
   return { roots, childrenByEpic, anchors };
 }
 

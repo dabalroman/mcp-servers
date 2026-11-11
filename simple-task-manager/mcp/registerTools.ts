@@ -26,11 +26,14 @@ import {
   handleDelete,
   handleCreateProject,
   handleUpdateProject,
+  handleReorder,
   handleUiStart,
   handleUiStop,
 } from './mutationHandlers.js';
 
 const PARENT_ID_RULE = 'Optional id of the epic this task belongs to. Must point to a task of type "epic"; an epic itself cannot have a parent (no nesting) and a task belongs to at most one epic. Violations return an error.';
+
+const SEQ_RULE = "Execution step among the epic's children: 10, 20, 30 (gaps leave room to insert 15); siblings with an equal seq are a parallel group. Needs parentId. To order a whole epic use reorder.";
 
 const statusParam = z.enum(['refinement', 'plan', 'todo', 'in_progress', 'done', 'open']).optional()
   .describe('Filter by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a specific status (incl. "done") for exact match.');
@@ -58,6 +61,8 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
       .describe('Initial status. ALWAYS leave as default "refinement" unless one of these holds: (a) the user explicitly told you to skip refinement / mark as todo, or (b) you just refined this exact task with the user in the current conversation. Otherwise pass "refinement" (or omit the field). Choosing "todo" without one of those conditions is a rule violation — when in doubt, pick "refinement".'),
     parentId: z.number().int().positive().optional()
       .describe(PARENT_ID_RULE),
+    seq: z.number().int().positive().optional()
+      .describe(SEQ_RULE),
     externalId: z.string().optional()
       .describe('External tracker ticket ID (JIRA/Asana/…, e.g. "OPXPIQ-6532"). Set it whenever the user names a ticket ID for this task. Find tasks by it later with getByExternalId.'),
     prs: prsSchema
@@ -88,7 +93,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   };
   server.tool(
     'getNext',
-    'Get the single next actionable task — use for "what should I do next?", "what\'s next?", or any recommendation request. Sort order: in_progress first (resume interrupted work), then refinement, then plan, then todo, then highest priority, then newest id (FILO). With no type filter the type order is bug > tool > feature > idea > other. Never returns an epic — its children are the actionable work.',
+    'Get the single next actionable task — use for "what should I do next?", "what\'s next?", or any recommendation request. Sort order: in_progress first (resume interrupted work), then refinement, then plan, then todo, then highest priority, then newest id (FILO); an epic\'s children rank as one block (by its highest-priority open child), lowest seq first. With no type filter the type order is bug > tool > feature > idea > other. Never returns an epic — its children are the actionable work.',
     getNextSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getNextSchema>>): Promise<MCPContent> => handleGetNext(store, args, ctx))
   );
@@ -111,7 +116,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   const getByIdSchema = { id: z.coerce.number().int().positive().describe('The numeric task ID to look up') };
   server.tool(
     'getById',
-    'Get a single task by its numeric ID — returns the full task including both summary (if set) and description, plus notes (oldest first) when the task has any, and refs as { id, relation, title } so you can tell what each linked task is without fetching it. A task in an epic also carries `epic` { id, title, status, summary, description, notes } — the epic\'s full text and notes, authoritative context for the child (order, goals, rules). An epic carries `children` [{ id, title, status, type, priority }] ordered by id. List methods carry only parentId + epicTitle. List tools omit description when a summary is present and show only noteCount, so use this for the full body. Use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Returns an error listing valid IDs if not found.',
+    'Get a single task by its numeric ID — returns the full task including both summary (if set) and description, plus notes (oldest first) when the task has any, and refs as { id, relation, title } so you can tell what each linked task is without fetching it. A task in an epic also carries `epic` { id, title, status, summary, description, notes } — the epic\'s full text and notes, authoritative context for the child (order, goals, rules). An epic carries `children` [{ id, title, status, type, priority, seq }] in execution order: by seq, unset last, then id. List methods carry only parentId + epicTitle. List tools omit description when a summary is present and show only noteCount, so use this for the full body. Use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Returns an error listing valid IDs if not found.',
     getByIdSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getByIdSchema>>): Promise<MCPContent> => handleGetById(store, args))
   );
@@ -147,6 +152,8 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
       .describe('Full replacement list of the task\'s pull/merge requests ({ url, number, status: draft|open|pipeline_pass|approved|merged|deployed|closed }), or null / empty array to clear. Include every PR you want to keep; to change a status, resend the list with the new status. Works in every project, whether or not it tracks PRs.'),
     parentId: z.number().int().positive().nullable().optional()
       .describe(`${PARENT_ID_RULE} Pass null to detach the task from its epic.`),
+    seq: z.number().int().positive().nullable().optional()
+      .describe(`${SEQ_RULE} Pass null to clear it. Changing parentId clears it unless you pass a new one.`),
     project: z.string().min(1).optional()
       .describe('Move the task to this project id. Must already exist (see getProjects). Omit to keep its current project.'),
   };
@@ -284,6 +291,19 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     'Create a new, empty project. Only call this when the user asks for a new project — never to make an unknown `project` argument work. The id is derived from the name (lowercase, a–z, 0–9 and \'-\', e.g. "Random Tools" → random-tools) and never changes. Returns { success, project: { id, name } }, or an error if that id is already taken.',
     createProjectSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof createProjectSchema>>): Promise<MCPContent> => handleCreateProject(store, args))
+  );
+
+  // ── reorder ───────────────────────────────────────────────────────────────────
+  const reorderSchema = {
+    epicId: z.coerce.number().int().positive().describe('The epic whose children to order'),
+    order: z.array(z.union([z.number().int().positive(), z.array(z.number().int().positive()).min(1)])).min(1)
+      .describe('Child ids in execution order; a nested array is a parallel group, e.g. [12, [13, 14], 15]. Every id must be a child of epicId.'),
+  };
+  server.tool(
+    'reorder',
+    "Set an epic's execution order: group i gets seq (i+1)*10, children in a nested array share it (run in parallel), unlisted children lose their seq. seq orders getNext and getById(epic).children; it is a hint, not a gate. Returns { success, epicId, children: [{ id, seq }] }.",
+    reorderSchema,
+    withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof reorderSchema>>): Promise<MCPContent> => handleReorder(store, args))
   );
 
   // ── updateProject ─────────────────────────────────────────────────────────────

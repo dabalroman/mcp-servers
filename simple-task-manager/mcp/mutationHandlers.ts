@@ -111,6 +111,15 @@ export function handleSetStatus(store: Store, { id, status }: { id: number; stat
   })();
 }
 
+export function handleReorder(store: Store, { epicId, order }: { epicId: number; order: (number | number[])[] }): MCPContent {
+  try {
+    const children = store.reorder(epicId, order).map(({ id, seq }) => (seq === undefined ? { id } : { id, seq }));
+    return text({ success: true, epicId, children });
+  } catch (err) {
+    return errorText({ error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
 export function handleCreateProject(store: Store, { name }: { name: string }): MCPContent {
   try {
     return text({ success: true, project: store.createProject(name) });

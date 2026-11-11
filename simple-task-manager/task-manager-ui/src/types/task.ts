@@ -53,6 +53,8 @@ export type Task = {
   plan?: string;
   scope?: string;
   parentId?: number;
+  // Execution step among the epic's children (10, 20, 30; equal = parallel group).
+  seq?: number;
   externalId: string | null;
   epicTitle?: string;
   refs?: TaskRef[];

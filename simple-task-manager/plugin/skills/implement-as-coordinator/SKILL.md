@@ -24,7 +24,7 @@ Tasks named later ("add 46 to your queue") join the live queue: re-plan, don't r
 
 ## Epic mode
 
-- **Epic is authoritative.** Read its description and notes first. Its Order of execution replaces Step 1.3's overlap ordering (overlap still decides what may run in parallel); its Rules beat this skill's defaults (branching, what waits on what) and its gates are breakpoints too.
+- **Epic is authoritative.** Read it via `getById` first: description, notes and `children`. The children's `seq` (unset last, then id) replaces Step 1.3's overlap ordering; children sharing a `seq` are a parallel group (overlap can still veto running them together). Its Order of execution gates and Rules beat this skill's defaults (branching, what waits on what), and its gates are breakpoints too.
 - **Epic status** follows its children (`setStatus` syncs it); skipped children keep it open.
 - **Unready children.** A child in `refinement` or `plan` is skipped, not refined (overrides Step 1.2), and so is a ready child ordered after a skipped one. The final report lists them with "run `/tm:refine #NN`" (or "plan #NN").
 - **Commit mode.** Before the first dispatch ask once: "Commit each child as it lands?". On yes, commit each child (each phase, if its plan has phases — dispatch one agent per phase: "implement only phase K of task NN") once it passes Step 3, Step 4's build-all and Step 6 on its own diff. Fixes and feedback on a committed child become a new commit titled with its id, never mashed into another child's. A child parked at a breakpoint is committed only after the user's lgtm. Then `setStatus(child, 'done')` and Step 9.6's epic note. On no, the normal approval flow applies; Step 9 then has only the uncommitted children.

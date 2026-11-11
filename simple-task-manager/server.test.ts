@@ -42,6 +42,7 @@ import {
   handleDelete,
   handleCreateProject,
   handleUpdateProject,
+  handleReorder,
 } from './mcp/mutationHandlers.js';
 import { withSchemaCheck, prsSchema, type MCPContent } from './mcp/shared.js';
 import Database from 'better-sqlite3';
@@ -1148,6 +1149,34 @@ describe('epics — MCP layer', () => {
 });
 
 // ── Instructions split + plugin rules hook ───────────────────────────────────
+
+describe('reorder handler', () => {
+  test('returns the children in execution order with their seq; getById(epic) matches', async () => {
+    const epic = addTask({ type: 'epic', title: 'Example epic' }).id;
+    const [a, b, c] = [1, 2, 3].map(() => addTask({ parentId: epic }).id) as [number, number, number];
+    const resp = decode(handleReorder(store, { epicId: epic, order: [b, [a, c]] }));
+    assert.deepEqual(resp, { success: true, epicId: epic, children: [{ id: b, seq: 10 }, { id: a, seq: 20 }, { id: c, seq: 20 }] });
+    const kids = (decode(await handleGetById(store, { id: epic })) as { task: { children: { id: number; seq?: number }[] } }).task.children;
+    assert.deepEqual(kids.map((k) => k.seq), [10, 20, 20]);
+  });
+
+  test('a foreign id is an error result and changes nothing', () => {
+    const epic = addTask({ type: 'epic', title: 'Example epic' }).id;
+    const a = addTask({ parentId: epic }).id;
+    const stray = addTask().id;
+    const resp = handleReorder(store, { epicId: epic, order: [a, stray] });
+    assert.equal(resp.isError, true);
+    assert.match(String(decode(resp)['error']), /not children of epic/);
+    assert.equal(store.getById(a)?.seq, undefined);
+  });
+
+  test('add/update handlers reject seq without parentId', () => {
+    const resp = handleAdd(store, { type: 'bug', priority: 'low', title: 'Loose', description: '', seq: 10 }, CTX);
+    assert.equal(resp.isError, true);
+    const { id } = addTask();
+    assert.equal(handleUpdate(store, { id, seq: 10 }).isError, true);
+  });
+});
 
 describe('externalId — MCP layer', () => {
   test('add with externalId is returned by getById', async () => {

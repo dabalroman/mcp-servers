@@ -95,6 +95,7 @@ describe('MCP over Streamable HTTP', () => {
     const names = (await client.listTools()).tools.map((t) => t.name);
     assert.ok(names.includes('getNext'));
     assert.ok(names.includes('add'));
+    assert.ok(names.includes('reorder'));
     assert.ok(!names.includes('ui-start'));
     assert.ok(!names.includes('ui-stop'));
   });
