@@ -80,13 +80,13 @@ describe('/api/projects', () => {
     await request(app).post('/api/tasks/').send({ project: 'default', type: 'bug', priority: 'high', title: 'T' });
     const res = await request(app).get('/api/projects/');
     expect(res.status).toBe(200);
-    expect(res.body).toEqual([{ id: 'default', name: 'default', total: 1, open: 1, trackPrs: false }]);
+    expect(res.body).toEqual([{ id: 'default', name: 'default', description: '', total: 1, open: 1, trackPrs: false }]);
   });
 
   it('POST creates a project with a derived id; a taken id or empty name is a 400', async () => {
     const created = await request(app).post('/api/projects/').send({ name: 'Example Project' });
     expect(created.status).toBe(200);
-    expect(created.body).toEqual({ id: 'example-project', name: 'Example Project' });
+    expect(created.body).toEqual({ id: 'example-project', name: 'Example Project', description: '' });
     expect((await request(app).post('/api/projects/').send({ name: 'Example-Project' })).status).toBe(400);
     expect((await request(app).post('/api/projects/').send({ name: ' ' })).status).toBe(400);
     const list = await request(app).get('/api/projects/');
@@ -97,9 +97,20 @@ describe('/api/projects', () => {
     await request(app).post('/api/projects/').send({ name: 'example-project' });
     const res = await request(app).patch('/api/projects/example-project').send({ name: 'Example Project', trackPrs: true });
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ id: 'example-project', name: 'Example Project', trackPrs: true });
+    expect(res.body).toEqual({ id: 'example-project', name: 'Example Project', description: '', trackPrs: true });
     const list = await request(app).get('/api/projects/');
     expect(list.body.find((p: { id: string }) => p.id === 'example-project')).toMatchObject({ name: 'Example Project', trackPrs: true });
+  });
+
+  it('POST and PATCH carry a description; an over-long one is a 400', async () => {
+    const created = await request(app).post('/api/projects/').send({ name: 'example-project', description: ' Covers the example tool. ' });
+    expect(created.body).toEqual({ id: 'example-project', name: 'example-project', description: 'Covers the example tool.' });
+    const res = await request(app).patch('/api/projects/example-project').send({ description: 'Example scope' });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ id: 'example-project', name: 'example-project', description: 'Example scope', trackPrs: false });
+    expect((await request(app).patch('/api/projects/example-project').send({ description: 'x'.repeat(281) })).status).toBe(400);
+    const list = await request(app).get('/api/projects/');
+    expect(list.body.find((p: { id: string }) => p.id === 'example-project')).toMatchObject({ description: 'Example scope' });
   });
 
   it('PATCH /:id is a 400 for a duplicate name, an empty patch or an unknown id', async () => {

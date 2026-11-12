@@ -45,6 +45,8 @@ export type Task = {
   description: string;
   plan?: string;
   parentId?: number;
+  // Step among the epic's children (10, 20, 30; equal = parallel group). Only on epic children.
+  seq?: number;
   // Always present (null when unset), unlike the other optionals, so agents can rely on the key.
   externalId: string | null;
   epicTitle?: string;
@@ -71,7 +73,7 @@ export type PrQuery = { url: string } | { repo?: string; number?: number };
 
 export type PrMatch = { task: Task; epic?: { id: number; title: string; status: TaskStatus; summary?: string } };
 
-export type EpicChild = { id: number; title: string; status: TaskStatus; type: TaskType; priority: TaskPriority };
+export type EpicChild = { id: number; title: string; status: TaskStatus; type: TaskType; priority: TaskPriority; seq?: number };
 
 export type Note = {
   id: number;
@@ -255,7 +257,7 @@ function runMigrations(db: DB): Set<string> {
 }
 
 // ── Schema ────────────────────────────────────────────────────────────────────
-// Current shape after every migration in ./migrations/ (last: 20261109120000_add-pr-pipeline-approved-status).
+// Current shape after every migration in ./migrations/ (last: 20261112120000_add-task-seq).
 // Hand-kept: update it in the same commit as any migration. Timestamps are TEXT
 // datetime('now') (UTC), booleans INTEGER 0/1. Behaviour: docs/claude/storage-and-migrations.md.
 //
@@ -266,6 +268,7 @@ function runMigrations(db: DB): Set<string> {
 //   priority TEXT NOT NULL CHECK IN (low, medium, high, critical)
 //   scope, summary, description, plan, external_id TEXT NULL
 //   parent_id INTEGER NULL FK tasks(id) ON DELETE SET NULL — the task's epic
+//   seq INTEGER NULL — step among the epic's children (#570); ignored on read when parent_id is NULL
 //   project TEXT NOT NULL COLLATE NOCASE FK projects(id) ON UPDATE CASCADE — no default, on purpose
 //   created_at, updated_at TEXT NOT NULL DEFAULT now
 //   indexes: status, type, scope, project, parent_id, lower(external_id)
@@ -293,6 +296,7 @@ function runMigrations(db: DB): Set<string> {
 //   id TEXT PK COLLATE NOCASE — the identity every FK, PROJECT_NAME, X-Project and UI URL uses; immutable except adoptDefaultProject
 //   name TEXT NOT NULL DEFAULT '' COLLATE NOCASE — display only, never a lookup key; created_at TEXT NOT NULL DEFAULT now
 //   track_prs INTEGER NOT NULL DEFAULT 0 — only decides whether agents are told to record PRs
+//   description TEXT NOT NULL DEFAULT '' — what the project covers (≤ PROJECT_DESCRIPTION_MAX); getProjects only, never in instructions
 //
 // api_keys — HTTP MCP keys (docs/claude/mcp-over-http.md)
 //   id INTEGER PK AUTOINCREMENT; label TEXT NOT NULL
@@ -320,6 +324,7 @@ type TaskRow = {
   description: string | null;
   plan: string | null;
   parent_id: number | null;
+  seq: number | null;
   external_id: string | null;
   created_at: string;
   updated_at: string;
@@ -344,6 +349,8 @@ function rowToTask(row: TaskRow, refs: Ref[]): Task {
   if (row.summary) t.summary = row.summary;
   if (row.plan) t.plan = row.plan;
   if (row.parent_id !== null) t.parentId = row.parent_id;
+  // An epic delete detaches children via ON DELETE SET NULL and leaves their seq behind.
+  if (row.parent_id !== null && row.seq !== null) t.seq = row.seq;
   if (refs && refs.length) t.refs = refs;
   return t;
 }
@@ -367,12 +374,31 @@ export function sortByPriority<T extends { priority: TaskPriority; id: number }>
   });
 }
 
-export function sortForNext<T extends { status: TaskStatus; priority: TaskPriority; id: number }>(tasks: T[]): T[] {
+type NextSortable = { status: TaskStatus; priority: TaskPriority; id: number; parentId?: number; seq?: number };
+
+// One total key, never a pairwise sibling special case (that is non-transitive): an epic's
+// children move as one block ranked by the block's highest priority among `tasks`, ordered by
+// seq inside (unset last, then id). A task outside an epic is its own block, so for those the
+// order is status desc, priority desc, id desc, as before.
+export function sortForNext<T extends NextSortable>(tasks: T[]): T[] {
+  const groupPri = new Map<number, number>();
+  for (const t of tasks) {
+    if (t.parentId === undefined) continue;
+    groupPri.set(t.parentId, Math.max(groupPri.get(t.parentId) ?? 0, PRIORITY_ORDER[t.priority]));
+  }
+  const keyOf = (t: T) => t.parentId === undefined
+    ? { pri: PRIORITY_ORDER[t.priority], group: t.id, seq: Infinity }
+    : { pri: groupPri.get(t.parentId) ?? 0, group: t.parentId, seq: t.seq ?? Infinity };
+  const keys = new Map(tasks.map((t) => [t, keyOf(t)]));
   return [...tasks].sort((a, b) => {
     const sd = STATUS_ORDER[b.status] - STATUS_ORDER[a.status];
     if (sd !== 0) return sd;
-    const pd = PRIORITY_ORDER[b.priority] - PRIORITY_ORDER[a.priority];
-    return pd !== 0 ? pd : b.id - a.id;
+    const ka = keys.get(a)!;
+    const kb = keys.get(b)!;
+    if (ka.pri !== kb.pri) return kb.pri - ka.pri;
+    if (ka.group !== kb.group) return kb.group - ka.group;
+    if (ka.seq !== kb.seq) return ka.seq < kb.seq ? -1 : 1;
+    return a.id - b.id;
   });
 }
 
@@ -389,6 +415,7 @@ export type AddInput = {
   prs?: PullRequest[];
   status?: TaskStatus;
   parentId?: number;
+  seq?: number;
   externalId?: string;
 };
 
@@ -406,6 +433,8 @@ export type UpdatePatch = {
   // Full replacement list; null or [] clears, undefined keeps.
   prs?: PullRequest[] | null;
   parentId?: number | null;
+  // undefined keeps it, but any parentId change clears it unless the same patch sets one.
+  seq?: number | null;
   externalId?: string | null;
 };
 
@@ -424,7 +453,7 @@ export type OverviewEntry =
   | { type: TaskType; refinement: number; plan: number; open: number; done: number }
   | { type: TaskType; count: number; status: TaskStatus };
 export type ScopeEntry = { scope: string; total: number; open: number };
-export type ProjectEntry = { id: string; name: string; total: number; open: number; trackPrs: boolean };
+export type ProjectEntry = { id: string; name: string; description: string; total: number; open: number; trackPrs: boolean };
 
 export type StatusFilter = TaskStatus | 'open';
 export type ListFilter = { status?: StatusFilter; type?: TaskType; scope?: string };
@@ -476,6 +505,7 @@ export type Store = {
   getByExternalId(externalId: string): Task[];
   getByPr(input: PrQuery): PrMatch[];
   getNext(project: string, type?: TaskType): Task | null;
+  reorder(epicId: number, order: (number | number[])[]): EpicChild[];
   getOverview(project: string, status?: StatusFilter): OverviewEntry[];
   getRelated(id: number, status?: StatusFilter): RelatedResult | null;
   getScopes(project: string): ScopeEntry[];
@@ -483,8 +513,8 @@ export type Store = {
   getAll(project: string, filter?: ListFilter): Task[];
   getUpdates(project: string, filter: GetUpdatesFilter): GetUpdatesResult;
   getProjects(): ProjectEntry[];
-  createProject(name: string): { id: string; name: string };
-  updateProject(id: string, settings: ProjectSettings): { id: string; name: string; trackPrs: boolean };
+  createProject(name: string, description?: string): { id: string; name: string; description: string };
+  updateProject(id: string, settings: ProjectSettings): { id: string; name: string; description: string; trackPrs: boolean };
   projectTracksPrs(id: string): boolean;
   hasProject(id: string): boolean;
   adoptDefaultProject(id: string): boolean;
@@ -502,8 +532,9 @@ export type Store = {
 export type SchemaStatus = { last: { name: string; appliedAt: string } | null; unknown: string[] };
 
 export const PROJECT_NAME_MAX = 64;
+export const PROJECT_DESCRIPTION_MAX = 280;
 
-export type ProjectSettings = { name?: string; trackPrs?: boolean };
+export type ProjectSettings = { name?: string; trackPrs?: boolean; description?: string };
 
 export type ApiKey = { id: number; label: string; project: string | null; createdAt: string; lastUsedAt: string | null; revokedAt: string | null };
 export type VerifiedKey = { id: number; project: string | null };
@@ -525,6 +556,15 @@ function validProjectName(name: string): string {
   const trimmed = String(name ?? '').trim();
   if (!isValidProjectName(trimmed)) {
     throw new Error(`Validation failed: project name must be 1–${PROJECT_NAME_MAX} characters.`);
+  }
+  return trimmed;
+}
+
+// Empty is allowed and clears it.
+function validProjectDescription(description: string): string {
+  const trimmed = String(description ?? '').trim();
+  if (trimmed.length > PROJECT_DESCRIPTION_MAX) {
+    throw new Error(`Validation failed: project description must be at most ${PROJECT_DESCRIPTION_MAX} characters.`);
   }
   return trimmed;
 }
@@ -561,6 +601,11 @@ export function validatePrs(prs: PullRequest[]): PullRequest[] {
     seen.add(url);
     return { url, number: pr.number, status: pr.status };
   });
+}
+
+function assertSeq(seq: unknown, parentId: number | null): void {
+  if (typeof seq !== 'number' || !Number.isInteger(seq) || seq <= 0) throw new Error('Validation failed: seq must be a positive integer.');
+  if (parentId === null) throw new Error('Validation failed: seq needs a parentId (it orders an epic\'s children).');
 }
 
 export function unknownProjectMessage(name: string): string {
@@ -602,7 +647,7 @@ export function createStore(dbPath: string): Store {
 
   // Prepared statements
   const stmtInsertTask      = db.prepare(
-    'INSERT INTO tasks (title, type, status, priority, project, scope, summary, description, plan, parent_id, external_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO tasks (title, type, status, priority, project, scope, summary, description, plan, parent_id, seq, external_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   );
   const stmtSelectTask      = db.prepare('SELECT * FROM tasks WHERE id = ?');
   const stmtAppliedMigrations = db.prepare('SELECT name, applied_at FROM schema_migrations ORDER BY version');
@@ -624,7 +669,7 @@ export function createStore(dbPath: string): Store {
   const stmtDeleteMirror    = db.prepare('DELETE FROM refs WHERE from_id = ? AND to_id = ? AND relation = ?');
   const stmtUpdateTask      = db.prepare(`
     UPDATE tasks
-    SET title = ?, type = ?, priority = ?, project = ?, scope = ?, summary = ?, description = ?, plan = ?, parent_id = ?, external_id = ?, updated_at = datetime('now')
+    SET title = ?, type = ?, priority = ?, project = ?, scope = ?, summary = ?, description = ?, plan = ?, parent_id = ?, seq = ?, external_id = ?, updated_at = datetime('now')
     WHERE id = ?
   `);
   const stmtSetTaskStatus   = db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`);
@@ -634,13 +679,15 @@ export function createStore(dbPath: string): Store {
   const stmtNotesFor        = db.prepare('SELECT * FROM notes WHERE task_id = ? ORDER BY created_at ASC, id ASC');
   const stmtUpdateNote      = db.prepare(`UPDATE notes SET body = ?, updated_at = datetime('now') WHERE id = ?`);
   const stmtDeleteNote      = db.prepare('DELETE FROM notes WHERE id = ?');
-  const stmtChildrenOf      = db.prepare('SELECT id, title, status, type, priority FROM tasks WHERE parent_id = ? ORDER BY id');
+  const stmtChildrenOf      = db.prepare('SELECT id, title, status, type, priority, seq FROM tasks WHERE parent_id = ? ORDER BY seq IS NULL, seq, id');
+  const stmtSetSeq          = db.prepare(`UPDATE tasks SET seq = ?, updated_at = datetime('now') WHERE id = ?`);
   const stmtHasChildren     = db.prepare('SELECT 1 FROM tasks WHERE parent_id = ? LIMIT 1');
   const stmtRescopeChildren = db.prepare("UPDATE tasks SET scope = @scope, updated_at = datetime('now') WHERE parent_id = @id AND scope IS NOT @scope");
-  const stmtSelectProject   = db.prepare('SELECT id, name FROM projects WHERE id = ?');
+  const stmtSelectProject   = db.prepare('SELECT id, name, description FROM projects WHERE id = ?');
   const stmtProjectTrackPrs = db.prepare('SELECT track_prs FROM projects WHERE id = ?');
   const stmtSetTrackPrs     = db.prepare('UPDATE projects SET track_prs = ? WHERE id = ?');
   const stmtSetProjectName  = db.prepare('UPDATE projects SET name = ? WHERE id = ?');
+  const stmtSetProjectDesc  = db.prepare('UPDATE projects SET description = ? WHERE id = ?');
   const stmtProjectNamedAs  = db.prepare('SELECT id, name FROM projects WHERE name = ? AND id != ?');
   const stmtPrsFor          = db.prepare('SELECT url, number, status FROM task_prs WHERE task_id = ? ORDER BY created_at, rowid');
   const stmtPrCreatedAt     = db.prepare('SELECT url, created_at FROM task_prs WHERE task_id = ?');
@@ -861,10 +908,11 @@ export function createStore(dbPath: string): Store {
 
   function add(input: AddInput): { id: number } {
     assertSchemaCurrent();
-    const { project, type, priority, title, description = '', scope, summary, plan, refs, prs, status = 'refinement', parentId, externalId } = input;
+    const { project, type, priority, title, description = '', scope, summary, plan, refs, prs, status = 'refinement', parentId, seq, externalId } = input;
     const trimmedTitle = String(title ?? '').trim();
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
     const validPrs = prs?.length ? validatePrs(prs) : [];
+    if (seq !== undefined && seq !== null) assertSeq(seq, parentId ?? null);
 
     return db.transaction(() => {
       const canonical = canonicalProject(project);
@@ -880,6 +928,7 @@ export function createStore(dbPath: string): Store {
         description.trim(),
         plan?.trim() || null,
         parentId ?? null,
+        seq ?? null,
         externalId?.trim() || null
       );
       const newId = Number(info.lastInsertRowid);
@@ -916,10 +965,15 @@ export function createStore(dbPath: string): Store {
           ? null
           : patch.plan !== undefined ? (patch.plan.trim() || null) : existing.plan,
         parentId: patch.parentId !== undefined ? patch.parentId : existing.parent_id,
+        seq: patch.seq !== undefined
+          ? patch.seq
+          : patch.parentId !== undefined && patch.parentId !== existing.parent_id ? null : existing.seq,
         externalId: patch.externalId === null
           ? null
           : patch.externalId !== undefined ? (patch.externalId.trim() || null) : existing.external_id,
       };
+
+      if (patch.seq !== undefined && patch.seq !== null) assertSeq(patch.seq, next.parentId);
 
       // Only re-validate when the link can change, so plan/description edits never trip it.
       const linkChanged = patch.type !== undefined || patch.parentId !== undefined || next.project !== existing.project;
@@ -929,10 +983,10 @@ export function createStore(dbPath: string): Store {
       if (parent) next.scope = parent.scope;
       const current = {
         title: existing.title, type: existing.type, priority: existing.priority, project: existing.project, scope: existing.scope,
-        summary: existing.summary, description: existing.description, plan: existing.plan, parentId: existing.parent_id, externalId: existing.external_id,
+        summary: existing.summary, description: existing.description, plan: existing.plan, parentId: existing.parent_id, seq: existing.seq, externalId: existing.external_id,
       };
       const columnsChanged = (Object.keys(next) as (keyof typeof next)[]).some((k) => next[k] !== current[k]);
-      if (columnsChanged) stmtUpdateTask.run(next.title, next.type, next.priority, next.project, next.scope, next.summary, next.description, next.plan, next.parentId, next.externalId, id);
+      if (columnsChanged) stmtUpdateTask.run(next.title, next.type, next.priority, next.project, next.scope, next.summary, next.description, next.plan, next.parentId, next.seq, next.externalId, id);
       if (next.parentId !== existing.parent_id) {
         if (existing.parent_id !== null) syncEpicStatus(existing.parent_id, null);
         if (next.parentId !== null) syncEpicStatus(next.parentId, existing.status);
@@ -1040,6 +1094,43 @@ export function createStore(dbPath: string): Store {
     });
   }
 
+  function childrenOf(epicId: number): EpicChild[] {
+    return (stmtChildrenOf.all(epicId) as (Omit<EpicChild, 'seq'> & { seq: number | null })[])
+      .map(({ seq, ...c }) => (seq === null ? c : { ...c, seq }));
+  }
+
+  // Group i gets seq (i + 1) * 10; a nested array is a parallel group; unlisted children → null.
+  function reorder(epicId: number, order: (number | number[])[]): EpicChild[] {
+    assertSchemaCurrent();
+    return db.transaction(() => {
+      const epic = stmtSelectTask.get(epicId) as TaskRow | undefined;
+      if (!epic) throw new Error(`Validation failed: epic #${epicId} does not exist.`);
+      if (epic.type !== 'epic') throw new Error(`Validation failed: #${epicId} is not an epic.`);
+      const children = stmtChildrenOf.all(epicId) as { id: number; seq: number | null }[];
+      const childIds = new Set(children.map((c) => c.id));
+      const target = new Map<number, number>();
+      const dup: number[] = [];
+      const foreign: number[] = [];
+      order.forEach((group, i) => {
+        const ids = Array.isArray(group) ? group : [group];
+        if (ids.length === 0) throw new Error('Validation failed: order must not contain an empty group.');
+        for (const id of ids) {
+          if (target.has(id)) dup.push(id);
+          else if (!childIds.has(id)) foreign.push(id);
+          target.set(id, (i + 1) * 10);
+        }
+      });
+      const list = (ids: number[]) => [...new Set(ids)].map((id) => `#${id}`).join(', ');
+      if (dup.length) throw new Error(`Validation failed: listed more than once: ${list(dup)}.`);
+      if (foreign.length) throw new Error(`Validation failed: not children of epic #${epicId}: ${list(foreign)}.`);
+      for (const c of children) {
+        const seq = target.get(c.id) ?? null;
+        if (c.seq !== seq) stmtSetSeq.run(seq, c.id);
+      }
+      return childrenOf(epicId);
+    })();
+  }
+
   function getNext(project: string, type?: TaskType): Task | null {
     let rows: TaskRow[];
     if (type) {
@@ -1114,7 +1205,7 @@ export function createStore(dbPath: string): Store {
         task.epic = ctx;
       }
     }
-    if (task.type === 'epic') task.children = stmtChildrenOf.all(id) as EpicChild[];
+    if (task.type === 'epic') task.children = childrenOf(id);
     return task;
   }
 
@@ -1219,7 +1310,7 @@ export function createStore(dbPath: string): Store {
 
   function getProjects(): ProjectEntry[] {
     const rows = db.prepare(`
-      SELECT p.id, p.name,
+      SELECT p.id, p.name, p.description,
              COUNT(t.id) AS total,
              COALESCE(SUM(CASE WHEN t.status != 'done' THEN 1 ELSE 0 END), 0) AS open,
              p.track_prs
@@ -1238,10 +1329,10 @@ export function createStore(dbPath: string): Store {
   }
 
   // Only the display name changes; the id (and everything bound to it) stays.
-  function updateProject(id: string, settings: ProjectSettings): { id: string; name: string; trackPrs: boolean } {
+  function updateProject(id: string, settings: ProjectSettings): { id: string; name: string; description: string; trackPrs: boolean } {
     assertSchemaCurrent();
-    if (settings.name === undefined && settings.trackPrs === undefined) {
-      throw new Error('Validation failed: pass name or trackPrs to change.');
+    if (settings.name === undefined && settings.trackPrs === undefined && settings.description === undefined) {
+      throw new Error('Validation failed: pass name, trackPrs or description to change.');
     }
     return db.transaction(() => {
       const canonical = canonicalProject(id);
@@ -1251,8 +1342,9 @@ export function createStore(dbPath: string): Store {
         stmtSetProjectName.run(name, canonical);
       }
       if (settings.trackPrs !== undefined) stmtSetTrackPrs.run(settings.trackPrs ? 1 : 0, canonical);
-      const { name } = stmtSelectProject.get(canonical) as { name: string };
-      return { id: canonical, name, trackPrs: projectTracksPrs(canonical) };
+      if (settings.description !== undefined) stmtSetProjectDesc.run(validProjectDescription(settings.description), canonical);
+      const { name, description } = stmtSelectProject.get(canonical) as { name: string; description: string };
+      return { id: canonical, name, description, trackPrs: projectTracksPrs(canonical) };
     }).immediate();
   }
 
@@ -1267,15 +1359,16 @@ export function createStore(dbPath: string): Store {
   }
 
   // The id is derived once and never follows a later name change.
-  function createProject(name: string): { id: string; name: string } {
+  function createProject(name: string, description = ''): { id: string; name: string; description: string } {
     assertSchemaCurrent();
     const trimmed = validProjectName(name);
+    const desc = validProjectDescription(description);
     const id = slugifyProjectId(trimmed);
     const existing = stmtSelectProject.get(id) as { id: string; name: string } | undefined;
     if (existing) throw new Error(`Validation failed: id "${id}" is already taken by project "${existing.name}".`);
     assertNameFree(trimmed, id);
-    db.prepare('INSERT INTO projects (id, name) VALUES (?, ?)').run(id, trimmed);
-    return { id, name: trimmed };
+    db.prepare('INSERT INTO projects (id, name, description) VALUES (?, ?, ?)').run(id, trimmed, desc);
+    return { id, name: trimmed, description: desc };
   }
 
   // A DB that only knows the migration's 'default' project takes the
@@ -1413,6 +1506,7 @@ export function createStore(dbPath: string): Store {
     getByExternalId,
     getByPr,
     getNext,
+    reorder,
     getOverview,
     getRelated,
     getScopes,

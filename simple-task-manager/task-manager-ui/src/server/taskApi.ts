@@ -74,17 +74,18 @@ export function createTaskApi({ dbPath }: TaskApiOptions) {
       return store.getProjects();
     },
 
-    async createProject(body: { name?: unknown }) {
-      const project = await store.createProject(String(body?.name ?? ''));
+    async createProject(body: { name?: unknown; description?: unknown }) {
+      const project = await store.createProject(String(body?.name ?? ''), typeof body?.description === 'string' ? body.description : undefined);
       broadcast();
       return project;
     },
 
-    // Ignores anything but a string name and a boolean trackPrs.
-    async updateProject(id: string, body: { name?: unknown; trackPrs?: unknown }) {
+    // Ignores anything but a string name or description and a boolean trackPrs.
+    async updateProject(id: string, body: { name?: unknown; trackPrs?: unknown; description?: unknown }) {
       const settings: ProjectSettings = {};
       if (typeof body?.name === 'string') settings.name = body.name;
       if (typeof body?.trackPrs === 'boolean') settings.trackPrs = body.trackPrs;
+      if (typeof body?.description === 'string') settings.description = body.description;
       const project = await store.updateProject(id, settings);
       broadcast();
       return project;

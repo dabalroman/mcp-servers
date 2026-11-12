@@ -17,6 +17,7 @@ import {
   StaleSchemaError,
   hashApiKey,
   slugifyProjectId,
+  PROJECT_DESCRIPTION_MAX,
 } from './tasks.js';
 
 const MIGRATION_NAMES = [
@@ -37,6 +38,8 @@ const MIGRATION_NAMES = [
   '20261106140000_add-pr-deployed-status',
   '20261106150000_split-project-id-name',
   '20261109120000_add-pr-pipeline-approved-status',
+  '20261112120000_add-task-seq',
+  '20261112130000_add-project-description',
 ];
 
 let dir: string;
@@ -670,6 +673,170 @@ describe('sortForNext', () => {
       { id: 5, status: 'in_progress' as const,  priority: 'medium' as const },
     ];
     assert.deepEqual(sortForNext(tasks).map((t) => t.id), [5, 4, 3, 2, 1]);
+  });
+});
+
+describe('sortForNext — epic seq blocks (#570)', () => {
+  type T = { id: number; status: 'todo' | 'in_progress'; priority: 'low' | 'medium' | 'high'; parentId?: number; seq?: number };
+  const ids = (ts: T[]) => sortForNext(ts).map((t) => t.id);
+  const permutations = <X,>(xs: X[]): X[][] =>
+    xs.length <= 1 ? [xs] : xs.flatMap((x, i) => permutations([...xs.slice(0, i), ...xs.slice(i + 1)]).map((p) => [x, ...p]));
+
+  test('siblings order by seq, unset last then id asc; equal seq = adjacent parallel group', () => {
+    const ts: T[] = [
+      { id: 5, status: 'todo', priority: 'medium', parentId: 1 },
+      { id: 4, status: 'todo', priority: 'medium', parentId: 1 },
+      { id: 3, status: 'todo', priority: 'medium', parentId: 1, seq: 30 },
+      { id: 7, status: 'todo', priority: 'medium', parentId: 1, seq: 20 },
+      { id: 6, status: 'todo', priority: 'medium', parentId: 1, seq: 20 },
+      { id: 8, status: 'todo', priority: 'medium', parentId: 1, seq: 10 },
+    ];
+    assert.deepEqual(ids(ts), [8, 6, 7, 3, 4, 5]);
+  });
+
+  test('an epic block ranks by its highest priority and stays together (transitive in any input order)', () => {
+    const A: T = { id: 10, status: 'todo', priority: 'low', parentId: 1, seq: 10 };
+    const B: T = { id: 11, status: 'todo', priority: 'high', parentId: 1, seq: 20 };
+    const C: T = { id: 12, status: 'todo', priority: 'medium' };
+    for (const p of permutations([A, B, C])) assert.deepEqual(ids(p), [10, 11, 12]);
+  });
+
+  test('an in_progress sibling outranks a lower-seq todo sibling', () => {
+    const ts: T[] = [
+      { id: 2, status: 'todo', priority: 'medium', parentId: 1, seq: 10 },
+      { id: 3, status: 'in_progress', priority: 'medium', parentId: 1, seq: 20 },
+    ];
+    assert.deepEqual(ids(ts), [3, 2]);
+  });
+
+  test('tasks outside an epic keep the old order (status, priority desc, id desc)', () => {
+    const old = (ts: T[]) => [...ts].sort((a, b) => {
+      const so = { in_progress: 2, todo: 1 };
+      const po = { high: 3, medium: 2, low: 1 };
+      return so[b.status] - so[a.status] || po[b.priority] - po[a.priority] || b.id - a.id;
+    }).map((t) => t.id);
+    const ts: T[] = [
+      { id: 1, status: 'todo', priority: 'low' },
+      { id: 2, status: 'todo', priority: 'high' },
+      { id: 3, status: 'in_progress', priority: 'low' },
+      { id: 4, status: 'todo', priority: 'high' },
+      { id: 5, status: 'todo', priority: 'medium' },
+    ];
+    assert.deepEqual(ids(ts), old(ts));
+  });
+
+  test('blocks of equal priority: newer epic first, like newer standalone task first', () => {
+    const ts: T[] = [
+      { id: 20, status: 'todo', priority: 'medium', parentId: 2, seq: 10 },
+      { id: 21, status: 'todo', priority: 'medium', parentId: 9, seq: 10 },
+      { id: 22, status: 'todo', priority: 'medium', parentId: 9, seq: 20 },
+      { id: 5, status: 'todo', priority: 'medium' },
+    ];
+    assert.deepEqual(ids(ts), [21, 22, 5, 20]);
+  });
+});
+
+describe('epic seq (#570)', () => {
+  const OLD = '2000-01-01 00:00:00';
+  const makeEpic = () => makeTask({ type: 'epic', title: 'Roadmap' }).id;
+
+  test('add stores seq on a child; getById(epic).children are ordered by seq, unset last', () => {
+    const epic = makeEpic();
+    const a = makeTask({ parentId: epic }).id;
+    const b = makeTask({ parentId: epic, seq: 20 }).id;
+    const c = makeTask({ parentId: epic, seq: 10 }).id;
+    assert.equal(store.getById(b)?.seq, 20);
+    assert.equal(store.getById(a)?.seq, undefined);
+    const kids = store.getById(epic)?.children ?? [];
+    assert.deepEqual(kids.map((k) => [k.id, k.seq]), [[c, 10], [b, 20], [a, undefined]]);
+    assert.ok(!('seq' in kids[2]!), 'unset seq is omitted, not null');
+  });
+
+  test('seq without parentId, or not a positive integer, is rejected', () => {
+    assert.throws(() => makeTask({ seq: 10 }), /seq needs a parentId/);
+    const { id } = makeTask();
+    assert.throws(() => store.update(id, { seq: 10 }), /seq needs a parentId/);
+    const epic = makeEpic();
+    assert.throws(() => makeTask({ parentId: epic, seq: 0 }), /positive integer/);
+    assert.throws(() => makeTask({ parentId: epic, seq: 1.5 }), /positive integer/);
+    assert.equal(makeTask({ parentId: epic, seq: null as unknown as undefined }).id > 0, true);
+  });
+
+  test('a parentId change clears seq unless the same patch sets one; null clears', () => {
+    const e1 = makeEpic();
+    const e2 = makeEpic();
+    const { id } = makeTask({ parentId: e1, seq: 10 });
+    store.update(id, { title: 'Renamed' });
+    assert.equal(store.getById(id)?.seq, 10);
+    store.update(id, { parentId: e2 });
+    assert.equal(store.getById(id)?.seq, undefined);
+    store.update(id, { parentId: e1, seq: 30 });
+    assert.equal(store.getById(id)?.seq, 30);
+    store.update(id, { parentId: null });
+    assert.equal(store.getById(id)?.seq, undefined);
+    store.update(id, { parentId: e1, seq: 10 });
+    store.update(id, { seq: null });
+    assert.equal(store.getById(id)?.seq, undefined);
+  });
+
+  test('a seq left behind by an epic delete is hidden on read', () => {
+    const epic = makeEpic();
+    const { id } = makeTask({ parentId: epic, seq: 10 });
+    store.delete(epic);
+    const t = store.getById(id);
+    assert.equal(t?.parentId, undefined);
+    assert.equal(t?.seq, undefined);
+  });
+
+  test('resending the same seq does not bump updated_at', () => {
+    const epic = makeEpic();
+    const { id } = makeTask({ parentId: epic, seq: 10 });
+    store.db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(OLD, id);
+    store.update(id, { seq: 10 });
+    assert.equal(store.getById(id)?.updated_at, OLD);
+  });
+
+  test('getNext returns the lowest-seq child of the epic block', () => {
+    const epic = makeEpic();
+    makeTask({ parentId: epic, status: 'todo', seq: 30 });
+    const first = makeTask({ parentId: epic, status: 'todo', seq: 10 }).id;
+    makeTask({ parentId: epic, status: 'todo' });
+    assert.equal(store.getNext('default')?.id, first);
+  });
+
+  describe('reorder', () => {
+    test('sets 10, 20, 30 per group; a nested array is a parallel group; unlisted children → unset', () => {
+      const epic = makeEpic();
+      const [a, b, c, d, e] = [1, 2, 3, 4, 5].map(() => makeTask({ parentId: epic }).id) as [number, number, number, number, number];
+      store.update(e, { seq: 5 });
+      const kids = store.reorder(epic, [[c], [a, b], d]);
+      assert.deepEqual(kids.map((k) => [k.id, k.seq]), [[c, 10], [a, 20], [b, 20], [d, 30], [e, undefined]]);
+    });
+
+    test('bumps updated_at only on children whose seq changed', () => {
+      const epic = makeEpic();
+      const a = makeTask({ parentId: epic, seq: 10 }).id;
+      const b = makeTask({ parentId: epic }).id;
+      store.db.prepare('UPDATE tasks SET updated_at = ?').run(OLD);
+      store.reorder(epic, [a, b]);
+      assert.equal(store.getById(a)?.updated_at, OLD);
+      assert.notEqual(store.getById(b)?.updated_at, OLD);
+      store.db.prepare('UPDATE tasks SET updated_at = ?').run(OLD);
+      store.reorder(epic, [a, b]);
+      assert.equal(store.getById(b)?.updated_at, OLD);
+    });
+
+    test('rejects a foreign id, a duplicate, an empty group or a non-epic, writing nothing', () => {
+      const epic = makeEpic();
+      const a = makeTask({ parentId: epic }).id;
+      const { id: stray } = makeTask();
+      assert.throws(() => store.reorder(epic, [a, stray]), new RegExp(`not children of epic #${epic}: #${stray}`));
+      assert.throws(() => store.reorder(epic, [a, [a]]), new RegExp(`listed more than once: #${a}`));
+      assert.throws(() => store.reorder(epic, [[]]), /empty group/);
+      assert.throws(() => store.reorder(stray, [a]), /is not an epic/);
+      assert.throws(() => store.reorder(999, [a]), /does not exist/);
+      assert.equal(store.getById(a)?.seq, undefined);
+    });
   });
 });
 
@@ -1394,7 +1561,7 @@ describe('project PR tracking', () => {
   test('is off by default and toggles via updateProject, case-insensitively', () => {
     store.createProject('Example-Project');
     assert.equal(store.projectTracksPrs('example-project'), false);
-    assert.deepEqual(store.updateProject('EXAMPLE-project', { trackPrs: true }), { id: 'example-project', name: 'Example-Project', trackPrs: true });
+    assert.deepEqual(store.updateProject('EXAMPLE-project', { trackPrs: true }), { id: 'example-project', name: 'Example-Project', description: '', trackPrs: true });
     assert.equal(store.projectTracksPrs('Example-Project'), true);
     assert.equal(store.getProjects().find((p) => p.id === 'example-project')?.trackPrs, true);
     store.updateProject('Example-Project', { trackPrs: false });
@@ -1407,11 +1574,33 @@ describe('project PR tracking', () => {
   });
 });
 
+describe('project description', () => {
+  test('defaults to empty and is set, trimmed, on create', () => {
+    assert.equal(store.createProject('example-project').description, '');
+    assert.deepEqual(store.createProject('other-project', '  Covers the example tool.  '), { id: 'other-project', name: 'other-project', description: 'Covers the example tool.' });
+    assert.equal(store.getProjects().find((p) => p.id === 'other-project')?.description, 'Covers the example tool.');
+  });
+
+  test('updates alone, leaving name and trackPrs, and clears with an empty string', () => {
+    store.createProject('example-project');
+    store.updateProject('example-project', { name: 'Example', trackPrs: true });
+    assert.deepEqual(store.updateProject('example-project', { description: 'Example scope' }), { id: 'example-project', name: 'Example', description: 'Example scope', trackPrs: true });
+    assert.equal(store.updateProject('example-project', { description: '   ' }).description, '');
+  });
+
+  test(`rejects more than ${PROJECT_DESCRIPTION_MAX} characters on create and update`, () => {
+    store.createProject('example-project', 'x'.repeat(PROJECT_DESCRIPTION_MAX));
+    assert.throws(() => store.updateProject('example-project', { description: 'x'.repeat(PROJECT_DESCRIPTION_MAX + 1) }), /at most 280 characters/);
+    assert.throws(() => store.createProject('other-project', 'x'.repeat(PROJECT_DESCRIPTION_MAX + 1)), /at most 280 characters/);
+    assert.equal(store.hasProject('other-project'), false);
+  });
+});
+
 describe('project rename', () => {
   test('changes only the display name; the id and its tasks stay', () => {
     store.createProject('example-project');
     store.add({ type: 'feature', priority: 'low', title: 'Do a thing', project: 'example-project' });
-    assert.deepEqual(store.updateProject('Example-Project', { name: '  Example Project  ' }), { id: 'example-project', name: 'Example Project', trackPrs: false });
+    assert.deepEqual(store.updateProject('Example-Project', { name: '  Example Project  ' }), { id: 'example-project', name: 'Example Project', description: '', trackPrs: false });
     const entry = store.getProjects().find((p) => p.id === 'example-project');
     assert.equal(entry?.name, 'Example Project');
     assert.equal(entry?.total, 1);
@@ -1419,8 +1608,8 @@ describe('project rename', () => {
 
   test('can set the name and trackPrs together, or either alone', () => {
     store.createProject('example-project');
-    assert.deepEqual(store.updateProject('example-project', { name: 'Example', trackPrs: true }), { id: 'example-project', name: 'Example', trackPrs: true });
-    assert.deepEqual(store.updateProject('example-project', { trackPrs: false }), { id: 'example-project', name: 'Example', trackPrs: false });
+    assert.deepEqual(store.updateProject('example-project', { name: 'Example', trackPrs: true }), { id: 'example-project', name: 'Example', description: '', trackPrs: true });
+    assert.deepEqual(store.updateProject('example-project', { trackPrs: false }), { id: 'example-project', name: 'Example', description: '', trackPrs: false });
   });
 
   test('may change the case of its own name', () => {
@@ -1439,7 +1628,7 @@ describe('project rename', () => {
     store.createProject('example-project');
     assert.throws(() => store.updateProject('example-project', { name: '   ' }), /1–64 characters/);
     assert.throws(() => store.updateProject('example-project', { name: 'x'.repeat(65) }), /1–64 characters/);
-    assert.throws(() => store.updateProject('example-project', {}), /pass name or trackPrs/);
+    assert.throws(() => store.updateProject('example-project', {}), /pass name, trackPrs or description/);
     assert.throws(() => store.updateProject('nope', { name: 'Nope' }), /does not exist/);
   });
 
@@ -1453,7 +1642,7 @@ describe('project rename', () => {
 
 describe('projects', () => {
   test('a fresh DB has only the default project', () => {
-    assert.deepEqual(store.getProjects(), [{ id: 'default', name: 'default', total: 0, open: 0, trackPrs: false }]);
+    assert.deepEqual(store.getProjects(), [{ id: 'default', name: 'default', description: '', total: 0, open: 0, trackPrs: false }]);
   });
 
   test('list methods only return the given project', () => {
@@ -1505,7 +1694,7 @@ describe('projects', () => {
   });
 
   test('createProject trims the name, derives the id and rejects a taken id and bad lengths', () => {
-    assert.deepEqual(store.createProject('  Example Project '), { id: 'example-project', name: 'Example Project' });
+    assert.deepEqual(store.createProject('  Example Project '), { id: 'example-project', name: 'Example Project', description: '' });
     assert.throws(() => store.createProject('EXAMPLE-project'), /id "example-project" is already taken by project "Example Project"/);
     assert.throws(() => store.createProject('Example  Project!'), /already taken/);
     assert.throws(() => store.createProject('   '), /1–64 characters/);
@@ -1528,9 +1717,9 @@ describe('projects', () => {
     const done = makeTask({ project: 'a-project' }).id;
     store.setStatus(done, 'done');
     assert.deepEqual(store.getProjects(), [
-      { id: 'a-project', name: 'a-project', total: 2, open: 1, trackPrs: false },
-      { id: 'b-project', name: 'b-project', total: 0, open: 0, trackPrs: false },
-      { id: 'default', name: 'default', total: 0, open: 0, trackPrs: false },
+      { id: 'a-project', name: 'a-project', description: '', total: 2, open: 1, trackPrs: false },
+      { id: 'b-project', name: 'b-project', description: '', total: 0, open: 0, trackPrs: false },
+      { id: 'default', name: 'default', description: '', total: 0, open: 0, trackPrs: false },
     ]);
   });
 

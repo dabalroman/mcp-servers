@@ -111,17 +111,26 @@ export function handleSetStatus(store: Store, { id, status }: { id: number; stat
   })();
 }
 
-export function handleCreateProject(store: Store, { name }: { name: string }): MCPContent {
+export function handleReorder(store: Store, { epicId, order }: { epicId: number; order: (number | number[])[] }): MCPContent {
   try {
-    return text({ success: true, project: store.createProject(name) });
+    const children = store.reorder(epicId, order).map(({ id, seq }) => (seq === undefined ? { id } : { id, seq }));
+    return text({ success: true, epicId, children });
   } catch (err) {
     return errorText({ error: err instanceof Error ? err.message : String(err) });
   }
 }
 
-export function handleUpdateProject(store: Store, { project, trackPrs }: { project: string; trackPrs: boolean }): MCPContent {
+export function handleCreateProject(store: Store, { name, description }: { name: string; description?: string }): MCPContent {
   try {
-    return text({ success: true, project: store.updateProject(project, { trackPrs }) });
+    return text({ success: true, project: store.createProject(name, description) });
+  } catch (err) {
+    return errorText({ error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+export function handleUpdateProject(store: Store, { project, trackPrs, description }: { project: string; trackPrs?: boolean; description?: string }): MCPContent {
+  try {
+    return text({ success: true, project: store.updateProject(project, { trackPrs, description }) });
   } catch (err) {
     return errorText({ error: err instanceof Error ? err.message : String(err) });
   }

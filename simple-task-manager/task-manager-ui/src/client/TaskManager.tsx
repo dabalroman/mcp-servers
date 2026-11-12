@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TaskListControls, loadViewState } from '@/components/TaskListControls';
 import { cn } from '@/lib/utils';
-import { NO_SCOPE, groupTasks, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, pickProject, projectFromPath, projectPath, defaultView, resolveCardViews } from '@/lib/taskView';
+import { NO_SCOPE, groupTasks, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, pickProject, projectFromPath, projectPath, defaultView, resolveCardViews, groupBySeq } from '@/lib/taskView';
 import type { CardView, CardViewEntry, ViewState } from '@/lib/taskView';
 import { useTasks } from './useTasks';
 import { TaskCard } from './TaskCard';
@@ -42,7 +42,7 @@ function failureReason(err: unknown): string {
   return err instanceof Error && /^(Validation failed|DB was migrated)/.test(err.message) ? ` ${err.message}` : '';
 }
 
-const EPIC_RAIL = 'relative ml-2 pl-5 before:absolute before:left-0 before:-top-2 before:bottom-0 before:border-l before:border-primary/40 after:absolute after:left-0 after:top-6 after:w-4 after:border-t after:border-primary/40 last:before:bottom-auto last:before:h-8';
+const EPIC_RAIL = 'relative ml-2 pl-5 before:absolute before:left-0 before:-top-2 before:bottom-0 before:border-l before:border-primary/40 after:absolute after:left-0 after:top-6 after:w-5 after:border-t after:border-primary/40 last:before:bottom-auto last:before:h-8';
 
 export default function TaskManager() {
   const { data, loading, error, add, update, remove, createProject, updateProject } = useTasks();
@@ -124,7 +124,7 @@ export default function TaskManager() {
     openAdd({ project: epic.project, parentId: epic.id, scope: epic.scope ?? '' });
   }
 
-  async function handleEditProject(settings: { name: string; trackPrs: boolean }): Promise<boolean> {
+  async function handleEditProject(settings: { name: string; trackPrs: boolean; description: string }): Promise<boolean> {
     if (!currentProject) return false;
     try {
       await updateProject(currentProject.id, settings);
@@ -135,9 +135,9 @@ export default function TaskManager() {
     }
   }
 
-  async function handleCreateProject({ name }: { name: string }): Promise<boolean> {
+  async function handleCreateProject({ name, description }: { name: string; description: string }): Promise<boolean> {
     try {
-      selectProject(await createProject(name));
+      selectProject(await createProject(name, description));
       return true;
     } catch (err) {
       toast.error(`Failed to create project.${failureReason(err)}`);
@@ -256,8 +256,16 @@ export default function TaskManager() {
             onToggleCollapse={kids ? () => toggleCollapse(collapseKey) : undefined}
             sticky={kids !== undefined && !collapsed}
           />
-          {kids && !collapsed && kids.map((child) => (
+          {kids && !collapsed && groupBySeq(kids).flatMap((group) => group.tasks.map((child, i) => (
             <div key={child.id} className={EPIC_RAIL}>
+              {group.step && i === 0 && (
+                <span
+                  title={`Step ${group.step} of ${group.total}${group.tasks.length > 1 ? `, ${group.tasks.length} tasks run in parallel` : ''}`}
+                  className="absolute left-0 top-3.5 z-[1] -translate-x-1/2 flex items-center justify-center w-6 h-6 border border-border bg-background text-xs tabular-nums text-muted-foreground"
+                >
+                  {group.step}
+                </span>
+              )}
               <TaskCard
                 task={child}
                 {...cardViewProps(child)}
@@ -269,7 +277,7 @@ export default function TaskManager() {
                 nested
               />
             </div>
-          ))}
+          )))}
         </div>
       );
     });

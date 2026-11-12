@@ -18,6 +18,8 @@ const TASK_PRS_MIGRATION = '20261106120000_add-task-prs';
 const PR_DEPLOYED_MIGRATION = '20261106140000_add-pr-deployed-status';
 const SPLIT_PROJECT_MIGRATION = '20261106150000_split-project-id-name';
 const PR_PIPELINE_APPROVED_MIGRATION = '20261109120000_add-pr-pipeline-approved-status';
+const TASK_SEQ_MIGRATION = '20261112120000_add-task-seq';
+const PROJECT_DESCRIPTION_MIGRATION = '20261112130000_add-project-description';
 
 let dir: string;
 let dbPath: string;
@@ -598,6 +600,54 @@ describe('add-pr-pipeline-approved-status migration', () => {
     ins.run(1, 'https://example.com/pr/3', 3, 'approved');
     assert.throws(() => ins.run(1, 'https://example.com/pr/4', 4, 'rejected'), /CHECK constraint failed/);
     assert.ok(sdb.prepare("SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'task_prs_number'").get());
+    store.close();
+  });
+});
+
+describe('add-task-seq migration', () => {
+  test('adds a nullable seq column; existing rows read NULL', () => {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    const earlier = loadMigrations().filter((m) => m.name < TASK_SEQ_MIGRATION);
+    earlier.forEach((m, i) => {
+      m.up(db);
+      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(i + 1, m.name);
+    });
+    db.pragma(`user_version = ${earlier.length}`);
+    db.prepare("INSERT INTO tasks (title, type, status, priority, project, description) VALUES ('Old', 'bug', 'todo', 'high', 'default', '')").run();
+    db.close();
+
+    const store = createStore(dbPath);
+    const cols = store.db.pragma('table_info(tasks)') as { name: string; notnull: number; type: string }[];
+    const col = cols.find((c) => c.name === 'seq');
+    assert.ok(col, 'seq column must exist');
+    assert.equal(col.notnull, 0);
+    assert.equal(col.type, 'INTEGER');
+    assert.deepEqual(store.db.prepare('SELECT seq FROM tasks').all(), [{ seq: null }]);
+    store.close();
+  });
+});
+
+describe('add-project-description migration', () => {
+  test('adds a NOT NULL description column; existing projects read empty', () => {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    const earlier = loadMigrations().filter((m) => m.name < PROJECT_DESCRIPTION_MIGRATION);
+    earlier.forEach((m, i) => {
+      m.up(db);
+      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(i + 1, m.name);
+    });
+    db.pragma(`user_version = ${earlier.length}`);
+    db.prepare("INSERT INTO projects (id, name) VALUES ('example-project', 'Example')").run();
+    db.close();
+
+    const store = createStore(dbPath);
+    const col = (store.db.pragma('table_info(projects)') as { name: string; notnull: number }[]).find((c) => c.name === 'description');
+    assert.ok(col, 'description column must exist');
+    assert.equal(col.notnull, 1);
+    assert.deepEqual(store.db.prepare("SELECT description FROM projects WHERE id = 'example-project'").all(), [{ description: '' }]);
     store.close();
   });
 });

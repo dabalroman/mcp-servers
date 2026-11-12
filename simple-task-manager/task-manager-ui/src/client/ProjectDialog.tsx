@@ -3,13 +3,15 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { Project } from '@/types/task';
 
-type ProjectSettings = { name: string; trackPrs: boolean };
+const PROJECT_DESCRIPTION_MAX = 280;
+
+type ProjectSettings = { name: string; trackPrs: boolean; description: string };
 
 export type ProjectDialogProps = {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   // Set = edit this project; unset = create a new one.
-  initial?: Pick<Project, 'id' | 'name' | 'trackPrs'>;
+  initial?: Pick<Project, 'id' | 'name' | 'trackPrs' | 'description'>;
   // Resolves false when saving failed and the dialog should stay open.
   onSubmit: (settings: ProjectSettings) => Promise<boolean>;
 };
@@ -17,6 +19,7 @@ export type ProjectDialogProps = {
 export function ProjectDialog({ open, onOpenChange, initial, onSubmit }: ProjectDialogProps) {
   const [name, setName] = useState(initial?.name ?? '');
   const [trackPrs, setTrackPrs] = useState(initial?.trackPrs ?? false);
+  const [description, setDescription] = useState(initial?.description ?? '');
   const [submitting, setSubmitting] = useState(false);
   const editing = initial !== undefined;
   const [idleLabel, busyLabel] = editing ? ['Save', 'Saving…'] : ['Create', 'Creating…'];
@@ -27,7 +30,7 @@ export function ProjectDialog({ open, onOpenChange, initial, onSubmit }: Project
     if (!name.trim() || submitting) return;
     setSubmitting(true);
     try {
-      if (await onSubmit({ name: name.trim(), trackPrs })) onOpenChange(false);
+      if (await onSubmit({ name: name.trim(), trackPrs, description: description.trim() })) onOpenChange(false);
     } finally {
       setSubmitting(false);
     }
@@ -51,6 +54,18 @@ export function ProjectDialog({ open, onOpenChange, initial, onSubmit }: Project
               placeholder="e.g. my-repo"
               className="bg-background border border-border px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
             />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs tracking-widest text-muted-foreground uppercase">Description</span>
+            <textarea
+              rows={3}
+              maxLength={PROJECT_DESCRIPTION_MAX}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder="What this project covers, so agents can tell projects apart"
+              className="bg-background border border-border px-3 py-2 text-base text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary resize-y"
+            />
+            <span className="self-end text-xs text-muted-foreground">{description.length}/{PROJECT_DESCRIPTION_MAX}</span>
           </label>
           {editing && (
             <>

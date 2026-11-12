@@ -31,7 +31,7 @@ export type Note = {
 };
 
 // id is the identity (URLs, task.project, API keys); name is display only.
-export type Project = { id: string; name: string; total: number; open: number; trackPrs: boolean };
+export type Project = { id: string; name: string; description: string; total: number; open: number; trackPrs: boolean };
 
 export type PrStatus = 'draft' | 'open' | 'pipeline_pass' | 'approved' | 'merged' | 'deployed' | 'closed';
 
@@ -53,6 +53,8 @@ export type Task = {
   plan?: string;
   scope?: string;
   parentId?: number;
+  // Execution step among the epic's children (10, 20, 30; equal = parallel group).
+  seq?: number;
   externalId: string | null;
   epicTitle?: string;
   refs?: TaskRef[];

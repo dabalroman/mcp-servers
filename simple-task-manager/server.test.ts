@@ -42,6 +42,7 @@ import {
   handleDelete,
   handleCreateProject,
   handleUpdateProject,
+  handleReorder,
 } from './mcp/mutationHandlers.js';
 import { withSchemaCheck, prsSchema, type MCPContent } from './mcp/shared.js';
 import Database from 'better-sqlite3';
@@ -1149,6 +1150,34 @@ describe('epics — MCP layer', () => {
 
 // ── Instructions split + plugin rules hook ───────────────────────────────────
 
+describe('reorder handler', () => {
+  test('returns the children in execution order with their seq; getById(epic) matches', async () => {
+    const epic = addTask({ type: 'epic', title: 'Example epic' }).id;
+    const [a, b, c] = [1, 2, 3].map(() => addTask({ parentId: epic }).id) as [number, number, number];
+    const resp = decode(handleReorder(store, { epicId: epic, order: [b, [a, c]] }));
+    assert.deepEqual(resp, { success: true, epicId: epic, children: [{ id: b, seq: 10 }, { id: a, seq: 20 }, { id: c, seq: 20 }] });
+    const kids = (decode(await handleGetById(store, { id: epic })) as { task: { children: { id: number; seq?: number }[] } }).task.children;
+    assert.deepEqual(kids.map((k) => k.seq), [10, 20, 20]);
+  });
+
+  test('a foreign id is an error result and changes nothing', () => {
+    const epic = addTask({ type: 'epic', title: 'Example epic' }).id;
+    const a = addTask({ parentId: epic }).id;
+    const stray = addTask().id;
+    const resp = handleReorder(store, { epicId: epic, order: [a, stray] });
+    assert.equal(resp.isError, true);
+    assert.match(String(decode(resp)['error']), /not children of epic/);
+    assert.equal(store.getById(a)?.seq, undefined);
+  });
+
+  test('add/update handlers reject seq without parentId', () => {
+    const resp = handleAdd(store, { type: 'bug', priority: 'low', title: 'Loose', description: '', seq: 10 }, CTX);
+    assert.equal(resp.isError, true);
+    const { id } = addTask();
+    assert.equal(handleUpdate(store, { id, seq: 10 }).isError, true);
+  });
+});
+
 describe('externalId — MCP layer', () => {
   test('add with externalId is returned by getById', async () => {
     const { id } = decode(handleAdd(store, { type: 'feature', priority: 'low', title: 'T', description: '', externalId: 'OPXPIQ-6532' }, CTX)) as { id: number };
@@ -1475,7 +1504,7 @@ describe('project binding', () => {
   });
 
   test('getProjects and createProject', async () => {
-    assert.deepEqual(decode(handleCreateProject(store, { name: 'Example Project' })), { success: true, project: { id: 'example-project', name: 'Example Project' } });
+    assert.deepEqual(decode(handleCreateProject(store, { name: 'Example Project' })), { success: true, project: { id: 'example-project', name: 'Example Project', description: '' } });
     assert.equal(handleCreateProject(store, { name: 'Example-Project' }).isError, true);
     const out = decode(await handleGetProjects(store, CTX)) as { boundProject: string; projects: { id: string; name: string }[] };
     assert.equal(out.boundProject, 'default');
@@ -1483,10 +1512,18 @@ describe('project binding', () => {
   });
 
   test('updateProject toggles trackPrs and getProjects reports it', async () => {
-    assert.deepEqual(decode(handleUpdateProject(store, { project: 'DEFAULT', trackPrs: true })), { success: true, project: { id: 'default', name: 'default', trackPrs: true } });
+    assert.deepEqual(decode(handleUpdateProject(store, { project: 'DEFAULT', trackPrs: true })), { success: true, project: { id: 'default', name: 'default', description: '', trackPrs: true } });
     const out = decode(await handleGetProjects(store, CTX)) as { projects: { name: string; trackPrs: boolean }[] };
     assert.deepEqual(out.projects.map((p) => [p.name, p.trackPrs]), [['default', true]]);
     assert.equal(handleUpdateProject(store, { project: 'nope', trackPrs: true }).isError, true);
+  });
+
+  test('createProject and updateProject set a description that getProjects reports', async () => {
+    assert.deepEqual(decode(handleCreateProject(store, { name: 'Example Project', description: 'Covers the example tool.' })), { success: true, project: { id: 'example-project', name: 'Example Project', description: 'Covers the example tool.' } });
+    assert.deepEqual(decode(handleUpdateProject(store, { project: 'default', description: 'Everything else.' })), { success: true, project: { id: 'default', name: 'default', description: 'Everything else.', trackPrs: false } });
+    const out = decode(await handleGetProjects(store, CTX)) as { projects: { id: string; description: string }[] };
+    assert.deepEqual(out.projects.map((p) => [p.id, p.description]), [['default', 'Everything else.'], ['example-project', 'Covers the example tool.']]);
+    assert.equal(handleUpdateProject(store, { project: 'default' }).isError, true);
   });
 
   test('health reports the bound project', async () => {

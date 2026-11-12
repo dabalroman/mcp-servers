@@ -87,11 +87,13 @@ If another command uses the same name, the namespaced form works too (`/tm:imple
 
 - **Projects** — every task belongs to one project, so repos can share a database. A repo's
   sessions default to its project; any tool takes `project` to reach another one. Task IDs are
-  global.
+  global. Give each project a short description (what it covers) so Claude can tell them apart
+  when it lists projects.
 - **Scopes** — free-text tags for an area within a project (`"auth"`, `"api"`).
 - **Epics** — an umbrella task holding the goal, order and rules for its children. Its status
-  follows them; children share its project and always inherit its scope. Claude ends any epic work
-  by suggesting the next step from its order.
+  follows them; children share its project and always inherit its scope. Children carry a step
+  number (`seq`, set with `reorder`; equal steps run in parallel) that orders `getNext`, the epic's
+  child list and the UI. Claude ends any epic work by suggesting the next step from that order.
 - **Notes** — decisions made after refinement. The newest statement wins over older notes and the
   description.
 - **Refs** — links like `blocks` or `depends on`. The server writes the inverse on the other task.
@@ -110,7 +112,7 @@ Claude calls the tools itself: `add`, `update`, `setStatus`, `getNext`, `getAll`
 
 A small Express + React app that shows the tasks Claude sees and pushes changes live. You can add,
 edit, re-prioritise, link and delete tasks, switch projects from a tab strip (a dropdown menu on phones), and
-rename a project or turn on its PR tracking from **Edit project**; the URL
+rename, describe or turn on PR tracking for a project from **Edit project**; the URL
 (`http://<host>:7374/<project>`) opens a project directly. The UI and `health` both say when a
 newer version is published. Epic cards and scope headers have quick-add buttons that pre-fill
 the project, epic and scope.

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sortTasks, groupTasks, getSectionValue, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, matchesTaskQuery, pickProject, projectFromPath, projectPath, defaultView, resolveView, resolveCardViews, nextView } from './taskView';
+import { sortTasks, sortBySeq, groupBySeq, groupTasks, getSectionValue, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, matchesTaskQuery, pickProject, projectFromPath, projectPath, defaultView, resolveView, resolveCardViews, nextView } from './taskView';
 import type { CardView, CardViewEntry, SortDir } from './taskView';
 import type { Task, TaskStatus } from '@/types/task';
 
@@ -193,10 +193,10 @@ describe('nestEpicChildren', () => {
   const plain = makeTask({ id: 14 });
   const ids = (ts: Task[] | undefined) => (ts ?? []).map((t) => t.id);
 
-  it('nests children under an epic in the same list, ordered by the sort', () => {
+  it('nests children under an epic in the same list, by id when none has a seq', () => {
     const { roots, childrenByEpic } = nestEpicChildren([a, epic, b, plain], [], 'priority', 'desc');
     expect(ids(roots)).toEqual([14, 10]);
-    expect(ids(childrenByEpic.get(10))).toEqual([12, 11]);
+    expect(ids(childrenByEpic.get(10))).toEqual([11, 12]);
   });
 
   it('keeps a child flat when its epic is not in the list', () => {
@@ -211,15 +211,15 @@ describe('nestEpicChildren', () => {
     expect(childrenByEpic.size).toBe(0);
   });
 
-  it('interleaves other-tab children with own ones by the current sort, never as roots', () => {
+  it('interleaves other-tab children with own ones in execution order, never as roots, whatever the sort', () => {
     const doneMid = makeTask({ id: 15, parentId: 10, status: 'done', priority: 'medium' });
     const doneCrit = makeTask({ id: 16, parentId: 10, status: 'done', priority: 'critical' });
     const unrelatedDone = makeTask({ id: 17, status: 'done' });
     const { roots, childrenByEpic } = nestEpicChildren([a, epic, b], [doneMid, doneCrit, unrelatedDone], 'priority', 'desc');
     expect(ids(roots)).toEqual([10]);
-    expect(ids(childrenByEpic.get(10))).toEqual([16, 12, 15, 11]);
+    expect(ids(childrenByEpic.get(10))).toEqual([11, 12, 15, 16]);
     const asc = nestEpicChildren([a, epic, b], [doneMid, doneCrit], 'priority', 'asc');
-    expect(ids(asc.childrenByEpic.get(10))).toEqual([11, 15, 12, 16]);
+    expect(ids(asc.childrenByEpic.get(10))).toEqual([11, 12, 15, 16]);
   });
 
   it('lists an epic whose children are all in the other tab', () => {
@@ -235,7 +235,40 @@ describe('nestEpicChildren', () => {
     const { roots, childrenByEpic } = nestEpicChildren([epic, a, plain], [doneChild], 'priority', 'desc');
     const sections = groupTasks(roots, 'status', 'desc');
     expect(sections.map((s) => [s.value, ids(s.tasks)])).toEqual([['in_progress', [10]], ['todo', [14]]]);
-    expect(ids(childrenByEpic.get(10))).toEqual([20, 11]);
+    expect(ids(childrenByEpic.get(10))).toEqual([11, 20]);
+  });
+
+  it('orders children by seq, unset last, regardless of the list sort', () => {
+    const s30 = makeTask({ id: 21, parentId: 10, seq: 30, priority: 'critical' });
+    const s10 = makeTask({ id: 22, parentId: 10, seq: 10, priority: 'low' });
+    const s20a = makeTask({ id: 24, parentId: 10, seq: 20 });
+    const s20b = makeTask({ id: 23, parentId: 10, seq: 20 });
+    for (const dir of ['asc', 'desc'] as SortDir[]) {
+      const { childrenByEpic } = nestEpicChildren([epic, a, s30, s20a, s10, s20b], [], 'priority', dir);
+      expect(ids(childrenByEpic.get(10))).toEqual([22, 23, 24, 21, 11]);
+    }
+    expect(ids(sortBySeq([a, s30, s10]))).toEqual([22, 21, 11]);
+  });
+});
+
+describe('groupBySeq', () => {
+  it('groups equal seq into one ranked step, keeps unset children ungrouped', () => {
+    const groups = groupBySeq([
+      makeTask({ id: 1, seq: 10 }),
+      makeTask({ id: 2, seq: 20 }),
+      makeTask({ id: 3, seq: 20 }),
+      makeTask({ id: 4, seq: 35 }),
+      makeTask({ id: 5 }),
+      makeTask({ id: 6 }),
+    ]);
+    expect(groups.map((g) => [g.step, g.tasks.map((t) => t.id)])).toEqual([
+      [1, [1]],
+      [2, [2, 3]],
+      [3, [4]],
+      [undefined, [5]],
+      [undefined, [6]],
+    ]);
+    expect(groups[0]!.total).toBe(3);
   });
 });
 

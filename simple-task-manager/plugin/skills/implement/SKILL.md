@@ -20,7 +20,7 @@ Work through `todo` tasks one at a time: simple ones inline, complex ones via a 
 ### Step 1 — Get next task
 
 - `#NN`: fetch it. An `epic` → invoke the `tm:implement-as-coordinator` skill with `#NN` and stop; that skill runs the epic's children. Status not `todo` → report the actual status and stop.
-- Otherwise call `mcp__task-manager__getNext`, narrowed by the resolved scope. Nothing returned → report "Queue empty" and stop.
+- Otherwise call `mcp__task-manager__getNext`, narrowed by the resolved scope; it already returns an epic's children in `seq` order. Nothing returned → report "Queue empty" and stop.
 - **Next task in `refinement` or `plan`** (`getNext` returns both): don't refine or plan inline. Report "Task #NN is in <status> — run `/tm:refine #NN` first" (or "finish and approve its plan first") and stop.
 
 ### Step 2 — Show summary, then go
