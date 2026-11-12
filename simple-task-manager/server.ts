@@ -1,6 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { resolve } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { VERSION } from './version.js';
 import { createStore } from './tasks.js';
 import { buildInstructions } from './instructions.js';
@@ -8,6 +9,7 @@ import { registerTools } from './mcp/registerTools.js';
 import { uiPkgDir, initUiChild, spawnUi, getUiChild, setUiChild } from './mcp/uiChild.js';
 import { checkForUpdate } from './updateCheck.js';
 import { PACKAGE_DIR } from './packageDir.js';
+import { attachCallLog } from './mcp/callLog.js';
 
 // Buffered log queue — anything emitted before the JSON-RPC transport is
 // connected is held here and flushed once `server.connect()` resolves. All
@@ -106,6 +108,8 @@ process.on('exit',    () => { killUi(); try { store.close(); } catch { /* ignore
 
 const transport = new StdioServerTransport();
 await server.connect(transport);
+// One process per Claude session, so the process is the call log's session.
+attachCallLog(transport, { store, session: randomUUID(), project, transport: 'stdio' });
 
 // Stdin listeners are registered *after* server.connect() resolves so the
 // StdioServerTransport owns stdin first. Attaching listeners before connect()

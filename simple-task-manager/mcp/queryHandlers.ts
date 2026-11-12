@@ -11,6 +11,7 @@ import { resolvePrLookup } from '../prUrl.js';
 import { PACKAGE_DIR } from '../packageDir.js';
 import { checkForUpdate } from '../updateCheck.js';
 import { VERSION } from '../version.js';
+import { callLogState } from './callLog.js';
 import type { Store, Task, TaskType, StatusFilter } from '../tasks.js';
 
 export async function handleGetOverview(store: Store, { status, project }: { status?: StatusFilter; project?: string }, ctx: SessionContext): Promise<MCPContent> {
@@ -418,6 +419,11 @@ export async function handleHealth(binding?: { store: Store; ctx: SessionContext
       ? check('✓', `API keys for /mcp: ${active} active`)
       : check('–', 'API keys for /mcp: none active — HTTP clients get 401; stdio needs none. Create one in the UI: Connect a machine'));
   }
+
+  const log = callLogState();
+  runtimeChecks.push(log.lastWriteError === undefined
+    ? check('✓', `Call log: ${log.file} (${log.lines} calls today)`)
+    : check('⚠', `Call log: ${log.file} (${log.lines} calls today) — last write failed: ${log.lastWriteError}`));
 
   sections.push(renderSection('Runtime', runtimeChecks));
 

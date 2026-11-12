@@ -18,6 +18,7 @@ No loopback exemption and no Host check: DNS rebinding can't supply the key, and
 ## Deliberate choices
 
 - **Stateless**: no session map, a `pm2 restart` strands no client, and the tools send no server→client notifications.
+- **`Mcp-Session-Id` for the call log only** (#598): initialize responses carry a fresh UUID, and later requests' echoed header becomes the log's `session`. The transport never validates it (`sessionIdGenerator: undefined`), so there are no 404s and nothing breaks across restarts. See the Call log section in the package CLAUDE.md.
 - **Second store connection**: `PRAGMA data_version` only moves for writes from *other* connections, so the UI's 1 s poll pushes SSE for MCP writes with no extra wiring.
 - Never calls `adoptDefaultProject` — one process serves many projects.
 

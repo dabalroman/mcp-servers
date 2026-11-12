@@ -39,6 +39,17 @@ Not loaded by default. **Read the file before working on its topic.**
 | `.mcp.json` env vars and `health` config checks | `docs/claude/mcp-config-env.md` | Adding/renaming an env var, `mcpConfig.ts`, `install.ts` output, `health`'s Config/Plugin sections |
 | The `tm` plugin (skills, RULES.md, hook, versioning) | `docs/claude/plugin.md` | Anything under `plugin/`, `bump-version.ts`, the plugin version check in `health` |
 
+## Call log (#598)
+
+Every MCP tool call, on both transports, becomes one JSON line in `<package>/task-logs/YYYY-MM-DD.jsonl` (UTC day, kept forever, `.gitignore`d; each install logs its own calls). Read it with grep/jq; there is no read tool or UI. Code: `mcp/callLog.ts`.
+
+- Line: `ts, session, seq, project, transport, tool, args, from` (setStatus only: status before the call)`, outcome` (`ok` | `validation_error` | `error`)`, error` (≤500 chars)`, ms`.
+- `args` redaction: numbers, booleans, null and the string values of `status, type, priority, relation, field, project, scope` stay verbatim; every other string becomes `"<N chars>"`. A new enum/identifier param must be added to `VERBATIM_KEYS`, or it logs as a length.
+- Hooked on the **transport** (`onmessage`/`send` wrapped after `server.connect`), not on the tool callbacks: the SDK rejects schema-invalid args before a callback runs and returns them as an `isError` result with `MCP error -32602` text. That text is what marks `validation_error` (unknown tool names land there too).
+- Session: stdio = a UUID per process. HTTP stays stateless. `mcp/http.ts` sets its own `Mcp-Session-Id` header on initialize responses, clients echo it (the SDK client and Claude Code do), and the transport ignores it. A request without it logs `unknown`. `seq` counters live in memory, so they restart after a process restart.
+- Writes are one `appendFileSync` per line (O_APPEND, no interleaving across processes), and failures are swallowed. The first failure warns on stderr, and `health` (Runtime) shows today's file, its line count and the last write error.
+- Tests call `setCallLogDir(tmp)`; never let a test write the real `task-logs/`. Don't point it under `/proc`: recursive `mkdirSync` there never returns.
+
 ## Toolchain
 
 - TypeScript 5.6+, strict + `noUncheckedIndexedAccess` + `noImplicitOverride` + `noFallthroughCasesInSwitch`. Source `.ts` files live at the package root; production runs from `dist/` (built by `tsc`). `tsconfig.json` excludes tests from emit; `tsconfig.test.json` extends it and includes them for typecheck only.

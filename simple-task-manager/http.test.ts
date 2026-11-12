@@ -2,7 +2,7 @@ import { test, describe, before, after, beforeEach, afterEach } from 'node:test'
 import assert from 'node:assert/strict';
 import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -10,6 +10,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { createStore, type Store } from './tasks.js';
 import { createMcpHttpHandler } from './mcp/http.js';
+import { callLogFile, setCallLogDir, type CallLogLine } from './mcp/callLog.js';
 
 type ToolResult = { content: { type: string; text: string }[]; isError?: boolean };
 
@@ -34,6 +35,7 @@ const clients: Client[] = [];
 beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), 'stm-http-test-'));
   dbPath = join(dir, 'tasks.db');
+  setCallLogDir(join(dir, 'task-logs'));
   store = createStore(dbPath);
   store.createProject('a');
   store.createProject('b');
@@ -242,5 +244,35 @@ describe('API key on /mcp', () => {
     assert.match(report, /API keys for \/mcp: 1 active/);
     assert.ok(!report.includes(key));
     assert.ok(!report.includes('test-machine'));
+  });
+});
+
+describe('call log over HTTP', () => {
+  const logLines = (): CallLogLine[] => readFileSync(callLogFile(), 'utf-8').trim().split('\n').map((l) => JSON.parse(l) as CallLogLine);
+
+  test('initialize answers with an Mcp-Session-Id; other requests do not get one', async () => {
+    const init = await raw({ method: 'POST', headers: { ...authed(), 'X-Project': 'a' }, body: INIT });
+    assert.equal(init.status, 200);
+    assert.match(String(init.headers['mcp-session-id']), /^[0-9a-f-]{36}$/);
+    const list = await raw({ method: 'POST', headers: { ...authed(), 'X-Project': 'a' }, body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list' }) });
+    assert.equal(list.headers['mcp-session-id'], undefined);
+  });
+
+  test('a client echoes the session id: its calls share one session with seq 1, 2', async () => {
+    const client = await connect('a');
+    await call(client, 'getNext');
+    await call(client, 'getById', { id: 'not-a-number' });
+    const [first, second] = logLines();
+    assert.notEqual(first?.session, 'unknown');
+    assert.equal(second?.session, first?.session);
+    assert.deepEqual([first?.seq, second?.seq], [1, 2]);
+    assert.deepEqual([first?.transport, first?.project, first?.outcome, second?.outcome], ['http', 'a', 'ok', 'validation_error']);
+  });
+
+  test('a call without the header logs session "unknown"', async () => {
+    const body = JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 'getNext', arguments: {} } });
+    const res = await raw({ method: 'POST', headers: { ...authed(), 'X-Project': 'a' }, body });
+    assert.equal(res.status, 200);
+    assert.equal(logLines()[0]?.session, 'unknown');
   });
 });

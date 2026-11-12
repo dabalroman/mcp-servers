@@ -107,6 +107,8 @@ If another command uses the same name, the namespaced form works too (`/tm:imple
 
 Claude calls the tools itself: `add`, `update`, `setStatus`, `getNext`, `getAll`, `getById`,
 `addNote`, `health`, and more. Each describes itself to Claude when it connects.
+Every call is logged, with free text reduced to its length, to `task-logs/<date>.jsonl` in this
+package, so you can see how agents actually use the tools.
 
 ## Web UI
 

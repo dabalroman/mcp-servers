@@ -1,9 +1,12 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 import { VERSION } from '../version.js';
 import { buildInstructions } from '../instructions.js';
 import { registerTools } from './registerTools.js';
+import { attachCallLog } from './callLog.js';
 import type { Store, VerifiedKey } from '../tasks.js';
 
 // Plain node:http types (no express) so node:test can drive the handler.
@@ -16,6 +19,23 @@ function bearerToken(header: string | undefined): string | undefined {
 function sendError(res: ServerResponse, status: number, code: number, message: string, headers: Record<string, string> = {}): void {
   res.writeHead(status, { 'Content-Type': 'application/json', ...headers });
   res.end(JSON.stringify({ jsonrpc: '2.0', error: { code, message }, id: null }));
+}
+
+function sessionOf(req: IncomingMessage): string {
+  const raw = req.headers['mcp-session-id'];
+  return (Array.isArray(raw) ? raw[0] : raw)?.trim() || 'unknown';
+}
+
+// A session id for the call log only. The transport stays stateless (it
+// ignores the header), but spec-compliant clients echo an Mcp-Session-Id they
+// got on the initialize response, so later calls of one session share it. No
+// session map: nothing to evict, nothing to 404 after a restart.
+function attachSessionId(transport: StreamableHTTPServerTransport, res: ServerResponse): void {
+  const receive = transport.onmessage;
+  transport.onmessage = (msg, extra) => {
+    if (isInitializeRequest(msg) && !res.headersSent) res.setHeader('Mcp-Session-Id', randomUUID());
+    receive?.(msg, extra);
+  };
 }
 
 export type McpHttpHandler = (req: IncomingMessage, res: ServerResponse) => Promise<void>;
@@ -70,6 +90,8 @@ export function createMcpHttpHandler({ store }: { store: Store }): McpHttpHandle
         void server.close();
       });
       await server.connect(transport);
+      attachSessionId(transport, res);
+      attachCallLog(transport, { store, session: sessionOf(req), project, transport: 'http' });
       await transport.handleRequest(req, res);
     } catch (err) {
       if (!res.headersSent) sendError(res, 500, -32603, `Internal error: ${err instanceof Error ? err.message : String(err)}`);
