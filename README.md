@@ -21,7 +21,7 @@ Add the marketplace once: `/plugin marketplace add dabalroman/mcp-servers`
 | pr-watch | Watches the PRs of the session's tasks: PR statuses, deploy note, a turn on failed checks, comments and deploys | `/plugin install pr-watch@dabalroman` |
 | task-watch | Tells the session when another session or the UI changes its tasks: a toast, and a turn on status changes and notes | `/plugin install task-watch@dabalroman` |
 
-`active-model` shows the task line only where the task-manager MCP is connected: it reads the current `in_progress` task and the open count from that server, and follows `setStatus`/`add`/`update`/`delete` as the agent makes them, with the task's epic id and title before it.
+`active-model` shows the task line only where the task-manager MCP is connected: it shows the `in_progress` task this session touched last (none until the session touches one), with its epic id and title before it, and the open count from that server, following the agent's task calls as it makes them.
 
 `pr-watch` needs `gh` (logged in) and the task-manager MCP. It watches the PRs on the tasks of the current branch's JIRA id and on the tasks the agent works on (an epic brings its children), polls GitHub every minute, writes each PR's status (`draft` -> `open` -> `pipeline_pass` -> `approved` -> `merged` -> `deployed`, or `closed`) and one deploy note per PR, and starts a turn when a check fails, someone comments or the deploy workflow (`deployWorkflow` option, default `deploy-dev.yml`) finishes. A row above the prompt lists the PRs it watches and their state. Install it only where GitHub workflows run.
 
