@@ -57,6 +57,10 @@ Not loaded by default. **Read the file before working on its topic.**
 
 `task-watch/` only reads task-manager (`getById`, `getUpdates`). It suppresses the agent's own writes by applying each call to its snapshot field by field, never by a full `getById` refresh, and ignores `prs` (pr-watch owns them). The live watch sits in module memory mirrored to `$.state`, because every `$.state.get` in one dispatch returns the value from when the dispatch began.
 
+## active-model (root plugin)
+
+A task's `updated_at` says nothing about the current session: other sessions, the UI and pr-watch's `update({prs})` bump it. The band's task is the last one this session touched (`touchedTaskIds`, copied per plugin in `hooks/watchSet.ts`) that is still `in_progress`; none touched shows no task.
+
 ## Git repo location
 
 The git repository root is `~/.claude/mcp-servers/`, **not** `~/.claude/mcp-servers/simple-task-manager/`. The `simple-task-manager/` directory has no `.git` of its own — it is a subdirectory of the `mcp-servers` repo. Always run git commands from `~/.claude/mcp-servers/` (or pass `-C ~/.claude/mcp-servers`). The pre-commit hook lives at `~/.claude/mcp-servers/.git/hooks/pre-commit` and is installed by `simple-task-manager/setup-hooks.ts`.
