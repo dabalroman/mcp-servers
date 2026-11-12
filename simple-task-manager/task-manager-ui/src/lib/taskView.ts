@@ -127,6 +127,22 @@ export function sortBySeq(tasks: Task[]): Task[] {
   });
 }
 
+export type SeqGroup = { step?: number; total: number; tasks: Task[] };
+
+// Children (already in seq order) grouped per step: distinct seq values ranked 1..n, so 10/20/20/30
+// becomes three groups with the 20s together. Each unsequenced child is its own group with no step.
+export function groupBySeq(kids: Task[]): SeqGroup[] {
+  const total = new Set(kids.flatMap((k) => (k.seq === undefined ? [] : [k.seq]))).size;
+  const groups: SeqGroup[] = [];
+  let lastSeq: number | undefined;
+  for (const k of kids) {
+    if (k.seq !== undefined && k.seq === lastSeq) groups[groups.length - 1]!.tasks.push(k);
+    else groups.push({ step: k.seq === undefined ? undefined : groups.filter((g) => g.step).length + 1, total, tasks: [k] });
+    lastSeq = k.seq;
+  }
+  return groups;
+}
+
 // Roots are `own` (the tab's tasks) plus any epic from `others` (the other tab) with an own child,
 // ordered by the current sort; an epic's children are drawn from `own` + `others` in seq order.
 // A child whose epic is in neither list stays a root.

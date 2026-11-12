@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sortTasks, sortBySeq, groupTasks, getSectionValue, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, matchesTaskQuery, pickProject, projectFromPath, projectPath, defaultView, resolveView, resolveCardViews, nextView } from './taskView';
+import { sortTasks, sortBySeq, groupBySeq, groupTasks, getSectionValue, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, matchesTaskQuery, pickProject, projectFromPath, projectPath, defaultView, resolveView, resolveCardViews, nextView } from './taskView';
 import type { CardView, CardViewEntry, SortDir } from './taskView';
 import type { Task, TaskStatus } from '@/types/task';
 
@@ -248,6 +248,27 @@ describe('nestEpicChildren', () => {
       expect(ids(childrenByEpic.get(10))).toEqual([22, 23, 24, 21, 11]);
     }
     expect(ids(sortBySeq([a, s30, s10]))).toEqual([22, 21, 11]);
+  });
+});
+
+describe('groupBySeq', () => {
+  it('groups equal seq into one ranked step, keeps unset children ungrouped', () => {
+    const groups = groupBySeq([
+      makeTask({ id: 1, seq: 10 }),
+      makeTask({ id: 2, seq: 20 }),
+      makeTask({ id: 3, seq: 20 }),
+      makeTask({ id: 4, seq: 35 }),
+      makeTask({ id: 5 }),
+      makeTask({ id: 6 }),
+    ]);
+    expect(groups.map((g) => [g.step, g.tasks.map((t) => t.id)])).toEqual([
+      [1, [1]],
+      [2, [2, 3]],
+      [3, [4]],
+      [undefined, [5]],
+      [undefined, [6]],
+    ]);
+    expect(groups[0]!.total).toBe(3);
   });
 });
 

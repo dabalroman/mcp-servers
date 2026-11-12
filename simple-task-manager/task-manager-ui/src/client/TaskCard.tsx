@@ -154,11 +154,6 @@ export function TaskCard({ task, view, onViewChange, onStatus, onEdit, onAddChil
               </button>
               <StatusPicker value={task.status} options={STATUSES} onChange={(st) => onStatus(task.id, st)} className="border-l-0" />
             </div>
-            {nested && task.seq !== undefined && (
-              <span title="Execution step in the epic; equal steps run in parallel" className={cn(externalIdClass, 'shrink-0 uppercase')}>
-                Step {task.seq}
-              </span>
-            )}
             {noteCount > 0 && (
               <button
                 type="button"
