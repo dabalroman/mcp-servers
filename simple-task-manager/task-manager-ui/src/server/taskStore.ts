@@ -40,11 +40,11 @@ export function createTaskStore({ dbPath }: TaskStoreOptions) {
     return store.getProjects();
   }
 
-  async function createProject(name: string): Promise<{ name: string }> {
-    return store.createProject(name);
+  async function createProject(name: string, description?: string): Promise<{ id: string; name: string; description: string }> {
+    return store.createProject(name, description);
   }
 
-  async function updateProject(id: string, settings: ProjectSettings): Promise<{ id: string; name: string; trackPrs: boolean }> {
+  async function updateProject(id: string, settings: ProjectSettings): Promise<{ id: string; name: string; description: string; trackPrs: boolean }> {
     return store.updateProject(id, settings);
   }
 

@@ -124,7 +124,7 @@ export default function TaskManager() {
     openAdd({ project: epic.project, parentId: epic.id, scope: epic.scope ?? '' });
   }
 
-  async function handleEditProject(settings: { name: string; trackPrs: boolean }): Promise<boolean> {
+  async function handleEditProject(settings: { name: string; trackPrs: boolean; description: string }): Promise<boolean> {
     if (!currentProject) return false;
     try {
       await updateProject(currentProject.id, settings);
@@ -135,9 +135,9 @@ export default function TaskManager() {
     }
   }
 
-  async function handleCreateProject({ name }: { name: string }): Promise<boolean> {
+  async function handleCreateProject({ name, description }: { name: string; description: string }): Promise<boolean> {
     try {
-      selectProject(await createProject(name));
+      selectProject(await createProject(name, description));
       return true;
     } catch (err) {
       toast.error(`Failed to create project.${failureReason(err)}`);

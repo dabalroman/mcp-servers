@@ -65,9 +65,9 @@ async function dispatchProjects(
     if (method === 'GET' && pathname === '/') {
       result = api.projects();
     } else if (method === 'POST' && pathname === '/') {
-      result = await api.createProject(req.body as { name?: unknown });
+      result = await api.createProject(req.body as { name?: unknown; description?: unknown });
     } else if (method === 'PATCH' && projectMatch) {
-      result = await api.updateProject(decodeURIComponent(projectMatch[1]!), req.body as { name?: unknown; trackPrs?: unknown });
+      result = await api.updateProject(decodeURIComponent(projectMatch[1]!), req.body as { name?: unknown; trackPrs?: unknown; description?: unknown });
     } else {
       if (next) return next();
       res.statusCode = 404;

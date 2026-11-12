@@ -149,18 +149,18 @@ export function useTasks() {
     if (!res.ok) throw await httpError(res);
   }, []);
 
-  const createProject = useCallback(async (name: string): Promise<string> => {
+  const createProject = useCallback(async (name: string, description: string): Promise<string> => {
     const res = await fetch('/api/projects', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name }),
+      body: JSON.stringify({ name, description }),
     });
     if (!res.ok) throw await httpError(res);
     const json = await res.json() as { id: string };
     return json.id;
   }, []);
 
-  const updateProject = useCallback(async (id: string, settings: { name?: string; trackPrs?: boolean }) => {
+  const updateProject = useCallback(async (id: string, settings: { name?: string; trackPrs?: boolean; description?: string }) => {
     const res = await fetch(`/api/projects/${encodeURIComponent(id)}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },

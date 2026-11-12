@@ -17,6 +17,7 @@ import {
   StaleSchemaError,
   hashApiKey,
   slugifyProjectId,
+  PROJECT_DESCRIPTION_MAX,
 } from './tasks.js';
 
 const MIGRATION_NAMES = [
@@ -38,6 +39,7 @@ const MIGRATION_NAMES = [
   '20261106150000_split-project-id-name',
   '20261109120000_add-pr-pipeline-approved-status',
   '20261112120000_add-task-seq',
+  '20261112130000_add-project-description',
 ];
 
 let dir: string;
@@ -1559,7 +1561,7 @@ describe('project PR tracking', () => {
   test('is off by default and toggles via updateProject, case-insensitively', () => {
     store.createProject('Example-Project');
     assert.equal(store.projectTracksPrs('example-project'), false);
-    assert.deepEqual(store.updateProject('EXAMPLE-project', { trackPrs: true }), { id: 'example-project', name: 'Example-Project', trackPrs: true });
+    assert.deepEqual(store.updateProject('EXAMPLE-project', { trackPrs: true }), { id: 'example-project', name: 'Example-Project', description: '', trackPrs: true });
     assert.equal(store.projectTracksPrs('Example-Project'), true);
     assert.equal(store.getProjects().find((p) => p.id === 'example-project')?.trackPrs, true);
     store.updateProject('Example-Project', { trackPrs: false });
@@ -1572,11 +1574,33 @@ describe('project PR tracking', () => {
   });
 });
 
+describe('project description', () => {
+  test('defaults to empty and is set, trimmed, on create', () => {
+    assert.equal(store.createProject('example-project').description, '');
+    assert.deepEqual(store.createProject('other-project', '  Covers the example tool.  '), { id: 'other-project', name: 'other-project', description: 'Covers the example tool.' });
+    assert.equal(store.getProjects().find((p) => p.id === 'other-project')?.description, 'Covers the example tool.');
+  });
+
+  test('updates alone, leaving name and trackPrs, and clears with an empty string', () => {
+    store.createProject('example-project');
+    store.updateProject('example-project', { name: 'Example', trackPrs: true });
+    assert.deepEqual(store.updateProject('example-project', { description: 'Example scope' }), { id: 'example-project', name: 'Example', description: 'Example scope', trackPrs: true });
+    assert.equal(store.updateProject('example-project', { description: '   ' }).description, '');
+  });
+
+  test(`rejects more than ${PROJECT_DESCRIPTION_MAX} characters on create and update`, () => {
+    store.createProject('example-project', 'x'.repeat(PROJECT_DESCRIPTION_MAX));
+    assert.throws(() => store.updateProject('example-project', { description: 'x'.repeat(PROJECT_DESCRIPTION_MAX + 1) }), /at most 280 characters/);
+    assert.throws(() => store.createProject('other-project', 'x'.repeat(PROJECT_DESCRIPTION_MAX + 1)), /at most 280 characters/);
+    assert.equal(store.hasProject('other-project'), false);
+  });
+});
+
 describe('project rename', () => {
   test('changes only the display name; the id and its tasks stay', () => {
     store.createProject('example-project');
     store.add({ type: 'feature', priority: 'low', title: 'Do a thing', project: 'example-project' });
-    assert.deepEqual(store.updateProject('Example-Project', { name: '  Example Project  ' }), { id: 'example-project', name: 'Example Project', trackPrs: false });
+    assert.deepEqual(store.updateProject('Example-Project', { name: '  Example Project  ' }), { id: 'example-project', name: 'Example Project', description: '', trackPrs: false });
     const entry = store.getProjects().find((p) => p.id === 'example-project');
     assert.equal(entry?.name, 'Example Project');
     assert.equal(entry?.total, 1);
@@ -1584,8 +1608,8 @@ describe('project rename', () => {
 
   test('can set the name and trackPrs together, or either alone', () => {
     store.createProject('example-project');
-    assert.deepEqual(store.updateProject('example-project', { name: 'Example', trackPrs: true }), { id: 'example-project', name: 'Example', trackPrs: true });
-    assert.deepEqual(store.updateProject('example-project', { trackPrs: false }), { id: 'example-project', name: 'Example', trackPrs: false });
+    assert.deepEqual(store.updateProject('example-project', { name: 'Example', trackPrs: true }), { id: 'example-project', name: 'Example', description: '', trackPrs: true });
+    assert.deepEqual(store.updateProject('example-project', { trackPrs: false }), { id: 'example-project', name: 'Example', description: '', trackPrs: false });
   });
 
   test('may change the case of its own name', () => {
@@ -1604,7 +1628,7 @@ describe('project rename', () => {
     store.createProject('example-project');
     assert.throws(() => store.updateProject('example-project', { name: '   ' }), /1–64 characters/);
     assert.throws(() => store.updateProject('example-project', { name: 'x'.repeat(65) }), /1–64 characters/);
-    assert.throws(() => store.updateProject('example-project', {}), /pass name or trackPrs/);
+    assert.throws(() => store.updateProject('example-project', {}), /pass name, trackPrs or description/);
     assert.throws(() => store.updateProject('nope', { name: 'Nope' }), /does not exist/);
   });
 
@@ -1618,7 +1642,7 @@ describe('project rename', () => {
 
 describe('projects', () => {
   test('a fresh DB has only the default project', () => {
-    assert.deepEqual(store.getProjects(), [{ id: 'default', name: 'default', total: 0, open: 0, trackPrs: false }]);
+    assert.deepEqual(store.getProjects(), [{ id: 'default', name: 'default', description: '', total: 0, open: 0, trackPrs: false }]);
   });
 
   test('list methods only return the given project', () => {
@@ -1670,7 +1694,7 @@ describe('projects', () => {
   });
 
   test('createProject trims the name, derives the id and rejects a taken id and bad lengths', () => {
-    assert.deepEqual(store.createProject('  Example Project '), { id: 'example-project', name: 'Example Project' });
+    assert.deepEqual(store.createProject('  Example Project '), { id: 'example-project', name: 'Example Project', description: '' });
     assert.throws(() => store.createProject('EXAMPLE-project'), /id "example-project" is already taken by project "Example Project"/);
     assert.throws(() => store.createProject('Example  Project!'), /already taken/);
     assert.throws(() => store.createProject('   '), /1–64 characters/);
@@ -1693,9 +1717,9 @@ describe('projects', () => {
     const done = makeTask({ project: 'a-project' }).id;
     store.setStatus(done, 'done');
     assert.deepEqual(store.getProjects(), [
-      { id: 'a-project', name: 'a-project', total: 2, open: 1, trackPrs: false },
-      { id: 'b-project', name: 'b-project', total: 0, open: 0, trackPrs: false },
-      { id: 'default', name: 'default', total: 0, open: 0, trackPrs: false },
+      { id: 'a-project', name: 'a-project', description: '', total: 2, open: 1, trackPrs: false },
+      { id: 'b-project', name: 'b-project', description: '', total: 0, open: 0, trackPrs: false },
+      { id: 'default', name: 'default', description: '', total: 0, open: 0, trackPrs: false },
     ]);
   });
 

@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { refsSchema, prsSchema, projectParam, withSchemaCheck, type MCPContent, type SessionContext } from './shared.js';
-import type { Store } from '../tasks.js';
+import { PROJECT_DESCRIPTION_MAX, type Store } from '../tasks.js';
 import {
   handleGetOverview,
   handleGetNext,
@@ -277,18 +277,21 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   // ── getProjects ───────────────────────────────────────────────────────────────
   server.tool(
     'getProjects',
-    "List all projects with task counts — use when the user asks which projects exist, or before passing `project` to another tool. Every task belongs to exactly one project; list tools default to this session's project (PROJECT_NAME). Task IDs are global, so getById, getRelated, setStatus and notes work across projects. Returns { boundProject, projects: Array<{ id, name, total, open, trackPrs }> } sorted by name; pass `id` as `project` (name is display only); open = not done; trackPrs = agents in it are expected to record PRs.",
+    "List all projects with task counts — use when the user asks which projects exist, or before passing `project` to another tool. Every task belongs to exactly one project; list tools default to this session's project (PROJECT_NAME). Task IDs are global, so getById, getRelated, setStatus and notes work across projects. Returns { boundProject, projects: Array<{ id, name, description, total, open, trackPrs }> } sorted by name; pass `id` as `project` (name is display only); description = what the project covers, use it to pick the right project; open = not done; trackPrs = agents in it are expected to record PRs.",
     {},
     withSchemaCheck(store, async (): Promise<MCPContent> => handleGetProjects(store, ctx))
   );
 
   // ── createProject ─────────────────────────────────────────────────────────────
+  const descriptionParam = z.string().trim().max(PROJECT_DESCRIPTION_MAX).optional()
+    .describe(`What the project covers, one or two sentences (at most ${PROJECT_DESCRIPTION_MAX} characters), so agents can tell projects apart; empty clears it.`);
   const createProjectSchema = {
     name: z.string().min(1).describe('Display name, 1–64 characters. The id is derived from it.'),
+    description: descriptionParam,
   };
   server.tool(
     'createProject',
-    'Create a new, empty project. Only call this when the user asks for a new project — never to make an unknown `project` argument work. The id is derived from the name (lowercase, a–z, 0–9 and \'-\', e.g. "Random Tools" → random-tools) and never changes. Returns { success, project: { id, name } }, or an error if that id is already taken.',
+    'Create a new, empty project. Only call this when the user asks for a new project — never to make an unknown `project` argument work. The id is derived from the name (lowercase, a–z, 0–9 and \'-\', e.g. "Random Tools" → random-tools) and never changes. Returns { success, project: { id, name, description } }, or an error if that id is already taken.',
     createProjectSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof createProjectSchema>>): Promise<MCPContent> => handleCreateProject(store, args))
   );
@@ -309,11 +312,12 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   // ── updateProject ─────────────────────────────────────────────────────────────
   const updateProjectSchema = {
     project: z.string().min(1).describe('Id of the project to change (case-insensitive).'),
-    trackPrs: z.boolean().describe('true adds an instruction telling agents in this project to record the PRs/MRs they open. It does not enable the prs field: prs on add/update works in every project either way. Takes effect from the next session.'),
+    trackPrs: z.boolean().describe('true adds an instruction telling agents in this project to record the PRs/MRs they open. It does not enable the prs field: prs on add/update works in every project either way. Takes effect from the next session.').optional(),
+    description: descriptionParam,
   };
   server.tool(
     'updateProject',
-    'Change a project\'s settings. Only call when the user asks for this setting (e.g. "turn on PR tracking"), never to make another tool or field work. Returns { success, project: { id, name, trackPrs } }, or an error for an unknown project.',
+    'Change a project\'s settings (pass trackPrs, description or both). Only call when the user asks for this setting (e.g. "turn on PR tracking", "describe this project"), never to make another tool or field work. Returns { success, project: { id, name, description, trackPrs } }, or an error for an unknown project.',
     updateProjectSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof updateProjectSchema>>): Promise<MCPContent> => handleUpdateProject(store, args))
   );

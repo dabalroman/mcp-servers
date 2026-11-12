@@ -1504,7 +1504,7 @@ describe('project binding', () => {
   });
 
   test('getProjects and createProject', async () => {
-    assert.deepEqual(decode(handleCreateProject(store, { name: 'Example Project' })), { success: true, project: { id: 'example-project', name: 'Example Project' } });
+    assert.deepEqual(decode(handleCreateProject(store, { name: 'Example Project' })), { success: true, project: { id: 'example-project', name: 'Example Project', description: '' } });
     assert.equal(handleCreateProject(store, { name: 'Example-Project' }).isError, true);
     const out = decode(await handleGetProjects(store, CTX)) as { boundProject: string; projects: { id: string; name: string }[] };
     assert.equal(out.boundProject, 'default');
@@ -1512,10 +1512,18 @@ describe('project binding', () => {
   });
 
   test('updateProject toggles trackPrs and getProjects reports it', async () => {
-    assert.deepEqual(decode(handleUpdateProject(store, { project: 'DEFAULT', trackPrs: true })), { success: true, project: { id: 'default', name: 'default', trackPrs: true } });
+    assert.deepEqual(decode(handleUpdateProject(store, { project: 'DEFAULT', trackPrs: true })), { success: true, project: { id: 'default', name: 'default', description: '', trackPrs: true } });
     const out = decode(await handleGetProjects(store, CTX)) as { projects: { name: string; trackPrs: boolean }[] };
     assert.deepEqual(out.projects.map((p) => [p.name, p.trackPrs]), [['default', true]]);
     assert.equal(handleUpdateProject(store, { project: 'nope', trackPrs: true }).isError, true);
+  });
+
+  test('createProject and updateProject set a description that getProjects reports', async () => {
+    assert.deepEqual(decode(handleCreateProject(store, { name: 'Example Project', description: 'Covers the example tool.' })), { success: true, project: { id: 'example-project', name: 'Example Project', description: 'Covers the example tool.' } });
+    assert.deepEqual(decode(handleUpdateProject(store, { project: 'default', description: 'Everything else.' })), { success: true, project: { id: 'default', name: 'default', description: 'Everything else.', trackPrs: false } });
+    const out = decode(await handleGetProjects(store, CTX)) as { projects: { id: string; description: string }[] };
+    assert.deepEqual(out.projects.map((p) => [p.id, p.description]), [['default', 'Everything else.'], ['example-project', 'Covers the example tool.']]);
+    assert.equal(handleUpdateProject(store, { project: 'default' }).isError, true);
   });
 
   test('health reports the bound project', async () => {

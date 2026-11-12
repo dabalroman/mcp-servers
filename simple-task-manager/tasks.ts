@@ -296,6 +296,7 @@ function runMigrations(db: DB): Set<string> {
 //   id TEXT PK COLLATE NOCASE — the identity every FK, PROJECT_NAME, X-Project and UI URL uses; immutable except adoptDefaultProject
 //   name TEXT NOT NULL DEFAULT '' COLLATE NOCASE — display only, never a lookup key; created_at TEXT NOT NULL DEFAULT now
 //   track_prs INTEGER NOT NULL DEFAULT 0 — only decides whether agents are told to record PRs
+//   description TEXT NOT NULL DEFAULT '' — what the project covers (≤ PROJECT_DESCRIPTION_MAX); getProjects only, never in instructions
 //
 // api_keys — HTTP MCP keys (docs/claude/mcp-over-http.md)
 //   id INTEGER PK AUTOINCREMENT; label TEXT NOT NULL
@@ -452,7 +453,7 @@ export type OverviewEntry =
   | { type: TaskType; refinement: number; plan: number; open: number; done: number }
   | { type: TaskType; count: number; status: TaskStatus };
 export type ScopeEntry = { scope: string; total: number; open: number };
-export type ProjectEntry = { id: string; name: string; total: number; open: number; trackPrs: boolean };
+export type ProjectEntry = { id: string; name: string; description: string; total: number; open: number; trackPrs: boolean };
 
 export type StatusFilter = TaskStatus | 'open';
 export type ListFilter = { status?: StatusFilter; type?: TaskType; scope?: string };
@@ -512,8 +513,8 @@ export type Store = {
   getAll(project: string, filter?: ListFilter): Task[];
   getUpdates(project: string, filter: GetUpdatesFilter): GetUpdatesResult;
   getProjects(): ProjectEntry[];
-  createProject(name: string): { id: string; name: string };
-  updateProject(id: string, settings: ProjectSettings): { id: string; name: string; trackPrs: boolean };
+  createProject(name: string, description?: string): { id: string; name: string; description: string };
+  updateProject(id: string, settings: ProjectSettings): { id: string; name: string; description: string; trackPrs: boolean };
   projectTracksPrs(id: string): boolean;
   hasProject(id: string): boolean;
   adoptDefaultProject(id: string): boolean;
@@ -531,8 +532,9 @@ export type Store = {
 export type SchemaStatus = { last: { name: string; appliedAt: string } | null; unknown: string[] };
 
 export const PROJECT_NAME_MAX = 64;
+export const PROJECT_DESCRIPTION_MAX = 280;
 
-export type ProjectSettings = { name?: string; trackPrs?: boolean };
+export type ProjectSettings = { name?: string; trackPrs?: boolean; description?: string };
 
 export type ApiKey = { id: number; label: string; project: string | null; createdAt: string; lastUsedAt: string | null; revokedAt: string | null };
 export type VerifiedKey = { id: number; project: string | null };
@@ -554,6 +556,15 @@ function validProjectName(name: string): string {
   const trimmed = String(name ?? '').trim();
   if (!isValidProjectName(trimmed)) {
     throw new Error(`Validation failed: project name must be 1–${PROJECT_NAME_MAX} characters.`);
+  }
+  return trimmed;
+}
+
+// Empty is allowed and clears it.
+function validProjectDescription(description: string): string {
+  const trimmed = String(description ?? '').trim();
+  if (trimmed.length > PROJECT_DESCRIPTION_MAX) {
+    throw new Error(`Validation failed: project description must be at most ${PROJECT_DESCRIPTION_MAX} characters.`);
   }
   return trimmed;
 }
@@ -672,10 +683,11 @@ export function createStore(dbPath: string): Store {
   const stmtSetSeq          = db.prepare(`UPDATE tasks SET seq = ?, updated_at = datetime('now') WHERE id = ?`);
   const stmtHasChildren     = db.prepare('SELECT 1 FROM tasks WHERE parent_id = ? LIMIT 1');
   const stmtRescopeChildren = db.prepare("UPDATE tasks SET scope = @scope, updated_at = datetime('now') WHERE parent_id = @id AND scope IS NOT @scope");
-  const stmtSelectProject   = db.prepare('SELECT id, name FROM projects WHERE id = ?');
+  const stmtSelectProject   = db.prepare('SELECT id, name, description FROM projects WHERE id = ?');
   const stmtProjectTrackPrs = db.prepare('SELECT track_prs FROM projects WHERE id = ?');
   const stmtSetTrackPrs     = db.prepare('UPDATE projects SET track_prs = ? WHERE id = ?');
   const stmtSetProjectName  = db.prepare('UPDATE projects SET name = ? WHERE id = ?');
+  const stmtSetProjectDesc  = db.prepare('UPDATE projects SET description = ? WHERE id = ?');
   const stmtProjectNamedAs  = db.prepare('SELECT id, name FROM projects WHERE name = ? AND id != ?');
   const stmtPrsFor          = db.prepare('SELECT url, number, status FROM task_prs WHERE task_id = ? ORDER BY created_at, rowid');
   const stmtPrCreatedAt     = db.prepare('SELECT url, created_at FROM task_prs WHERE task_id = ?');
@@ -1298,7 +1310,7 @@ export function createStore(dbPath: string): Store {
 
   function getProjects(): ProjectEntry[] {
     const rows = db.prepare(`
-      SELECT p.id, p.name,
+      SELECT p.id, p.name, p.description,
              COUNT(t.id) AS total,
              COALESCE(SUM(CASE WHEN t.status != 'done' THEN 1 ELSE 0 END), 0) AS open,
              p.track_prs
@@ -1317,10 +1329,10 @@ export function createStore(dbPath: string): Store {
   }
 
   // Only the display name changes; the id (and everything bound to it) stays.
-  function updateProject(id: string, settings: ProjectSettings): { id: string; name: string; trackPrs: boolean } {
+  function updateProject(id: string, settings: ProjectSettings): { id: string; name: string; description: string; trackPrs: boolean } {
     assertSchemaCurrent();
-    if (settings.name === undefined && settings.trackPrs === undefined) {
-      throw new Error('Validation failed: pass name or trackPrs to change.');
+    if (settings.name === undefined && settings.trackPrs === undefined && settings.description === undefined) {
+      throw new Error('Validation failed: pass name, trackPrs or description to change.');
     }
     return db.transaction(() => {
       const canonical = canonicalProject(id);
@@ -1330,8 +1342,9 @@ export function createStore(dbPath: string): Store {
         stmtSetProjectName.run(name, canonical);
       }
       if (settings.trackPrs !== undefined) stmtSetTrackPrs.run(settings.trackPrs ? 1 : 0, canonical);
-      const { name } = stmtSelectProject.get(canonical) as { name: string };
-      return { id: canonical, name, trackPrs: projectTracksPrs(canonical) };
+      if (settings.description !== undefined) stmtSetProjectDesc.run(validProjectDescription(settings.description), canonical);
+      const { name, description } = stmtSelectProject.get(canonical) as { name: string; description: string };
+      return { id: canonical, name, description, trackPrs: projectTracksPrs(canonical) };
     }).immediate();
   }
 
@@ -1346,15 +1359,16 @@ export function createStore(dbPath: string): Store {
   }
 
   // The id is derived once and never follows a later name change.
-  function createProject(name: string): { id: string; name: string } {
+  function createProject(name: string, description = ''): { id: string; name: string; description: string } {
     assertSchemaCurrent();
     const trimmed = validProjectName(name);
+    const desc = validProjectDescription(description);
     const id = slugifyProjectId(trimmed);
     const existing = stmtSelectProject.get(id) as { id: string; name: string } | undefined;
     if (existing) throw new Error(`Validation failed: id "${id}" is already taken by project "${existing.name}".`);
     assertNameFree(trimmed, id);
-    db.prepare('INSERT INTO projects (id, name) VALUES (?, ?)').run(id, trimmed);
-    return { id, name: trimmed };
+    db.prepare('INSERT INTO projects (id, name, description) VALUES (?, ?, ?)').run(id, trimmed, desc);
+    return { id, name: trimmed, description: desc };
   }
 
   // A DB that only knows the migration's 'default' project takes the
