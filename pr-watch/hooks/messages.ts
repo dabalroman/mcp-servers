@@ -37,6 +37,7 @@ export function rulesSection(followUp: string): string {
     'The pr-watch plugin keeps the PR statuses and deploy notes on task-manager tasks: record a new PR in a task\'s `prs`, but never update PR statuses or write deploy notes yourself.',
     'A prompt starting with `pr-watch:` lists PR events. Report them, don\'t act on them:',
     '- failed or cancelled check: read the failed log (`gh run view <run> --log-failed`) and propose a fix;',
+    '- all checks passed, merged, no deploy workflow: report it in one line; after a merge with no deploy to wait for, suggest the next step from the epic\'s order;',
     '- comment or review: name the author and the gist; for questions and change requests propose the reply or the fix;',
     `- deploy result: report the run and its conclusion; on failure the failed jobs and log lines with a proposed fix.${success} With an epic, then suggest the next step from its order;`,
     '- `pr-watch error`: report it verbatim.',

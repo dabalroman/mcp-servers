@@ -3,6 +3,7 @@ import type { Watch } from '../types'
 import type { PrRef } from './gh.ts'
 import { ghOf, prRefOf } from './gh.ts'
 import { commit, ledgerKey, loadLedger, pruneLedgers, unseen } from './ledger.ts'
+import { claimTask, ownsTask, pruneOwners, WRITING_TOOLS } from './owner.ts'
 import type { TaskLabel } from './messages.ts'
 import { BACKOFF_LABEL, errorText, eventLine, promptText, rulesSection, shortLine, watchLabel } from './messages.ts'
 import type { PollConfig } from './poll.ts'
@@ -69,6 +70,7 @@ async function branchTaskIds($: EngineInterface, call: TaskCall): Promise<number
 }
 
 // The watch set grows only; an epic brings its children, so their PRs are watched too.
+// Only the task's owner polls its PRs: the ledger is shared, so another session's poll would consume the events.
 async function watchedPrs($: EngineInterface, call: TaskCall): Promise<Watched[]> {
   let start: number[]
   try {
@@ -79,6 +81,8 @@ async function watchedPrs($: EngineInterface, call: TaskCall): Promise<Watched[]
   const queue = [...new Set(start)]
   const ids = new Set(queue)
   const prs = new Map<string, Watched>()
+  const session = await $.session.id()
+  const now = await $.clock.now()
   for (let id = queue.shift(); id !== undefined; id = queue.shift()) {
     const task = (await call('getById', { id }).catch(() => undefined))?.task as Json | undefined
     if (task === undefined) continue
@@ -91,10 +95,12 @@ async function watchedPrs($: EngineInterface, call: TaskCall): Promise<Watched[]
         }
       }
     }
-    for (const entry of Array.isArray(task.prs) ? (task.prs as Json[]) : []) {
+    const open = (Array.isArray(task.prs) ? (task.prs as Json[]) : []).flatMap(entry => {
       const pr = typeof entry.url === 'string' && WATCHED.has(String(entry.status)) ? prRefOf(entry.url) : undefined
-      if (pr !== undefined && !prs.has(pr.url)) prs.set(pr.url, { pr, task: { id, title: String(task.title ?? '') } })
-    }
+      return pr === undefined || prs.has(pr.url) ? [] : [pr]
+    })
+    if (open.length === 0 || !(await ownsTask($, id, session, now))) continue
+    for (const pr of open) prs.set(pr.url, { pr, task: { id, title: String(task.title ?? '') } })
   }
   await addToWatch($, [...ids])
 
@@ -191,7 +197,9 @@ export const register: Register = (on, options) => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
     try {
-      await pruneLedgers($, await $.clock.now())
+      const now = await $.clock.now()
+      await pruneLedgers($, now)
+      await pruneOwners($, now)
     } catch {
       // A full or unreadable store only costs the prune.
     }
@@ -207,6 +215,11 @@ export const register: Register = (on, options) => {
         const tool = String(e.tool).slice(TASK_PREFIX.length)
         const ids = touchedTaskIds(tool, e as unknown as Json, parseJson(result.text))
         if (ids.length > 0) await addToWatch($, ids)
+        if (WRITING_TOOLS.has(tool)) {
+          const session = await $.session.id()
+          const now = await $.clock.now()
+          for (const id of ids) await claimTask($, id, session, now)
+        }
       }
     } catch {
       // Watching must never fail a task call.
