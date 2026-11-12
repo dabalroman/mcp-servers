@@ -256,9 +256,9 @@ export default function TaskManager() {
             onToggleCollapse={kids ? () => toggleCollapse(collapseKey) : undefined}
             sticky={kids !== undefined && !collapsed}
           />
-          {kids && !collapsed && groupBySeq(kids).map((group) => (
-            <div key={group.tasks[0]!.id} className={EPIC_RAIL}>
-              {group.step && (
+          {kids && !collapsed && groupBySeq(kids).flatMap((group) => group.tasks.map((child, i) => (
+            <div key={child.id} className={EPIC_RAIL}>
+              {group.step && i === 0 && (
                 <span
                   title={`Step ${group.step} of ${group.total}${group.tasks.length > 1 ? `, ${group.tasks.length} tasks run in parallel` : ''}`}
                   className="absolute left-0 top-3.5 z-[1] -translate-x-1/2 flex items-center justify-center w-6 h-6 border border-border bg-background text-xs tabular-nums text-muted-foreground"
@@ -266,23 +266,18 @@ export default function TaskManager() {
                   {group.step}
                 </span>
               )}
-              <div className="flex flex-col gap-2">
-                {group.tasks.map((child) => (
-                  <TaskCard
-                    key={child.id}
-                    task={child}
-                    {...cardViewProps(child)}
-                    onStatus={handleStatus}
-                    onEdit={openEdit}
-                    onRefClick={navigateToRef}
-                    refTargets={refTargets}
-                    highlighted={highlightedId === child.id}
-                    nested
-                  />
-                ))}
-              </div>
+              <TaskCard
+                task={child}
+                {...cardViewProps(child)}
+                onStatus={handleStatus}
+                onEdit={openEdit}
+                onRefClick={navigateToRef}
+                refTargets={refTargets}
+                highlighted={highlightedId === child.id}
+                nested
+              />
             </div>
-          ))}
+          )))}
         </div>
       );
     });
