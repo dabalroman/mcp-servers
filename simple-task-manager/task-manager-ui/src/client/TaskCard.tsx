@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { toast } from 'sonner';
@@ -55,9 +55,10 @@ export type TaskCardProps = {
   onToggleCollapse?: () => void;
   nested?: boolean;
   sticky?: boolean;
+  dragHandle?: ReactNode;
 };
 
-export function TaskCard({ task, view, onViewChange, onStatus, onEdit, onAddChild, onRefClick, refTargets, highlighted = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false }: TaskCardProps) {
+export function TaskCard({ task, view, onViewChange, onStatus, onEdit, onAddChild, onRefClick, refTargets, highlighted = false, progress, collapsed = false, onToggleCollapse, nested = false, sticky = false, dragHandle }: TaskCardProps) {
   const next = nextView(view);
   const ViewIcon = VIEW_ICONS[view];
   const [planOpen, setPlanOpen] = useState(false);
@@ -141,6 +142,7 @@ export function TaskCard({ task, view, onViewChange, onStatus, onEdit, onAddChil
       <div className={cn('flex flex-col gap-3 px-3 pt-3', view === 'compact' ? 'pb-3' : 'pb-2')}>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div className="flex flex-wrap items-center gap-2 min-w-0">
+            {dragHandle}
             <div className="flex items-stretch shrink-0">
               <button
                 type="button"

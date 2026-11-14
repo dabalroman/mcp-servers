@@ -142,6 +142,7 @@ async function dispatch(
 ): Promise<void> {
   const idMatch = pathname.match(/^\/(\d+)$/);
   const id = idMatch ? parseInt(idMatch[1]!, 10) : null;
+  const reorderMatch = pathname.match(/^\/(\d+)\/reorder$/);
 
   try {
     let result: unknown;
@@ -152,6 +153,8 @@ async function dispatch(
       result = await api.add(req.body as Parameters<TaskApi['add']>[0]);
     } else if (method === 'PATCH' && id !== null) {
       result = await api.patch(id, req.body as Parameters<TaskApi['patch']>[1]);
+    } else if (method === 'POST' && reorderMatch) {
+      result = await api.reorder(parseInt(reorderMatch[1]!, 10), req.body as { order?: unknown });
     } else if (method === 'DELETE' && id !== null) {
       result = await api.remove(id);
     } else {

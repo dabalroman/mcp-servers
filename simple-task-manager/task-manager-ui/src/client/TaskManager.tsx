@@ -4,10 +4,11 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TaskListControls, loadViewState } from '@/components/TaskListControls';
 import { cn } from '@/lib/utils';
-import { NO_SCOPE, groupTasks, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, pickProject, projectFromPath, projectPath, defaultView, resolveCardViews, groupBySeq } from '@/lib/taskView';
-import type { CardView, CardViewEntry, ViewState } from '@/lib/taskView';
+import { NO_SCOPE, groupTasks, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, pickProject, projectFromPath, projectPath, defaultView, resolveCardViews } from '@/lib/taskView';
+import type { CardView, CardViewEntry, ReorderOrder, ViewState } from '@/lib/taskView';
 import { useTasks } from './useTasks';
 import { TaskCard } from './TaskCard';
+import { EpicChildren } from './EpicChildren';
 import { TaskForm, type TaskPrefill } from './TaskForm';
 import { ProjectDialog } from './ProjectDialog';
 import { ProjectSwitcher } from './ProjectSwitcher';
@@ -34,18 +35,14 @@ function saveProject(name: string): void {
 
 type Tab = 'active' | 'done';
 
-// Tree rail: each child draws its own segment (bridging the gap-2 above it) plus a
-// tick to its title row; the last segment stops at its tick.
 // Server messages worth showing verbatim: bad input, and the notice that the
 // DB was migrated past this build.
 function failureReason(err: unknown): string {
   return err instanceof Error && /^(Validation failed|DB was migrated)/.test(err.message) ? ` ${err.message}` : '';
 }
 
-const EPIC_RAIL = 'relative ml-2 pl-5 before:absolute before:left-0 before:-top-2 before:bottom-0 before:border-l before:border-primary/40 after:absolute after:left-0 after:top-6 after:w-5 after:border-t after:border-primary/40 last:before:bottom-auto last:before:h-8';
-
 export default function TaskManager() {
-  const { data, loading, error, add, update, remove, createProject, updateProject } = useTasks();
+  const { data, loading, error, add, update, reorder, remove, createProject, updateProject } = useTasks();
   const [tab, setTab] = useState<Tab>('active');
   const [formOpen, setFormOpen] = useState(false);
   const [projectDialog, setProjectDialog] = useState<'new' | 'edit' | null>(null);
@@ -95,6 +92,17 @@ export default function TaskManager() {
     } catch (err) {
       console.error('[task-ui] status update failed', { id, status, error: err });
       toast.error(`Failed to update status of #${id}.${failureReason(err)}`);
+    }
+  }
+
+  async function handleReorder(epicId: number, order: ReorderOrder): Promise<boolean> {
+    try {
+      await reorder(epicId, order);
+      return true;
+    } catch (err) {
+      console.error('[task-ui] reorder failed', { epicId, order, error: err });
+      toast.error(`Failed to reorder #${epicId}.${failureReason(err)}`);
+      return false;
     }
   }
 
@@ -256,28 +264,26 @@ export default function TaskManager() {
             onToggleCollapse={kids ? () => toggleCollapse(collapseKey) : undefined}
             sticky={kids !== undefined && !collapsed}
           />
-          {kids && !collapsed && groupBySeq(kids).flatMap((group) => group.tasks.map((child, i) => (
-            <div key={child.id} className={EPIC_RAIL}>
-              {group.step && i === 0 && (
-                <span
-                  title={`Step ${group.step} of ${group.total}${group.tasks.length > 1 ? `, ${group.tasks.length} tasks run in parallel` : ''}`}
-                  className="absolute left-0 top-3.5 z-[1] -translate-x-1/2 flex items-center justify-center w-6 h-6 border border-border bg-background text-xs tabular-nums text-muted-foreground"
-                >
-                  {group.step}
-                </span>
+          {kids && !collapsed && (
+            <EpicChildren
+              epicId={task.id}
+              kids={kids}
+              onReorder={handleReorder}
+              renderCard={(child, dragHandle) => (
+                <TaskCard
+                  task={child}
+                  {...cardViewProps(child)}
+                  onStatus={handleStatus}
+                  onEdit={openEdit}
+                  onRefClick={navigateToRef}
+                  refTargets={refTargets}
+                  highlighted={highlightedId === child.id}
+                  nested
+                  dragHandle={dragHandle}
+                />
               )}
-              <TaskCard
-                task={child}
-                {...cardViewProps(child)}
-                onStatus={handleStatus}
-                onEdit={openEdit}
-                onRefClick={navigateToRef}
-                refTargets={refTargets}
-                highlighted={highlightedId === child.id}
-                nested
-              />
-            </div>
-          )))}
+            />
+          )}
         </div>
       );
     });

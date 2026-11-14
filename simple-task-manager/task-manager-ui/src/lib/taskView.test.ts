@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sortTasks, sortBySeq, groupBySeq, groupTasks, getSectionValue, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, matchesTaskQuery, pickProject, projectFromPath, projectPath, defaultView, resolveView, resolveCardViews, nextView } from './taskView';
+import { sortTasks, sortBySeq, groupBySeq, reorderAfterDrop, dropLabel, groupTasks, getSectionValue, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, matchesTaskQuery, pickProject, projectFromPath, projectPath, defaultView, resolveView, resolveCardViews, nextView } from './taskView';
 import type { CardView, CardViewEntry, SortDir } from './taskView';
 import type { Task, TaskStatus } from '@/types/task';
 
@@ -252,7 +252,7 @@ describe('nestEpicChildren', () => {
 });
 
 describe('groupBySeq', () => {
-  it('groups equal seq into one ranked step, keeps unset children ungrouped', () => {
+  it('groups equal seq into one ranked step, unset children into one final group', () => {
     const groups = groupBySeq([
       makeTask({ id: 1, seq: 10 }),
       makeTask({ id: 2, seq: 20 }),
@@ -265,10 +265,67 @@ describe('groupBySeq', () => {
       [1, [1]],
       [2, [2, 3]],
       [3, [4]],
-      [undefined, [5]],
-      [undefined, [6]],
+      [undefined, [5, 6]],
     ]);
     expect(groups[0]!.total).toBe(3);
+  });
+
+  it('puts all-unsequenced children in one group', () => {
+    const groups = groupBySeq([makeTask({ id: 1 }), makeTask({ id: 2 })]);
+    expect(groups.map((g) => [g.step, g.tasks.map((t) => t.id)])).toEqual([[undefined, [1, 2]]]);
+  });
+});
+
+describe('reorderAfterDrop', () => {
+  // step 1: [1], step 2: [2, 3], step 3: [4], no step: [5, 6]
+  const groups = groupBySeq([
+    makeTask({ id: 1, seq: 10 }),
+    makeTask({ id: 2, seq: 20 }),
+    makeTask({ id: 3, seq: 20 }),
+    makeTask({ id: 4, seq: 30 }),
+    makeTask({ id: 5 }),
+    makeTask({ id: 6 }),
+  ]);
+
+  it('joins another step', () => {
+    expect(reorderAfterDrop(groups, 1, { kind: 'join', group: 1 })).toEqual([[2, 3, 1], 4]);
+  });
+
+  it('leaves a parallel step for a new step', () => {
+    expect(reorderAfterDrop(groups, 3, { kind: 'gap', before: 2 })).toEqual([1, 2, 3, 4]);
+    expect(reorderAfterDrop(groups, 3, { kind: 'gap', before: 1 })).toEqual([1, 3, 2, 4]);
+  });
+
+  it('makes a new step at the start, middle and end', () => {
+    expect(reorderAfterDrop(groups, 4, { kind: 'gap', before: 0 })).toEqual([4, 1, [2, 3]]);
+    expect(reorderAfterDrop(groups, 4, { kind: 'gap', before: 1 })).toEqual([1, 4, [2, 3]]);
+    expect(reorderAfterDrop(groups, 1, { kind: 'gap', before: 3 })).toEqual([[2, 3], 4, 1]);
+    const noUnset = groupBySeq([makeTask({ id: 1, seq: 10 }), makeTask({ id: 2, seq: 20 })]);
+    expect(reorderAfterDrop(noUnset, 1, { kind: 'gap', before: 2 })).toEqual([2, 1]);
+  });
+
+  it('moves into the no-step group (unlisted) and out of it', () => {
+    expect(reorderAfterDrop(groups, 4, { kind: 'join', group: 3 })).toEqual([1, [2, 3]]);
+    expect(reorderAfterDrop(groups, 5, { kind: 'join', group: 0 })).toEqual([[1, 5], [2, 3], 4]);
+    expect(reorderAfterDrop(groups, 5, { kind: 'gap', before: 3 })).toEqual([1, [2, 3], 4, 5]);
+  });
+
+  it('returns null for no-op drops', () => {
+    expect(reorderAfterDrop(groups, 2, { kind: 'join', group: 1 })).toBeNull();
+    expect(reorderAfterDrop(groups, 5, { kind: 'join', group: 3 })).toBeNull();
+    expect(reorderAfterDrop(groups, 4, { kind: 'gap', before: 2 })).toBeNull();
+    expect(reorderAfterDrop(groups, 4, { kind: 'gap', before: 3 })).toBeNull();
+    expect(reorderAfterDrop(groups, 99, { kind: 'gap', before: 0 })).toBeNull();
+  });
+});
+
+describe('dropLabel', () => {
+  const groups = groupBySeq([makeTask({ id: 1, seq: 10 }), makeTask({ id: 2, seq: 20 }), makeTask({ id: 3 })]);
+  it('names the outcome', () => {
+    expect(dropLabel(groups, { kind: 'join', group: 1 })).toBe('Join step 2');
+    expect(dropLabel(groups, { kind: 'join', group: 2 })).toBe('No step');
+    expect(dropLabel(groups, { kind: 'gap', before: 0 })).toBe('New first step');
+    expect(dropLabel(groups, { kind: 'gap', before: 2 })).toBe('New step after 2');
   });
 });
 

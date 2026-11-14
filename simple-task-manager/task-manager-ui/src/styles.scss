@@ -86,4 +86,7 @@
   .prose-task table { border-collapse: collapse; margin: 0.4em 0; font-size: 0.875em; }
   .prose-task th, .prose-task td { border: 1px solid hsl(var(--border)); padding: 0.2em 0.5em; }
   .prose-task th { background: hsl(var(--accent)/0.2); font-weight: 600; }
+
+  /* Set on <html> for the length of an epic-child drag: the pointer leaves the handle at once. */
+  .dnd-grabbing, .dnd-grabbing * { cursor: grabbing !important; }
 }

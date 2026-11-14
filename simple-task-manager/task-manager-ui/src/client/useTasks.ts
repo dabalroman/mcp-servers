@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { WATCHDOG_INTERVAL_MS, isStreamStale, shouldRefetchOnReturn } from './streamHealth';
 import type { Project, Task, TaskRef, TaskStatus, TaskType, TaskPriority } from '@/types/task';
+import type { ReorderOrder } from '@/lib/taskView';
 
 export type TasksPayload = {
   active: Task[];
@@ -149,6 +150,15 @@ export function useTasks() {
     if (!res.ok) throw await httpError(res);
   }, []);
 
+  const reorder = useCallback(async (epicId: number, order: ReorderOrder) => {
+    const res = await fetch(`/api/tasks/${epicId}/reorder`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order }),
+    });
+    if (!res.ok) throw await httpError(res);
+  }, []);
+
   const createProject = useCallback(async (name: string, description: string): Promise<string> => {
     const res = await fetch('/api/projects', {
       method: 'POST',
@@ -174,5 +184,5 @@ export function useTasks() {
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
   }, []);
 
-  return { data, loading, error, refresh, add, update, remove, createProject, updateProject };
+  return { data, loading, error, refresh, add, update, reorder, remove, createProject, updateProject };
 }

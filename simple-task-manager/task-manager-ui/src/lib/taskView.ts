@@ -130,17 +130,46 @@ export function sortBySeq(tasks: Task[]): Task[] {
 export type SeqGroup = { step?: number; total: number; tasks: Task[] };
 
 // Children (already in seq order) grouped per step: distinct seq values ranked 1..n, so 10/20/20/30
-// becomes three groups with the 20s together. Each unsequenced child is its own group with no step.
+// becomes three groups with the 20s together. Unsequenced children share one final group with no step.
 export function groupBySeq(kids: Task[]): SeqGroup[] {
   const total = new Set(kids.flatMap((k) => (k.seq === undefined ? [] : [k.seq]))).size;
   const groups: SeqGroup[] = [];
   let lastSeq: number | undefined;
   for (const k of kids) {
-    if (k.seq !== undefined && k.seq === lastSeq) groups[groups.length - 1]!.tasks.push(k);
-    else groups.push({ step: k.seq === undefined ? undefined : groups.filter((g) => g.step).length + 1, total, tasks: [k] });
+    if (groups.length > 0 && k.seq === lastSeq) groups[groups.length - 1]!.tasks.push(k);
+    else groups.push({ step: k.seq === undefined ? undefined : groups.length + 1, total, tasks: [k] });
     lastSeq = k.seq;
   }
   return groups;
+}
+
+// `group` / `before` index into groupBySeq's result; a gap `before = i` sits above group i.
+export type DropTarget = { kind: 'join'; group: number } | { kind: 'gap'; before: number };
+export type ReorderOrder = (number | number[])[];
+
+// The `reorder` payload after dropping `draggedId` on `target`: numbered groups only (the no-seq group
+// stays unlisted, so its children lose their seq), singletons as plain ids. null = the drop changes nothing.
+export function reorderAfterDrop(groups: SeqGroup[], draggedId: number, target: DropTarget): ReorderOrder | null {
+  const src = groups.findIndex((g) => g.tasks.some((t) => t.id === draggedId));
+  if (src < 0) return null;
+  const srcAlone = groups[src]!.tasks.length === 1 && groups[src]!.step !== undefined;
+  if (target.kind === 'join' && target.group === src) return null;
+  if (target.kind === 'gap' && srcAlone && (target.before === src || target.before === src + 1)) return null;
+
+  const work = groups.map((g) => ({ numbered: g.step !== undefined, ids: g.tasks.map((t) => t.id).filter((id) => id !== draggedId) }));
+  if (target.kind === 'join') work[target.group]!.ids.push(draggedId);
+  else work.splice(target.before, 0, { numbered: true, ids: [draggedId] });
+  return work.filter((g) => g.numbered && g.ids.length > 0).map((g) => (g.ids.length === 1 ? g.ids[0]! : g.ids));
+}
+
+// What the drop does, in words, for the drag ghost. Steps are named in the current numbering.
+export function dropLabel(groups: SeqGroup[], target: DropTarget): string {
+  if (target.kind === 'join') {
+    const step = groups[target.group]?.step;
+    return step === undefined ? 'No step' : `Join step ${step}`;
+  }
+  if (target.before === 0) return 'New first step';
+  return `New step after ${groups[target.before - 1]?.step}`;
 }
 
 // Roots are `own` (the tab's tasks) plus any epic from `others` (the other tab) with an own child,

@@ -70,6 +70,18 @@ export function createTaskApi({ dbPath }: TaskApiOptions) {
       return { ok };
     },
 
+    // The store validates epic and child ids; this only checks the payload's shape.
+    async reorder(epicId: number, body: { order?: unknown }) {
+      const order = body?.order;
+      const isId = (v: unknown): v is number => Number.isInteger(v);
+      if (!Array.isArray(order) || !order.every((g) => isId(g) || (Array.isArray(g) && g.every(isId)))) {
+        throw new Error('Validation failed: order must be an array of task ids or id arrays.');
+      }
+      const children = await store.reorder(epicId, order as (number | number[])[]);
+      broadcast();
+      return { epicId, children };
+    },
+
     projects() {
       return store.getProjects();
     },

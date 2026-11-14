@@ -75,6 +75,33 @@ describe('POST /api/tasks — project', () => {
   });
 });
 
+describe('POST /api/tasks/:epicId/reorder', () => {
+  const add = async (body: Record<string, unknown>) =>
+    (await request(app).post('/api/tasks/').send({ project: 'default', priority: 'medium', ...body })).body.id as number;
+
+  it('renumbers the children and returns them', async () => {
+    const epic = await add({ type: 'epic', title: 'E' });
+    const [a, b, c] = [await add({ type: 'feature', title: 'A', parentId: epic }), await add({ type: 'feature', title: 'B', parentId: epic }), await add({ type: 'feature', title: 'C', parentId: epic })];
+    const res = await request(app).post(`/api/tasks/${epic}/reorder`).send({ order: [c, [a, b]] });
+    expect(res.status).toBe(200);
+    const seqs = Object.fromEntries((res.body.children as { id: number; seq?: number }[]).map((k) => [k.id, k.seq]));
+    expect(seqs).toEqual({ [a]: 20, [b]: 20, [c]: 10 });
+  });
+
+  it('returns 400 with the reason for a non-epic, a foreign child, or a bad payload', async () => {
+    const epic = await add({ type: 'epic', title: 'E' });
+    const plain = await add({ type: 'feature', title: 'P' });
+    const nonEpic = await request(app).post(`/api/tasks/${plain}/reorder`).send({ order: [] });
+    expect(nonEpic.status).toBe(400);
+    expect(nonEpic.body.error).toMatch(/is not an epic/);
+    const foreign = await request(app).post(`/api/tasks/${epic}/reorder`).send({ order: [plain] });
+    expect(foreign.status).toBe(400);
+    expect(foreign.body.error).toMatch(/not children of epic/);
+    expect((await request(app).post(`/api/tasks/${epic}/reorder`).send({})).status).toBe(400);
+    expect((await request(app).post(`/api/tasks/${epic}/reorder`).send({ order: ['x'] })).status).toBe(400);
+  });
+});
+
 describe('/api/projects', () => {
   it('GET lists projects with counts', async () => {
     await request(app).post('/api/tasks/').send({ project: 'default', type: 'bug', priority: 'high', title: 'T' });
