@@ -49,6 +49,16 @@ export async function handleGetById(store: Store, { id }: { id: number }): Promi
   return text({ task });
 }
 
+export async function handleGetEpic(store: Store, { id }: { id: number }): Promise<MCPContent> {
+  try {
+    const task = store.getEpic(id);
+    if (!task) return notFoundError(id, store);
+    return text({ task });
+  } catch (err) {
+    return errorText({ error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
 export async function handleGetByExternalId(store: Store, { externalId }: { externalId: string }): Promise<MCPContent> {
   return text({ externalId, tasks: store.getByExternalId(externalId).map(toListTask) });
 }

@@ -24,7 +24,7 @@ Tasks named later ("add 46 to your queue") join the live queue: re-plan, don't r
 
 ## Epic mode
 
-- **Epic is authoritative.** Read it via `getById` first: description, notes and `children`. The children's `seq` (unset last, then id) replaces Step 1.3's overlap ordering; children sharing a `seq` are a parallel group (overlap can still veto running them together). Its Order of execution gates and Rules beat this skill's defaults (branching, what waits on what), and its gates are breakpoints too.
+- **Epic is authoritative.** Read it via `getEpic({ id })` first: description, notes and `children` with summaries. The children's `seq` (unset last, then id) replaces Step 1.3's overlap ordering; children sharing a `seq` are a parallel group (overlap can still veto running them together). Its Order of execution gates and Rules beat this skill's defaults (branching, what waits on what), and its gates are breakpoints too.
 - **Epic status** follows its children (`setStatus` syncs it); skipped children keep it open.
 - **Unready children.** A child in `refinement` or `plan` is skipped, not refined (overrides Step 1.2), and so is a ready child ordered after a skipped one. The final report lists them with "run `/tm:refine #NN`" (or "plan #NN").
 - **Commit mode.** Before the first dispatch ask once: "Commit each child as it lands?". On yes, commit each child (each phase, if its plan has phases — dispatch one agent per phase: "implement only phase K of task NN") once it passes Step 3, Step 4's build-all and Step 6 on its own diff. Fixes and feedback on a committed child become a new commit titled with its id, never mashed into another child's. A child parked at a breakpoint is committed only after the user's lgtm. Then `setStatus(child, 'done')` and Step 9.6's epic note. On no, the normal approval flow applies; Step 9 then has only the uncommitted children.
@@ -42,7 +42,7 @@ Tasks named later ("add 46 to your queue") join the live queue: re-plan, don't r
 ## Step 1 — Build the queue
 
 0. **Repo binding.** `whoami({ cwdBasename })` with the main worktree's basename (parent of the absolute `git rev-parse --git-common-dir`). With a `repo` back, flag in the queue message every task whose `repo` differs, with its `../<folder>` from `repoContext`; never dispatch one into the wrong checkout. `repo: null` → no flags.
-1. `getById` every task; read **description, summary, plan AND notes** (refinement often lives in `plan` or `notes`; notes are as authoritative as the description, newest statement wins).
+1. `getById` every task; read **description, summary, plan AND notes** (refinement often lives in `plan` or `notes`; notes are as authoritative as the description, newest statement wins). A child's `epic` block is short by design (no epic text): the brief to each subagent carries the epic's Rules from `getEpic`.
 2. **Status gate.**
    - `todo` → queue it. `plan` → skip (plan awaits the user's approval), list in the final report.
    - `refinement` → in Epic mode, skip. Otherwise, if refined in substance (locked Facts/Changes/Steps, a `plan`, or decisions the user just gave), `setStatus(todo)`; if not, refine it yourself from code and conversation (don't ask), write your decisions into the **`plan` field**, then promote. Genuinely unresolvable questions go in the final report and the task is skipped.
@@ -130,5 +130,5 @@ Approval: "lgtm", "commit", "approved", or approval of named tasks. Feedback ins
 3. **Check the index**: `git diff --cached --name-status`. Agents' `git mv` / `git rm --cached` pre-stage changes; each commit holds exactly what it claims and builds on its own.
 4. **One commit per approved task** in the project's style, review fixes, feedback and version bumps folded in. Tasks touching the same files, or approved as one, share a commit. The version file goes in the last commit so the tree ends clean. Unapproved work stays uncommitted.
 5. `mcp__task-manager__setStatus(id, 'done')` per committed task, then **reconcile**: `getById` every task that entered the queue and confirm each committed one is `done` (agents set `in_progress` themselves; it's easy to close a task's neighbours but not the task).
-6. Per committed task with an `epic` (from `getById`), `mcp__task-manager__addNote` on the epic: `"#NN done, commit <sha>. <anything the next child needs to know>"`. If a `setStatus(done)` carried `epicStatus`, report that the epic closed.
+6. Per committed task with a `parentId`, `mcp__task-manager__addNote` on that epic: `"#NN done, commit <sha>. <anything the next child needs to know>"`. If a `setStatus(done)` carried `epicStatus`, report that the epic closed.
 7. Report the commit hashes.

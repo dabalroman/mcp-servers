@@ -95,6 +95,10 @@ If another command uses the same name, the namespaced form works too (`/tm:imple
   follows them; children share its project and always inherit its scope. Children carry a step
   number (`seq`, set with `reorder`; equal steps run in parallel) that orders `getNext`, the epic's
   child list and the UI. Claude ends any epic work by suggesting the next step from that order.
+  `add`/`update` take a `position` (`'next'`, `'last'`, `{ after: id }`, `{ before: id }`) so the
+  server picks the step, and answer with a `placement` saying where the child landed. `getEpic`
+  (epic or child id) returns the whole epic with its children's summaries, which is also what
+  `getById` returns for an epic; a child's `getById` carries only a short epic block.
 - **Notes** — decisions made after refinement. The newest statement wins over older notes and the
   description.
 - **Refs** — links like `blocks` or `depends on`. The server writes the inverse on the other task.

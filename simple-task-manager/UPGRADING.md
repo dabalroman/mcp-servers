@@ -20,6 +20,12 @@ How to move a local clone to a newer version without losing data or quietly losi
 
 ## Version notes
 
+### A child's `getById` no longer carries the epic's text (2026-11-060)
+
+- `getById` on an epic child now returns a short `epic` block (`id`, `title`, `status`, `summary`, `noteCount`, `more`) instead of the epic's description and notes. Read them with the new `getEpic({ id })`, which takes the epic or any child id. `getById` on an epic returns the same as `getEpic`; its `children` now also carry `summary`.
+- `add`/`update` accept `position` for an epic child and return `placement`.
+- Restart open Claude Code sessions so they load the matching `tm` skills, which read epics with `getEpic`.
+
 ### Projects get an id and a display name (2026-11-014)
 
 - Nothing to do: the `split-project-id-name` migration runs by itself on the first open (backup first, as always). Every existing project keeps its name as its id, so `PROJECT_NAME`, `X-Project`, API keys and UI links keep working.

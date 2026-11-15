@@ -7,6 +7,7 @@ import {
   handleGetNext,
   handleGetAll,
   handleGetById,
+  handleGetEpic,
   handleGetByExternalId,
   handleGetByPr,
   handleGetUpdates,
@@ -39,7 +40,17 @@ import {
 
 const PARENT_ID_RULE = 'Optional id of the epic this task belongs to. Must point to a task of type "epic"; an epic itself cannot have a parent (no nesting) and a task belongs to at most one epic. Violations return an error.';
 
-const SEQ_RULE = "Execution step among the epic's children: 10, 20, 30 (gaps leave room to insert 15); siblings with an equal seq are a parallel group. Needs parentId. To order a whole epic use reorder.";
+const SEQ_RULE = "Execution step among the epic's children: 10, 20, 30 (gaps leave room to insert 15); siblings with an equal seq are a parallel group. Needs parentId. Omitted (and no position) = unset: runs after every sequenced sibling. To join a parallel group pass its seq; to order a whole epic use reorder.";
+
+const POSITION_RULE = "Where an epic child runs; the server picks the seq. 'next' = after every done/in_progress sibling, before every not-started one; 'last' = after the highest seq; { after: id } / { before: id } = just after/before that sibling's parallel group (never joins it). Prefer over seq when the user names a spot ('next', 'after #NN'). Needs parentId (given or existing); not with seq. May renumber the epic to 10, 20, 30 when there is no gap. The response's placement says where it landed: tell the user.";
+
+const positionParam = z.union([
+  z.enum(['next', 'last']),
+  z.object({ after: z.number().int().positive() }).strict(),
+  z.object({ before: z.number().int().positive() }).strict(),
+]).optional().describe(POSITION_RULE);
+
+const PLACEMENT_NOTE = 'For an epic child, pass position when the user names where it goes; the response carries placement { seq, runsAfter, runsBefore, renumbered, warning? }.';
 
 const REPO_RULE = "Id of the registered repo (see getRepos) this task's change lives in. Never inherited from the epic: set it per child.";
 
@@ -78,6 +89,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
       .describe(PARENT_ID_RULE),
     seq: z.number().int().positive().optional()
       .describe(SEQ_RULE),
+    position: positionParam,
     externalId: z.string().optional()
       .describe('External tracker ticket ID (JIRA/Asana/…, e.g. "OPXPIQ-6532"). Set it whenever the user names a ticket ID for this task. Find tasks by it later with getByExternalId.'),
     prs: prsSchema
@@ -89,7 +101,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   };
   server.tool(
     'add',
-    'Schedule a new task — call this whenever the user reports a bug, requests a feature, shares an idea, or says "schedule" / "TODO" / "add to the list". Do NOT implement the task inline; add it and stop. Status defaults to "refinement" — see status. Returns { id }, plus suggestedFollowUps when contract is passed. Refs pointing to nonexistent IDs or self-references are silently dropped.',
+    `Schedule a new task — call this whenever the user reports a bug, requests a feature, shares an idea, or says "schedule" / "TODO" / "add to the list". Do NOT implement the task inline; add it and stop. Status defaults to "refinement" — see status. ${PLACEMENT_NOTE} Returns { id }, plus placement for an epic child and suggestedFollowUps when contract is passed. Refs pointing to nonexistent IDs or self-references are silently dropped.`,
     addSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof addSchema>>): Promise<MCPContent> => handleAdd(store, args, ctx))
   );
@@ -136,9 +148,18 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   const getByIdSchema = { id: z.coerce.number().int().positive().describe('The numeric task ID to look up') };
   server.tool(
     'getById',
-    'Get a single task by its numeric ID — returns the full task including both summary (if set) and description, plus notes (oldest first) when the task has any, and refs as { id, relation, title } so you can tell what each linked task is without fetching it. A task in an epic also carries `epic` { id, title, status, summary, description, notes } — the epic\'s full text and notes, authoritative context for the child (order, goals, rules). An epic carries `children` [{ id, title, status, type, priority, seq }] in execution order: by seq, unset last, then id. A task with repo or touches carries `repoContext` { repo, touches, contracts }: the full registry entries (folder, role, commands, rulesFile) and every contract those repos own or consume, tagged role owner|consumer. List methods carry only parentId + epicTitle. List tools omit description when a summary is present and show only noteCount, so use this for the full body. Use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Returns an error listing valid IDs if not found.',
+    'Get a single task by its numeric ID — returns the full task including both summary (if set) and description, plus notes (oldest first) when the task has any, and refs as { id, relation, title } so you can tell what each linked task is without fetching it. On an epic id it returns exactly what getEpic returns. A task in an epic carries a short `epic` { id, title, status, summary?, noteCount, more }: call getEpic({ id }) (the task\'s own id works) for the epic\'s description and notes — authoritative context for the child (order, goals, rules) — before refining or implementing it. A task with repo or touches carries `repoContext` { repo, touches, contracts }: the full registry entries (folder, role, commands, rulesFile) and every contract those repos own or consume, tagged role owner|consumer. List methods carry only parentId + epicTitle. List tools omit description when a summary is present and show only noteCount, so use this for the full body. Use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Returns an error listing valid IDs if not found.',
     getByIdSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getByIdSchema>>): Promise<MCPContent> => handleGetById(store, args))
+  );
+
+  // ── getEpic ────────────────────────────────────────────────────────────────────
+  const getEpicSchema = { id: z.coerce.number().int().positive().describe('The epic id, or the id of any of its children') };
+  server.tool(
+    'getEpic',
+    "The whole epic — description, plan, notes (goal, gates, rules) and children with summaries in execution order (seq, unset last, then id); accepts the epic or any child id. Use it instead of getById on each child to learn the order, what's next and what's left. Children are minified { id, title, status, type, priority, seq?, summary? }: getById(childId) for a child's full description, plan and notes. Returns { task }; a task in no epic returns an error (use getById).",
+    getEpicSchema,
+    withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getEpicSchema>>): Promise<MCPContent> => handleGetEpic(store, args))
   );
 
   // ── setStatus ──────────────────────────────────────────────────────────────────
@@ -173,7 +194,8 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     parentId: z.number().int().positive().nullable().optional()
       .describe(`${PARENT_ID_RULE} Pass null to detach the task from its epic.`),
     seq: z.number().int().positive().nullable().optional()
-      .describe(`${SEQ_RULE} Pass null to clear it. Changing parentId clears it unless you pass a new one.`),
+      .describe(`${SEQ_RULE} Pass null to clear it. Changing parentId clears it unless you pass a new one (or position).`),
+    position: positionParam,
     project: z.string().min(1).optional()
       .describe('Move the task to this project id. Must already exist (see getProjects). Omit to keep its current project. Its repo and touches must be registered there too, or be replaced/cleared in the same update.'),
     repo: z.string().nullable().optional().describe(`${REPO_RULE} Pass null to clear.`),
@@ -182,7 +204,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   };
   server.tool(
     'update',
-    'Patch any fields of an existing task in place — use when the user asks to edit, rename, reprioritize, retype, rescope, move to another project, or update the refs/description of a task. Omitted fields keep their current values. Returns { success: true, task } (plan and note bodies omitted, noteCount instead — use getById), plus suggestedFollowUps when contract is passed, or { success: false, error }.',
+    `Patch any fields of an existing task in place — use when the user asks to edit, rename, reprioritize, retype, rescope, move to another project, or update the refs/description of a task. Omitted fields keep their current values. ${PLACEMENT_NOTE} Returns { success: true, task } (plan and note bodies omitted, noteCount instead — use getById), plus placement when an epic child's parentId, seq or position was passed and suggestedFollowUps when contract is passed, or { success: false, error }.`,
     updateSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof updateSchema>>): Promise<MCPContent> => handleUpdate(store, args))
   );
@@ -328,7 +350,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   };
   server.tool(
     'reorder',
-    "Set an epic's execution order: group i gets seq (i+1)*10, children in a nested array share it (run in parallel), unlisted children lose their seq. seq orders getNext and getById(epic).children; it is a hint, not a gate. Returns { success, epicId, children: [{ id, seq }] }.",
+    "Set an epic's execution order: group i gets seq (i+1)*10, children in a nested array share it (run in parallel), unlisted children lose their seq. seq orders getNext and getEpic's children; it is a hint, not a gate. Returns { success, epicId, children: [{ id, seq }] }.",
     reorderSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof reorderSchema>>): Promise<MCPContent> => handleReorder(store, args))
   );

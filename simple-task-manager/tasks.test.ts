@@ -1197,19 +1197,28 @@ describe('epics', () => {
     assert.equal(t?.epic, undefined);
   });
 
-  test('getById on a child injects the epic text and all its notes', () => {
+  test('getById on a child carries a short epic block pointing to getEpic (#618)', () => {
     const epic = makeEpic({ summary: 'gist' });
     store.addNote(epic, 'first');
     store.addNote(epic, 'second');
     const { id } = makeTask({ parentId: epic });
     const t = store.getById(id);
-    assert.equal(t?.epic?.id, epic);
-    assert.equal(t?.epic?.title, 'Roadmap');
-    assert.equal(t?.epic?.status, 'refinement');
-    assert.equal(t?.epic?.summary, 'gist');
-    assert.equal(t?.epic?.description, 'Order: A then B');
-    assert.deepEqual(t?.epic?.notes?.map((n) => n.body), ['first', 'second']);
+    assert.deepEqual(t?.epic, {
+      id: epic,
+      title: 'Roadmap',
+      status: 'refinement',
+      summary: 'gist',
+      noteCount: 2,
+      more: `getEpic({ id: ${epic} }) for its description, notes and children`,
+    });
     assert.equal(t?.children, undefined);
+  });
+
+  test('the short epic block omits summary when the epic has none and counts zero notes', () => {
+    const epic = makeEpic();
+    const t = store.getById(makeTask({ parentId: epic }).id);
+    assert.equal(t?.epic?.noteCount, 0);
+    assert.ok(t?.epic && !('summary' in t.epic));
   });
 
   test('getById on an epic lists children ordered by id and carries no epic', () => {
@@ -1291,6 +1300,136 @@ describe('epics', () => {
     assert.ok(t);
     assert.equal(t.parentId, undefined);
     assert.equal(t.epic, undefined);
+  });
+});
+
+describe('getEpic (#618)', () => {
+  const makeEpic = (overrides: Partial<AddInput> = {}) =>
+    makeTask({ type: 'epic', title: 'Roadmap', description: 'Rules', plan: 'P', ...overrides }).id;
+
+  test('by the epic id or a child id returns the whole epic with minified children in seq order', () => {
+    const epic = makeEpic();
+    store.addNote(epic, 'gate');
+    const a = makeTask({ parentId: epic, title: 'A', summary: 'gist A', description: 'long A', plan: 'plan A' }).id;
+    const b = makeTask({ parentId: epic, title: 'B', seq: 10 }).id;
+    store.addNote(a, 'child note');
+    const byEpic = store.getEpic(epic);
+    assert.deepEqual(store.getEpic(a), byEpic);
+    assert.equal(byEpic?.id, epic);
+    assert.equal(byEpic?.description, 'Rules');
+    assert.equal(byEpic?.plan, 'P');
+    assert.deepEqual(byEpic?.notes?.map((n) => n.body), ['gate']);
+    assert.deepEqual(byEpic?.children, [
+      { id: b, title: 'B', status: 'refinement', type: 'bug', priority: 'medium', seq: 10 },
+      { id: a, title: 'A', status: 'refinement', type: 'bug', priority: 'medium', summary: 'gist A' },
+    ]);
+    assert.equal(byEpic?.more, "getById({ id: <childId> }) for a child's description, plan and notes");
+  });
+
+  test('getById on an epic deep-equals getEpic', () => {
+    const epic = makeEpic();
+    makeTask({ parentId: epic, summary: 's' });
+    assert.deepEqual(store.getById(epic), store.getEpic(epic));
+  });
+
+  test('an epic with no children has no more hint', () => {
+    const t = store.getEpic(makeEpic());
+    assert.deepEqual(t?.children, []);
+    assert.equal(t?.more, undefined);
+  });
+
+  test('a task in no epic is an error pointing to getById; unknown id is null', () => {
+    const { id } = makeTask();
+    assert.throws(() => store.getEpic(id), new RegExp(`task #${id} is in no epic; use getById`));
+    assert.equal(store.getEpic(9999), null);
+  });
+});
+
+describe('epic position and placement (#618)', () => {
+  const makeEpic = () => makeTask({ type: 'epic', title: 'Roadmap' }).id;
+  const seqOf = (id: number) => store.getById(id)?.seq;
+
+  test("add with position 'next' lands between the started and the not-started children", () => {
+    const epic = makeEpic();
+    const done = makeTask({ parentId: epic, seq: 80, title: 'Done' }).id;
+    store.setStatus(done, 'done');
+    const todo = makeTask({ parentId: epic, seq: 90, title: 'Todo' }).id;
+    const r = store.add({ project: 'default', type: 'bug', priority: 'medium', title: 'New', parentId: epic, position: 'next' });
+    assert.equal(seqOf(r.id), 85);
+    assert.deepEqual(r.placement, { seq: 85, runsAfter: { id: done, title: 'Done' }, runsBefore: { id: todo, title: 'Todo' }, renumbered: [] });
+  });
+
+  test('a renumber is applied in the same write and echoed', () => {
+    const epic = makeEpic();
+    const a = makeTask({ parentId: epic, seq: 10 }).id;
+    const b = makeTask({ parentId: epic, seq: 11 }).id;
+    const r = makeTask({ parentId: epic, position: { before: b } }) as { id: number; placement?: { renumbered: unknown[]; seq: number | null } };
+    assert.equal(seqOf(a), 10);
+    assert.equal(seqOf(b), 20);
+    assert.equal(seqOf(r.id), 15);
+    assert.deepEqual(r.placement?.renumbered, [{ id: b, from: 11, to: 20 }]);
+  });
+
+  test('a failed add rolls back the renumber', () => {
+    const epic = makeEpic();
+    const b = makeTask({ parentId: epic, seq: 1 }).id;
+    assert.throws(() => makeTask({ parentId: epic, position: { before: b }, repo: 'nope' }));
+    assert.equal(seqOf(b), 1);
+  });
+
+  test('add without seq or position warns that the child runs last', () => {
+    const epic = makeEpic();
+    const a = makeTask({ parentId: epic, seq: 10, title: 'A' }).id;
+    const r = makeTask({ parentId: epic }) as { placement?: unknown };
+    assert.deepEqual(r.placement, {
+      seq: null,
+      runsAfter: { id: a, title: 'A' },
+      runsBefore: null,
+      renumbered: [],
+      warning: 'no seq: runs after every sequenced child; pass position or seq if the user named a position',
+    });
+  });
+
+  test('add without parentId carries no placement', () => {
+    assert.deepEqual(Object.keys(makeTask()), ['id']);
+  });
+
+  test('position with seq, or without a parent, is rejected', () => {
+    const epic = makeEpic();
+    assert.throws(() => makeTask({ parentId: epic, seq: 10, position: 'last' }), /pass position or seq, not both/);
+    assert.throws(() => makeTask({ position: 'last' }), /position needs a parentId/);
+    const { id } = makeTask();
+    assert.throws(() => store.update(id, { position: 'last' }), /position needs a parentId/);
+    const kid = makeTask({ parentId: epic }).id;
+    assert.throws(() => store.update(kid, { position: 'last', seq: null }), /pass position or seq, not both/);
+  });
+
+  test('update with position excludes the task itself and returns placement', () => {
+    const epic = makeEpic();
+    const a = makeTask({ parentId: epic, seq: 10, title: 'A' }).id;
+    const b = makeTask({ parentId: epic, seq: 20, title: 'B' }).id;
+    const r = store.update(a, { position: { after: b } });
+    assert.equal(seqOf(a), 30);
+    assert.deepEqual(r?.placement, { seq: 30, runsAfter: { id: b, title: 'B' }, runsBefore: null, renumbered: [] });
+    assert.throws(() => store.update(a, { position: { after: a } }), /cannot reference #\d+ itself/);
+  });
+
+  test('parentId change plus position places the task in the new epic instead of clearing seq', () => {
+    const from = makeEpic();
+    const to = makeEpic();
+    const kid = makeTask({ parentId: from, seq: 10 }).id;
+    makeTask({ parentId: to, seq: 40 });
+    const r = store.update(kid, { parentId: to, position: 'last' });
+    assert.equal(seqOf(kid), 50);
+    assert.equal(r?.placement?.seq, 50);
+  });
+
+  test('update returns placement only when parentId, seq or position is passed', () => {
+    const epic = makeEpic();
+    const kid = makeTask({ parentId: epic }).id;
+    assert.equal(store.update(kid, { title: 'x' })?.placement, undefined);
+    assert.equal(store.update(kid, { seq: 10 })?.placement?.seq, 10);
+    assert.equal(store.update(kid, { parentId: null })?.placement, undefined);
   });
 });
 

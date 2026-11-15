@@ -1,5 +1,5 @@
 import { text, errorText, notFoundError, probeTcp, resolveProject, type MCPContent, type SessionContext } from './shared.js';
-import type { AddInput, ContractInput, FollowUpDraft, RepoInput, Store, TaskStatus, UpdatePatch } from '../tasks.js';
+import type { AddInput, ContractInput, FollowUpDraft, Placement, RepoInput, Store, TaskStatus, UpdatePatch } from '../tasks.js';
 import { checkPlanText } from './planText.js';
 import { uiPkgDir, uiServerEntry, getUiChild, setUiChild, spawnUi } from './uiChild.js';
 
@@ -26,8 +26,8 @@ export function handleAdd(
   }
   try {
     return text(store.db.transaction(() => {
-      const { id } = store.add({ ...args, project: p });
-      return { id, ...followUps(store, id, contract) };
+      const { id, placement } = store.add({ ...args, project: p });
+      return { id, ...(placement ? { placement } : {}), ...followUps(store, id, contract) };
     })());
   } catch (err) {
     return errorText({ error: err instanceof Error ? err.message : String(err) });
@@ -55,9 +55,10 @@ export function handleUpdate(store: Store, { id, contract, ...patch }: UpdatePat
   // plan and note bodies omitted from the echo (can be large); getById returns them
   const { plan: _plan, notes, ...rest } = result.task;
   const task = notes ? { ...rest, noteCount: notes.length } : rest;
-  const response: { success: true; task: typeof task; summaryReminder?: string; suggestedFollowUps?: FollowUpDraft[] } = {
+  const response: { success: true; task: typeof task; placement?: Placement; summaryReminder?: string; suggestedFollowUps?: FollowUpDraft[] } = {
     success: true,
     task,
+    ...(result.placement ? { placement: result.placement } : {}),
     ...drafts,
   };
   if (result.task.status === 'refinement' && !result.task.summary && !('summary' in patch)) {

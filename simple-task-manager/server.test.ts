@@ -22,6 +22,7 @@ import {
   handleGetNext,
   handleGetAll,
   handleGetById,
+  handleGetEpic,
   handleGetByExternalId,
   handleGetByPr,
   handleGetUpdates,
@@ -1016,16 +1017,66 @@ describe('note handlers', () => {
 describe('epics — MCP layer', () => {
   const epicId = (): number => addTask({ type: 'epic', title: 'Roadmap', description: 'Rules' }).id;
 
-  test('add handler accepts parentId; getById handler returns epic and children', async () => {
+  test('add handler accepts parentId; getById handler returns a short epic block and children', async () => {
     const epic = epicId();
     store.addNote(epic, 'ctx');
     const added = decode(handleAdd(store, { type: 'feature', priority: 'low', title: 'Kid', description: '', status: 'refinement', parentId: epic }, CTX));
-    const kid = decode(await handleGetById(store, { id: added.id as number })).task as { epic: { id: number; description: string; notes: { body: string }[] } };
-    assert.equal(kid.epic.id, epic);
-    assert.equal(kid.epic.description, 'Rules');
-    assert.equal(kid.epic.notes[0]?.body, 'ctx');
+    const kid = decode(await handleGetById(store, { id: added.id as number })).task as { epic: Record<string, unknown> };
+    assert.deepEqual(kid.epic, {
+      id: epic,
+      title: 'Roadmap',
+      status: 'refinement',
+      noteCount: 1,
+      more: `getEpic({ id: ${epic} }) for its description, notes and children`,
+    });
     const parent = decode(await handleGetById(store, { id: epic })).task as { children: { id: number }[] };
     assert.deepEqual(parent.children.map((c) => c.id), [added.id]);
+  });
+
+  test('add response carries placement; unset seq adds the warning', () => {
+    const epic = epicId();
+    const first = decode(handleAdd(store, { type: 'feature', priority: 'low', title: 'A', description: '', status: 'refinement', parentId: epic, seq: 10 }, CTX));
+    const placed = decode(handleAdd(store, { type: 'feature', priority: 'low', title: 'B', description: '', status: 'refinement', parentId: epic, position: 'next' }, CTX));
+    assert.deepEqual(placed.placement, { seq: 5, runsAfter: null, runsBefore: { id: first.id, title: 'A' }, renumbered: [] });
+    const unset = decode(handleAdd(store, { type: 'feature', priority: 'low', title: 'C', description: '', status: 'refinement', parentId: epic }, CTX));
+    assert.match(String((unset.placement as { warning?: string }).warning), /^no seq: runs after every sequenced child/);
+    const loose = decode(handleAdd(store, { type: 'feature', priority: 'low', title: 'D', description: '', status: 'refinement' }, CTX));
+    assert.equal('placement' in loose, false);
+  });
+
+  test('add with position and seq is an error result', () => {
+    const resp = handleAdd(store, { type: 'feature', priority: 'low', title: 'X', description: '', status: 'refinement', parentId: epicId(), seq: 10, position: 'last' }, CTX);
+    assert.ok(resp.isError);
+    assert.match(String(decode(resp).error), /pass position or seq, not both/);
+  });
+
+  test('update with position carries placement; a plain edit does not', () => {
+    const epic = epicId();
+    const a = addTask({ parentId: epic, seq: 10 }).id;
+    const b = addTask({ parentId: epic, seq: 20 }).id;
+    const moved = decode(handleUpdate(store, { id: b, position: { before: a } }));
+    assert.equal((moved.placement as { seq: number }).seq, 5);
+    assert.equal('placement' in decode(handleUpdate(store, { id: b, title: 'Renamed' })), false);
+  });
+
+  test('getEpic returns the epic with minified children in order, by epic or child id', async () => {
+    const epic = epicId();
+    const a = addTask({ parentId: epic, summary: 'gist', description: 'long', plan: 'p' }).id;
+    const b = addTask({ parentId: epic, seq: 10 }).id;
+    const byEpic = decode(await handleGetEpic(store, { id: epic }));
+    assert.deepEqual(decode(await handleGetEpic(store, { id: a })), byEpic);
+    assert.deepEqual(decode(await handleGetById(store, { id: epic })), byEpic);
+    const task = byEpic.task as { description: string; children: Record<string, unknown>[] };
+    assert.equal(task.description, 'Rules');
+    assert.deepEqual(task.children.map((c) => c.id), [b, a]);
+    assert.deepEqual(Object.keys(task.children[1]!).sort(), ['id', 'priority', 'status', 'summary', 'title', 'type']);
+  });
+
+  test('getEpic on a task in no epic, or an unknown id, is an error result', async () => {
+    const loose = await handleGetEpic(store, { id: addTask().id });
+    assert.ok(loose.isError);
+    assert.match(String(decode(loose).error), /is in no epic; use getById/);
+    assert.ok((await handleGetEpic(store, { id: 9999 })).isError);
   });
 
   test('handleUpdate returns an error (not a throw) on an invalid parent', () => {

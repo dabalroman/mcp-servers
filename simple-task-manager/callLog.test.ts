@@ -19,6 +19,8 @@ describe('redactArgs', () => {
     );
     assert.deepEqual(redactArgs({ id: 7, field: 'plan', anchor: 'abc', replace_with: 'de' }), { id: 7, field: 'plan', anchor: '<3 chars>', replace_with: '<2 chars>' });
     assert.deepEqual(redactArgs({ trackPrs: true, summary: null }), { trackPrs: true, summary: null });
+    assert.deepEqual(redactArgs({ position: 'next' }), { position: 'next' });
+    assert.deepEqual(redactArgs({ position: { after: 4 } }), { position: { after: 4 } });
   });
 
   test('arrays keep their element shape', () => {

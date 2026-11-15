@@ -37,7 +37,7 @@ Show the task (id, title, type, summary) and go to step 3. If step 0 returned a 
 
 ### Step 4 — Break into a task list
 
-**Before writing any code**, read the task's description, plan and notes from `getById` (notes are as authoritative as the description; newest wins: newer note > older note > description) and decompose the work with `TaskCreate`, one reviewable unit per step (e.g. "Add `priority` column migration", "Add tests for priority filtering").
+**Before writing any code**, read the task's description, plan and notes from `getById` (notes are as authoritative as the description; newest wins: newer note > older note > description). If it has a `parentId`, also read `getEpic({ id })` (getById's `epic` block is short) and work from the epic's Rules too. Then decompose the work with `TaskCreate`, one reviewable unit per step (e.g. "Add `priority` column migration", "Add tests for priority filtering").
 
 - Create **all steps up front** so the user sees the full checklist.
 - Each step: imperative `subject`, short `description` (what changes, where), `activeForm` (e.g. "Adding priority column migration").
@@ -53,7 +53,7 @@ Show the task (id, title, type, summary) and go to step 3. If step 0 returned a 
 
 **Simple → inline:** read the files, make the changes, add/update tests, run the project's verify command (from its CLAUDE.md, e.g. `npm run verify`; "verify" below means this). When `getById` carries `repoContext.repo.commands`, those are the build/test/lint commands: use them instead. One that fails as a command (not found, wrong path), not because of your change: read the repo's `rulesFile`, then fix the entry with `setRepo` in the same session.
 
-**Complex → focused subagent:** pick the most specific type in the project's `CLAUDE.md` agent table. Pass: task id, title, full description, relevant file paths and line numbers, fix approach, the step-4 task IDs, the repo folder and commands from `repoContext` (when set), and the instructions: read files → implement → mark each step completed as you go → add/update tests → run verify → report the diff summary and verify result.
+**Complex → focused subagent:** pick the most specific type in the project's `CLAUDE.md` agent table. Pass: task id, title, full description, relevant file paths and line numbers, fix approach, the step-4 task IDs, the repo folder and commands from `repoContext` (when set), the epic's Rules from `getEpic` (when the task has a `parentId`), and the instructions: read files → implement → mark each step completed as you go → add/update tests → run verify → report the diff summary and verify result.
 
 **Web UI work** (HTML, CSS/SCSS, components, client-side JS/TS), inline or delegated: when the `modern-web-guidance` skill is installed, invoke it (search → retrieve) once before the first such edit and follow the guide; a subagent's brief must say so explicitly and its report must name the guide ids it applied. Skip it for trivial edits (copy, renames, pure logic).
 
@@ -91,5 +91,5 @@ Once the user confirms:
 1. Stage and commit in the project's message style. **No `Co-Authored-By` line.** With per-phase commits, this commits only what is left (the last phase or feedback fixes).
    If the task-manager server instructions say this project tracks PRs and you opened a PR/MR for the task, record it: `mcp__task-manager__update({ id, prs: [...existing, { url, number, status }] })`.
 2. `mcp__task-manager__setStatus(id, 'done')`. If the response carries `epicStatus` (the last child closed its epic), tell the user.
-3. If the task has an `epic` (from `getById`), `mcp__task-manager__addNote` on it: `"#NN done, commit <sha>. <anything the next child needs to know>"`.
+3. If the task has a `parentId`, `mcp__task-manager__addNote` on that epic: `"#NN done, commit <sha>. <anything the next child needs to know>"`.
 4. Back to step 1 (next task's summary, then start).

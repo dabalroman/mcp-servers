@@ -8,6 +8,9 @@ import { fileURLToPath } from 'node:url';
 import Database from 'better-sqlite3';
 import type { Database as DB } from 'better-sqlite3';
 import { parsePrUrl, resolvePrLookup } from './prUrl.js';
+import { positionRef, resolvePosition, type Position, type Renumbered } from './epicPosition.js';
+
+export type { Position } from './epicPosition.js';
 
 const __dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -56,6 +59,8 @@ export type Task = {
   epicTitle?: string;
   epic?: EpicContext;
   children?: EpicChild[];
+  // On an epic with children: where a child's full text lives.
+  more?: string;
   refs?: Ref[];
   prs?: PullRequest[];
   notes?: Note[];
@@ -64,20 +69,31 @@ export type Task = {
   updated_at: string;
 };
 
+// Short on purpose: the epic's text and notes would repeat on every child read; getEpic has them.
 export type EpicContext = {
   id: number;
   title: string;
   status: TaskStatus;
   summary?: string;
-  description: string;
-  notes?: Note[];
+  noteCount: number;
+  more: string;
+};
+
+type Neighbour = { id: number; title: string } | null;
+
+export type Placement = {
+  seq: number | null;
+  runsAfter: Neighbour;
+  runsBefore: Neighbour;
+  renumbered: Renumbered[];
+  warning?: string;
 };
 
 export type PrQuery = { url: string } | { repo?: string; number?: number };
 
 export type PrMatch = { task: Task; epic?: { id: number; title: string; status: TaskStatus; summary?: string } };
 
-export type EpicChild = { id: number; title: string; status: TaskStatus; type: TaskType; priority: TaskPriority; seq?: number };
+export type EpicChild = { id: number; title: string; status: TaskStatus; type: TaskType; priority: TaskPriority; seq?: number; summary?: string };
 
 export type Note = {
   id: number;
@@ -485,6 +501,8 @@ export type AddInput = {
   status?: TaskStatus;
   parentId?: number;
   seq?: number;
+  // Resolved to a seq among the epic's children; exclusive with seq.
+  position?: Position;
   externalId?: string;
   repo?: string;
   touches?: string[];
@@ -506,6 +524,8 @@ export type UpdatePatch = {
   parentId?: number | null;
   // undefined keeps it, but any parentId change clears it unless the same patch sets one.
   seq?: number | null;
+  // Counts as passing a seq: exclusive with seq, and keeps a parentId change from clearing it.
+  position?: Position;
   externalId?: string | null;
   // null or '' clears.
   repo?: string | null;
@@ -574,8 +594,9 @@ export type Store = {
   dataVersion(): number;
   load(): LoadResult;
   loadWithNotes(): LoadResult;
-  add(input: AddInput): { id: number };
-  update(id: number, patch: UpdatePatch): { task: Task } | null;
+  // placement only for an epic child; update returns it only when parentId, seq or position was passed.
+  add(input: AddInput): { id: number; placement?: Placement };
+  update(id: number, patch: UpdatePatch): { task: Task; placement?: Placement } | null;
   setStatus(id: number, status: TaskStatus): boolean;
   delete(id: number): boolean;
   getByStatus(project: string, status: TaskStatus, scope?: string): Task[];
@@ -587,6 +608,8 @@ export type Store = {
   getRelated(id: number, status?: StatusFilter): RelatedResult | null;
   getScopes(project: string): ScopeEntry[];
   getById(id: number): Task | null;
+  // The epic of id (an epic or any child); null if id does not exist, throws if it is in no epic.
+  getEpic(id: number): Task | null;
   getAll(project: string, filter?: ListFilter): Task[];
   getUpdates(project: string, filter: GetUpdatesFilter): GetUpdatesResult;
   getRepos(project: string): RepoRegistry;
@@ -691,6 +714,13 @@ function assertSeq(seq: unknown, parentId: number | null): void {
   if (typeof seq !== 'number' || !Number.isInteger(seq) || seq <= 0) throw new Error('Validation failed: seq must be a positive integer.');
   if (parentId === null) throw new Error('Validation failed: seq needs a parentId (it orders an epic\'s children).');
 }
+
+function assertPosition(seq: unknown, parentId: number | null): void {
+  if (seq !== undefined) throw new Error('Validation failed: pass position or seq, not both.');
+  if (parentId === null) throw new Error('Validation failed: position needs a parentId (it places a child among an epic\'s children).');
+}
+
+const NO_SEQ_WARNING = 'no seq: runs after every sequenced child; pass position or seq if the user named a position';
 
 const REPO_ID_MAX = 64;
 const REPO_TEXT_MAX = 280;
@@ -817,7 +847,8 @@ export function createStore(dbPath: string): Store {
   const stmtNotesFor        = db.prepare('SELECT * FROM notes WHERE task_id = ? ORDER BY created_at ASC, id ASC');
   const stmtUpdateNote      = db.prepare(`UPDATE notes SET body = ?, updated_at = datetime('now') WHERE id = ?`);
   const stmtDeleteNote      = db.prepare('DELETE FROM notes WHERE id = ?');
-  const stmtChildrenOf      = db.prepare('SELECT id, title, status, type, priority, seq FROM tasks WHERE parent_id = ? ORDER BY seq IS NULL, seq, id');
+  const stmtChildrenOf      = db.prepare('SELECT id, title, status, type, priority, seq, summary FROM tasks WHERE parent_id = ? ORDER BY seq IS NULL, seq, id');
+  const stmtNoteCount       = db.prepare('SELECT COUNT(*) AS n FROM notes WHERE task_id = ?');
   const stmtSetSeq          = db.prepare(`UPDATE tasks SET seq = ?, updated_at = datetime('now') WHERE id = ?`);
   const stmtHasChildren     = db.prepare('SELECT 1 FROM tasks WHERE parent_id = ? LIMIT 1');
   const stmtRescopeChildren = db.prepare("UPDATE tasks SET scope = @scope, updated_at = datetime('now') WHERE parent_id = @id AND scope IS NOT @scope");
@@ -1117,17 +1148,21 @@ export function createStore(dbPath: string): Store {
     return splitByDone(readAllTasks(true));
   }
 
-  function add(input: AddInput): { id: number } {
+  function add(input: AddInput): { id: number; placement?: Placement } {
     assertSchemaCurrent();
-    const { project, type, priority, title, description = '', scope, summary, plan, refs, prs, status = 'refinement', parentId, seq, externalId, repo, touches } = input;
+    const { project, type, priority, title, description = '', scope, summary, plan, refs, prs, status = 'refinement', parentId, position, externalId, repo, touches } = input;
+    let { seq } = input;
     const trimmedTitle = String(title ?? '').trim();
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
     const validPrs = prs?.length ? validatePrs(prs) : [];
+    if (position !== undefined) assertPosition(seq, parentId ?? null);
     if (seq !== undefined && seq !== null) assertSeq(seq, parentId ?? null);
 
     return db.transaction(() => {
       const canonical = canonicalProject(project);
       const parent = assertParent(type, parentId ?? null, canonical);
+      let renumbered: Renumbered[] = [];
+      if (position !== undefined && parentId != null) ({ seq, renumbered } = placeAmong(parentId, null, position));
       // Unlike scope, repo/touches are never taken from the epic: its children span repos.
       const repos = assertTaskRepos(canonical, repo, touches);
       const info = stmtInsertTask.run(
@@ -1153,11 +1188,37 @@ export function createStore(dbPath: string): Store {
         applyRefsImpl(newId, canonical, [], refs);
       }
       if (validPrs.length) applyPrs(newId, validPrs);
-      return { id: newId };
+      return parentId != null ? { id: newId, placement: placementOf(newId, parentId, renumbered) } : { id: newId };
     })();
   }
 
-  function update(id: number, patch: UpdatePatch): { task: Task } | null {
+  // Resolves position against the epic's other children and applies any renumber; same transaction as the caller's write.
+  function placeAmong(epicId: number, selfId: number | null, position: Position): { seq: number; renumbered: Renumbered[] } {
+    if (selfId !== null && positionRef(position) === selfId) throw new Error(`Validation failed: position cannot reference #${selfId} itself.`);
+    const siblings = (stmtChildrenOf.all(epicId) as { id: number; status: TaskStatus; seq: number | null }[])
+      .filter((c) => c.id !== selfId);
+    const resolved = resolvePosition(siblings, position, epicId);
+    for (const r of resolved.renumbered) stmtSetSeq.run(r.to, r.id);
+    return resolved;
+  }
+
+  function placementOf(id: number, epicId: number, renumbered: Renumbered[]): Placement {
+    const kids = childrenOf(epicId);
+    const self = kids.find((k) => k.id === id);
+    const seq = self?.seq ?? null;
+    const brief = (k: EpicChild | undefined): Neighbour => (k ? { id: k.id, title: k.title } : null);
+    if (seq === null) {
+      const sequenced = kids.filter((k) => k.seq !== undefined && k.id !== id);
+      return { seq, runsAfter: brief(sequenced.at(-1)), runsBefore: null, renumbered, warning: NO_SEQ_WARNING };
+    }
+    // Parallel siblings (same seq) are neither ahead nor behind.
+    const i = kids.findIndex((k) => k.id === id);
+    const ahead = kids.slice(0, i).filter((k) => k.seq !== seq).at(-1);
+    const behind = kids.slice(i + 1).find((k) => k.seq !== seq);
+    return { seq, runsAfter: brief(ahead), runsBefore: brief(behind), renumbered };
+  }
+
+  function update(id: number, patch: UpdatePatch): { task: Task; placement?: Placement } | null {
     assertSchemaCurrent();
     const nextPrs = patch.prs === undefined ? undefined : patch.prs === null ? [] : validatePrs(patch.prs);
     return db.transaction(() => {
@@ -1182,13 +1243,14 @@ export function createStore(dbPath: string): Store {
         parentId: patch.parentId !== undefined ? patch.parentId : existing.parent_id,
         seq: patch.seq !== undefined
           ? patch.seq
-          : patch.parentId !== undefined && patch.parentId !== existing.parent_id ? null : existing.seq,
+          : patch.position === undefined && patch.parentId !== undefined && patch.parentId !== existing.parent_id ? null : existing.seq,
         externalId: patch.externalId === null
           ? null
           : patch.externalId !== undefined ? (patch.externalId.trim() || null) : existing.external_id,
         repo: existing.repo,
       };
 
+      if (patch.position !== undefined) assertPosition(patch.seq, next.parentId);
       if (patch.seq !== undefined && patch.seq !== null) assertSeq(patch.seq, next.parentId);
 
       // Only re-validate when the link can change, so plan/description edits never trip it.
@@ -1197,6 +1259,12 @@ export function createStore(dbPath: string): Store {
       if (linkChanged) parent = assertParent(next.type, next.parentId, next.project, { id, type: existing.type, project: existing.project });
       else if (next.parentId !== null) parent = stmtSelectTask.get(next.parentId) as TaskRow | undefined;
       if (parent) next.scope = parent.scope;
+      let renumbered: Renumbered[] = [];
+      if (patch.position !== undefined && next.parentId !== null) {
+        const placed = placeAmong(next.parentId, id, patch.position);
+        next.seq = placed.seq;
+        renumbered = placed.renumbered;
+      }
 
       const oldTouches = readTouches(id);
       let nextTouches = oldTouches;
@@ -1242,7 +1310,9 @@ export function createStore(dbPath: string): Store {
       if (linksChanged && !columnsChanged) stmtTouchTask.run(id);
 
       const task = readTask(id);
-      return task ? { task } : null;
+      if (!task) return null;
+      const orderTouched = patch.parentId !== undefined || patch.seq !== undefined || patch.position !== undefined;
+      return orderTouched && next.parentId !== null ? { task, placement: placementOf(id, next.parentId, renumbered) } : { task };
     })();
   }
 
@@ -1329,8 +1399,8 @@ export function createStore(dbPath: string): Store {
   }
 
   function childrenOf(epicId: number): EpicChild[] {
-    return (stmtChildrenOf.all(epicId) as (Omit<EpicChild, 'seq'> & { seq: number | null })[])
-      .map(({ seq, ...c }) => (seq === null ? c : { ...c, seq }));
+    return (stmtChildrenOf.all(epicId) as (Omit<EpicChild, 'seq' | 'summary'> & { seq: number | null; summary: string | null })[])
+      .map(({ seq, summary, ...c }) => ({ ...c, ...(seq === null ? {} : { seq }), ...(summary ? { summary } : {}) }));
   }
 
   // Group i gets seq (i + 1) * 10; a nested array is a parallel group; unlisted children → null.
@@ -1422,19 +1492,43 @@ export function createStore(dbPath: string): Store {
   function getById(id: number): Task | null {
     const task = readTask(id);
     if (!task) return null;
+    if (task.type === 'epic') return epicView(task);
     if (task.parentId !== undefined) {
       const epic = stmtSelectTask.get(task.parentId) as TaskRow | undefined;
       if (epic) {
-        const ctx: EpicContext = { id: epic.id, title: epic.title, status: epic.status, description: epic.description ?? '' };
-        if (epic.summary) ctx.summary = epic.summary;
-        const notes = stmtNotesFor.all(epic.id) as Note[];
-        if (notes.length) ctx.notes = notes;
-        task.epic = ctx;
+        const { n } = stmtNoteCount.get(epic.id) as { n: number };
+        task.epic = {
+          id: epic.id,
+          title: epic.title,
+          status: epic.status,
+          ...(epic.summary ? { summary: epic.summary } : {}),
+          noteCount: n,
+          more: `getEpic({ id: ${epic.id} }) for its description, notes and children`,
+        };
       }
     }
-    if (task.type === 'epic') task.children = childrenOf(id);
+    return withRepoContext(task);
+  }
+
+  // One shape for an epic, whether read by getById or getEpic: children stay minified.
+  function epicView(task: Task): Task {
+    task.children = childrenOf(task.id);
+    if (task.children.length) task.more = "getById({ id: <childId> }) for a child's description, plan and notes";
+    return withRepoContext(task);
+  }
+
+  function withRepoContext(task: Task): Task {
     if (task.repo !== undefined || task.touches !== undefined) task.repoContext = repoContextFor(task);
     return task;
+  }
+
+  function getEpic(id: number): Task | null {
+    const task = readTask(id);
+    if (!task) return null;
+    if (task.type === 'epic') return epicView(task);
+    const epic = task.parentId !== undefined ? readTask(task.parentId) : null;
+    if (!epic) throw new Error(`Validation failed: task #${id} is in no epic; use getById({ id: ${id} }).`);
+    return epicView(epic);
   }
 
   function repoContextFor(task: Task): RepoContext {
@@ -1876,6 +1970,7 @@ export function createStore(dbPath: string): Store {
     getRelated,
     getScopes,
     getById,
+    getEpic,
     getAll,
     getUpdates,
     getRepos,
