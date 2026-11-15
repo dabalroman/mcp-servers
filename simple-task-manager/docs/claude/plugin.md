@@ -2,7 +2,7 @@
 
 Read before touching anything under `plugin/`, `bump-version.ts`, or the plugin version check in `health`.
 
-- Layout: `.claude-plugin/plugin.json`, `skills/<name>/SKILL.md` (the 4 skills, single source), `hooks/hooks.json`, `hooks/session-rules.mjs`, `RULES.md`. The marketplace is `.claude-plugin/marketplace.json` at the repo root; `marketplace add owner/repo` reads only that path.
+- Layout: `.claude-plugin/plugin.json`, `skills/<name>/SKILL.md` (the 5 skills, single source), `hooks/hooks.json`, `hooks/session-rules.mjs`, `RULES.md`. The marketplace is `.claude-plugin/marketplace.json` at the repo root; `marketplace add owner/repo` reads only that path.
 - `plugin/` must be self-contained: a git-marketplace install copies only that folder into the plugin cache. No `../` references, no symlinks out, no `CLAUDE.md` inside it (not loaded; validate warns).
 - The plugin carries no MCP entry: project binding is per repo (`.mcp.json`) and plugin config (`pluginConfigs`) is user/managed-scope only; a plugin MCP would also connect in unbound repos.
 
@@ -21,7 +21,7 @@ Exec-form `node` + `args`, not a shell one-liner: shell-form hooks run in PowerS
 
 - Write the prefixed form (`/tm:implement`) in docs, rules, server instructions and the UI. Bare `/implement` resolves only when SKILL.md sets frontmatter `name` and no other command owns the name, and some sessions list only `tm:<skill>`, so a printed bare name can fail with "Unknown command" (#468). Keep `name:` on every skill anyway, so bare still works where it can. Skill-tool invocations inside skills use `tm:<skill>` (no slash). `/plan` is Claude Code's built-in plan mode, not ours: never prefix it.
 - Skills are self-contained: an invocation loads only that skill, so never point at another skill's text unless the reader runs that skill (the coordinator's brief can cite `/tm:implement`'s OCR step because its subagent runs it). Shared text such as scope matching is restated in each skill (#476).
-- The four skills (refine, implement, implement-as-coordinator, assess) stay separate skills.
+- The five skills (init, refine, implement, implement-as-coordinator, assess) stay separate skills.
 
 ## Dev
 

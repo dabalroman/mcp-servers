@@ -6,7 +6,7 @@ session restarts and context compaction. Claude files work as you mention it, re
 implements it, and suggests what to do next.
 
 - **Rules built in** — the server and the `tm` plugin teach Claude how to use it.
-- **Skills** — `/tm:refine`, `/tm:implement`, `/tm:implement-as-coordinator` and `/tm:assess`.
+- **Skills** — `/tm:init`, `/tm:refine`, `/tm:implement`, `/tm:implement-as-coordinator` and `/tm:assess`.
 - **Web UI** — browse and edit the same tasks at <http://localhost:7374>, with live updates.
 - **One DB or many** — one per repo by default, or one shared server for every repo and machine.
 
@@ -76,6 +76,7 @@ Every task moves through `refinement` → `plan` (optional) → `todo` → `in_p
 
 | Skill | What it does |
 |---|---|
+| `/tm:init` | Binds the current repo to the MCP server (stdio or client mode). |
 | `/tm:refine` | Claude acts as PM: clarifies the goal and scope, rewrites the task, and offers to group a split under an epic. |
 | `/tm:implement` | Implements one task (or every `todo` in a scope), runs a code review, and commits after you confirm. |
 | `/tm:implement-as-coordinator` | Supervises a queue or an epic: one subagent per task, independent checks and review, then one commit per task after you approve. |

@@ -40,7 +40,5 @@ For small edits to a task's description or plan, use replace({ id, field, anchor
 - Read notes via getById (alongside plan) before implementing a task.
 - For incremental additions prefer addNote({ taskId, body }) over rewriting the description with update(). Edit with updateNote, remove with deleteNote.
 - /tm:refine folds existing notes into the description, then deletes the folded notes.
-
-Extended rules (epics, user prefixes, refs, projects, knowledge capture, binding a repo) ship with the \`tm\` Claude Code plugin (this MCP server keeps the name task-manager); without it they are missing from this session.
 `.trim();
 }

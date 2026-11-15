@@ -18,7 +18,7 @@ in this repo. Content reaches an agent through three channels, and mixing them i
 | Channel | Loads | Holds |
 |---|---|---|
 | `instructions.ts` | on MCP connect | core usage rules only (lifecycle, refinement-by-default, notes) — hard cap 4,096 chars |
-| `plugin/RULES.md` | SessionStart hook of the `task-manager` plugin, only in repos whose `.mcp.json` has a `task-manager` entry | extended rules: epics, user prefixes, refs, projects, knowledge capture, repo binding — cap 10,000 chars |
+| `plugin/RULES.md` | SessionStart hook of the `task-manager` plugin, only in repos whose `.mcp.json` has a `task-manager` entry | extended rules: epics, user prefixes, refs, projects, knowledge capture — cap 10,000 chars |
 | `CLAUDE.md` (this file) + `docs/claude/*.md` | on demand, when working in this repo; the topic files only when their row in **Context on demand** applies | everything about developing the package |
 
 Claude Code cuts MCP server instructions at 4,096 chars and SessionStart hook output at 10,000 (beyond it only a 2,000-char preview shows). Both caps are asserted in `server.test.ts`. A rule lives in exactly one of the two files, and never in either when a tool description or param describe already states it (#473); anything new goes to `RULES.md` unless every session without the plugin must have it.

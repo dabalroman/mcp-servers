@@ -1,6 +1,6 @@
 {
   "name": "pr-watch",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "description": "Watches the PRs of the session's task-manager tasks: keeps their PR statuses, writes the deploy note and starts a turn on failed checks, comments and deploy results",
   "types": "./types/index.d.ts",
   "userConfig": {
