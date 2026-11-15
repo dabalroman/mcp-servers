@@ -4,7 +4,7 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { TaskListControls, loadViewState } from '@/components/TaskListControls';
 import { cn } from '@/lib/utils';
-import { NO_SCOPE, groupTasks, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, pickProject, projectFromPath, projectPath, defaultView, resolveCardViews } from '@/lib/taskView';
+import { NO_SCOPE, groupTasks, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, filterByRepo, activeRepoChoice, pickProject, projectFromPath, projectPath, settingsPath, isSettingsPath, defaultView, resolveCardViews } from '@/lib/taskView';
 import type { CardView, CardViewEntry, ReorderOrder, ViewState } from '@/lib/taskView';
 import { useTasks } from './useTasks';
 import { TaskCard } from './TaskCard';
@@ -12,6 +12,8 @@ import { EpicChildren } from './EpicChildren';
 import { TaskForm, type TaskPrefill } from './TaskForm';
 import { ProjectDialog } from './ProjectDialog';
 import { ProjectSwitcher } from './ProjectSwitcher';
+import { ProjectSettings } from './ProjectSettings';
+import { useRepos } from './useRepos';
 import { isCollapsed } from './collapseState';
 import { useRefNavigation } from './useRefNavigation';
 import type { Task, TaskStatus, TaskType } from '@/types/task';
@@ -45,35 +47,60 @@ export default function TaskManager() {
   const { data, loading, error, add, update, reorder, remove, createProject, updateProject } = useTasks();
   const [tab, setTab] = useState<Tab>('active');
   const [formOpen, setFormOpen] = useState(false);
-  const [projectDialog, setProjectDialog] = useState<'new' | 'edit' | null>(null);
+  const [projectDialog, setProjectDialog] = useState(false);
   const [editing, setEditing] = useState<Task | null>(null);
   const [prefill, setPrefill] = useState<TaskPrefill | undefined>(undefined);
   const [view, setView] = useState<ViewState>(loadViewState);
   const [cardViews, setCardViews] = useState<ReadonlyMap<number, CardViewEntry>>(() => new Map());
   const [rememberedProject, setRememberedProject] = useState<string | null>(() => projectFromPath(window.location.pathname) ?? loadProject());
 
+  const [settingsOpen, setSettingsOpen] = useState(() => isSettingsPath(window.location.pathname));
+
   const { active: allActive, done: allDone, projects } = data;
   const project = pickProject(projects.map((p) => p.id), rememberedProject);
   const currentProject = projects.find((p) => p.id === project);
-  const active = project === null ? [] : filterByProject(allActive, project);
-  const done = project === null ? [] : filterByProject(allDone, project);
+  const { repos } = useRepos(project, data);
+  const repoIds = repos.map((r) => r.id);
+  // Without repos there is no filter and no repo UI at all.
+  const repoChoice = project === null ? undefined : activeRepoChoice(view.repos[project], repoIds);
+  // Filtered as one list so an epic in one tab stays when only its child in the other matches.
+  const visible = project === null ? [] : filterByRepo(filterByProject([...allActive, ...allDone], project), repoChoice);
+  const visibleIds = new Set(visible.map((t) => t.id));
+  const active = project === null ? [] : filterByProject(allActive, project).filter((t) => visibleIds.has(t.id));
+  const done = project === null ? [] : filterByProject(allDone, project).filter((t) => visibleIds.has(t.id));
 
   const selectProject = useCallback((id: string) => {
     setRememberedProject(id);
+    setSettingsOpen(false);
     saveProject(id);
     if (window.location.pathname !== projectPath(id)) window.history.pushState(null, '', projectPath(id));
   }, []);
 
-  // Rewrite /, a miscased or an unknown id to the shown project's path,
+  const openSettings = useCallback(() => {
+    if (project === null) return;
+    setSettingsOpen(true);
+    window.history.pushState(null, '', settingsPath(project));
+  }, [project]);
+
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(false);
+    if (project !== null) window.history.pushState(null, '', projectPath(project));
+  }, [project]);
+
+  // Rewrite /, a miscased or an unknown id to the shown project's path (keeping /settings),
   // without adding a history entry.
   useEffect(() => {
     if (project === null) return;
     saveProject(project);
-    if (window.location.pathname !== projectPath(project)) window.history.replaceState(null, '', projectPath(project));
-  }, [project]);
+    const wanted = settingsOpen ? settingsPath(project) : projectPath(project);
+    if (window.location.pathname !== wanted) window.history.replaceState(null, '', wanted);
+  }, [project, settingsOpen]);
 
   useEffect(() => {
-    const onPop = () => setRememberedProject(projectFromPath(window.location.pathname) ?? loadProject());
+    const onPop = () => {
+      setRememberedProject(projectFromPath(window.location.pathname) ?? loadProject());
+      setSettingsOpen(isSettingsPath(window.location.pathname));
+    };
     window.addEventListener('popstate', onPop);
     return () => window.removeEventListener('popstate', onPop);
   }, []);
@@ -153,7 +180,7 @@ export default function TaskManager() {
     }
   }
 
-  async function handleFormSubmit(form: { project: string; title: string; type: TaskType; priority: Task['priority']; description: string; summary: string; scope: string; externalId: string; parentId: number | null; refs: import('@/types/task').TaskRef[]; status?: 'refinement' | 'plan' | 'todo' }): Promise<boolean> {
+  async function handleFormSubmit(form: { project: string; title: string; type: TaskType; priority: Task['priority']; description: string; summary: string; scope: string; repo: string; touches: string[]; externalId: string; parentId: number | null; refs: import('@/types/task').TaskRef[]; status?: 'refinement' | 'plan' | 'todo' }): Promise<boolean> {
     const scope = form.scope || undefined;
     const refs = form.refs.length ? form.refs : undefined;
     try {
@@ -166,13 +193,15 @@ export default function TaskManager() {
           description: form.description,
           summary: form.summary || null,
           scope: scope ?? null,
+          repo: form.repo || null,
+          touches: form.touches.length ? form.touches : null,
           externalId: form.externalId || null,
           parentId: form.parentId,
           refs: form.refs.length ? form.refs : null,
           ...(form.status !== undefined && { status: form.status }),
         });
       } else {
-        const newId = await add({ project: form.project, title: form.title, type: form.type, priority: form.priority, description: form.description, summary: form.summary || undefined, scope, externalId: form.externalId || undefined, ...(form.parentId !== null && { parentId: form.parentId }), refs, status: form.status ?? 'refinement' });
+        const newId = await add({ project: form.project, title: form.title, type: form.type, priority: form.priority, description: form.description, summary: form.summary || undefined, scope, ...(form.repo && { repo: form.repo }), ...(form.touches.length > 0 && { touches: form.touches }), externalId: form.externalId || undefined, ...(form.parentId !== null && { parentId: form.parentId }), refs, status: form.status ?? 'refinement' });
         const toastId = `task-added-${newId}`;
         toast.success(
           <button
@@ -363,39 +392,45 @@ export default function TaskManager() {
         projects={projects}
         current={project}
         onSelect={selectProject}
-        onNewProject={() => setProjectDialog('new')}
-        onEditProject={() => setProjectDialog('edit')}
+        onNewProject={() => setProjectDialog(true)}
+        onSettings={openSettings}
       />
 
-      <div className="flex border-b border-border">
-        <div className="flex">
-          {tabs.map((t) => (
-            <button
-              key={t}
-              onClick={() => setTab(t)}
-              className={cn(
-                'flex items-center gap-2 px-5 py-2 tracking-widest uppercase transition-colors border-b-2 -mb-px',
-                tab === t
-                  ? 'border-primary text-primary'
-                  : 'border-transparent text-muted-foreground hover:text-foreground',
-              )}
-            >
-              <span className="text-xs">{t}</span>
-              <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
-                {loading ? '…' : counts[t]}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
+      {settingsOpen && currentProject ? (
+        <ProjectSettings key={currentProject.id} project={currentProject} version={data} onSave={handleEditProject} onBack={closeSettings} />
+      ) : (
+        <>
+          <div className="flex border-b border-border">
+            <div className="flex">
+              {tabs.map((t) => (
+                <button
+                  key={t}
+                  onClick={() => setTab(t)}
+                  className={cn(
+                    'flex items-center gap-2 px-5 py-2 tracking-widest uppercase transition-colors border-b-2 -mb-px',
+                    tab === t
+                      ? 'border-primary text-primary'
+                      : 'border-transparent text-muted-foreground hover:text-foreground',
+                  )}
+                >
+                  <span className="text-xs">{t}</span>
+                  <span className="text-2xs tracking-widest uppercase border border-border px-1.5 py-0.5 text-muted-foreground">
+                    {loading ? '…' : counts[t]}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
 
-      <TaskListControls value={view} onChange={setView}>
-        <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialog('edit')} disabled={!currentProject}>Edit project</Button>
-        <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialog('new')}>New project</Button>
-        <Button size="sm" variant="outline" onClick={() => openAdd()} disabled={project === null}>New task</Button>
-      </TaskListControls>
+          <TaskListControls value={view} repoFilter={repoIds.length > 0 && project !== null ? { project, repoIds } : undefined} onChange={setView}>
+            <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={openSettings} disabled={!currentProject}>Settings</Button>
+            <Button size="sm" variant="outline" className="hidden sm:inline-flex" onClick={() => setProjectDialog(true)}>New project</Button>
+            <Button size="sm" variant="outline" onClick={() => openAdd()} disabled={project === null}>New task</Button>
+          </TaskListControls>
 
-      {renderTaskList(grouped, tab === 'active' ? 'No active tasks. Add one to get started.' : 'No done tasks yet.')}
+          {renderTaskList(grouped, tab === 'active' ? 'No active tasks. Add one to get started.' : 'No done tasks yet.')}
+        </>
+      )}
 
       <TaskForm
         key={`${String(formOpen)}:${editing?.id ?? 'new'}:${JSON.stringify(prefill ?? null)}`}
@@ -411,11 +446,10 @@ export default function TaskManager() {
       />
 
       <ProjectDialog
-        key={projectDialog ?? 'closed'}
-        open={projectDialog !== null}
-        onOpenChange={(open) => { if (!open) setProjectDialog(null); }}
-        initial={projectDialog === 'edit' ? currentProject : undefined}
-        onSubmit={projectDialog === 'edit' ? handleEditProject : handleCreateProject}
+        key={String(projectDialog)}
+        open={projectDialog}
+        onOpenChange={setProjectDialog}
+        onSubmit={handleCreateProject}
       />
     </div>
   );

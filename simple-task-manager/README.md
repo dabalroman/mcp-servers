@@ -102,6 +102,8 @@ If another command uses the same name, the namespaced form works too (`/tm:imple
 - **Pull requests** — a task's PRs/MRs show as linked status tags on its card. Ask Claude to "turn
   on PR tracking" for a project and it records them as it opens them. `getByPr` finds the tasks of a PR by url
   or repo + number.
+- **Repos** — a project that spans sibling repos can register them; a task then carries its `repo`
+  (plus `touches` for other repos it edits). See [Adopting repos](#adopting-repos).
 - **Polling for changes** - `getUpdates` returns tasks (and their new/edited notes) changed since a
   timestamp, filterable by ids, epic or scope, so a session can notice another session's or the UI's
   edits without re-polling every task.
@@ -169,6 +171,32 @@ Code and the plugin; no clone or Node.
 
 The dialog also lists keys with their last use, and **Revoke** cuts a repo off on its next request.
 Only a hash of each key is stored, so a lost key is replaced, not recovered.
+
+## Adopting repos
+
+For a project that spans sibling repos (say firmware, a watch app and a phone app that share a wire
+protocol). Single-repo projects need none of this.
+
+1. Ask Claude to register each repo, or use the project's settings page in the UI: an id, its folder
+   (the sibling directory name, never a path), a one-line role and its build/test/lint commands.
+
+   ```text
+   setRepo({ id: "firmware", folder: "example-firmware", role: "board firmware", commands: { build: "make", test: "make test" } })
+   setRepo({ id: "watch", folder: "example-watch-app", commands: { test: "scripts/test.sh" } })
+   setRepo({ id: "android", folder: "example-android-app", commands: { test: "./gradlew test" } })
+   setContract({
+     name: "Wire protocol v1", owner: "firmware", source: "docs/protocol/*.yaml",
+     consumers: ["watch", "android"], rule: "change the spec first, then a follow-up per app",
+   })
+   ```
+
+2. Replace the copies of these commands and rules in each repo's CLAUDE.md and in epic rules with a
+   one-line pointer: "Repo commands and contracts: `getRepos`."
+
+After that `getById` on a task returns its repo's folder, commands and contracts, `/tm:implement`
+picks tasks for the repo it runs in and warns when a task belongs to another one, and a task that
+changes a contract (`contract: "Wire protocol v1"`) gets draft follow-ups for each consumer, filed
+only when you say so.
 
 ## Troubleshooting
 

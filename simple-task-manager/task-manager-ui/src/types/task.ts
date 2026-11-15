@@ -52,6 +52,9 @@ export type Task = {
   summary?: string;
   plan?: string;
   scope?: string;
+  // Absent when unset; touches never contains repo. Neither is inherited from the epic.
+  repo?: string;
+  touches?: string[];
   parentId?: number;
   // Execution step among the epic's children (10, 20, 30; equal = parallel group).
   seq?: number;
@@ -63,4 +66,23 @@ export type Task = {
   noteCount?: number;
   created_at: string;
   updated_at: string;
+};
+
+export type RepoCommands = { build?: string; test?: string; lint?: string };
+
+export type RepoEntry = {
+  id: string;
+  name: string;
+  folder: string;
+  role: string;
+  commands: RepoCommands;
+  rulesFile: string;
+};
+
+export type Contract = {
+  name: string;
+  owner: string;
+  source: string;
+  consumers: string[];
+  rule: string;
 };

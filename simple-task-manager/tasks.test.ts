@@ -40,6 +40,8 @@ const MIGRATION_NAMES = [
   '20261109120000_add-pr-pipeline-approved-status',
   '20261112120000_add-task-seq',
   '20261112130000_add-project-description',
+  '20261115120000_add-project-repos',
+  '20261115120001_add-task-repo',
 ];
 
 let dir: string;
@@ -514,7 +516,7 @@ describe('getNext', () => {
     const { id: b } = makeTask({ type: 'bug' });
     makeTask({ type: 'feature' });
     store.setStatus(b, 'todo');
-    assert.equal(store.getNext('default', 'bug')?.id, b);
+    assert.equal(store.getNext('default', { type: 'bug' })?.id, b);
   });
 
   test('skips done tasks', () => {
@@ -1250,7 +1252,7 @@ describe('epics', () => {
       find(store.getAll('default', { type: 'bug', scope: 's' })),
       find(store.load().active),
       find(rel!.inbound),
-      store.getNext('default', 'bug')!,
+      store.getNext('default', { type: 'bug' })!,
     ];
     for (const t of reads) {
       assert.equal(t.id, id);
@@ -1275,10 +1277,10 @@ describe('epics', () => {
   test('getNext skips epics, with and without a type filter', () => {
     makeEpic({ priority: 'critical' });
     assert.equal(store.getNext('default'), null);
-    assert.equal(store.getNext('default', 'epic'), null);
+    assert.equal(store.getNext('default', { type: 'epic' }), null);
     const { id } = makeTask({ type: 'other', priority: 'low' });
     assert.equal(store.getNext('default')?.id, id);
-    assert.equal(store.getNext('default', 'epic'), null);
+    assert.equal(store.getNext('default', { type: 'epic' }), null);
   });
 
   test('deleting an epic detaches its children instead of deleting them', () => {
@@ -1860,5 +1862,170 @@ describe('API keys', () => {
     assert.throws(() => store.revokeApiKey(id), StaleSchemaError);
     assert.ok(store.verifyApiKey(key));
     assert.equal(store.listApiKeys()[0]!.lastUsedAt, null);
+  });
+});
+
+describe('repo registry (#569)', () => {
+  const OLD = '2000-01-01 00:00:00';
+  function seedRepos(): void {
+    store.setRepo('default', { id: 'core', folder: 'example-core', role: 'owns the wire format', commands: { build: 'make', test: 'make test' } });
+    store.setRepo('default', { id: 'app-a', folder: 'example-app-a', commands: { test: 'npm test' } });
+    store.setRepo('default', { id: 'app-b', folder: 'example-app-b' });
+    store.setContract('default', { name: 'Wire v1', owner: 'core', source: 'docs/wire/*.yaml', consumers: ['app-a', 'app-b'], rule: 'change the source first' });
+  }
+
+  test('setRepo upserts with defaults; omitted fields keep, commands merge per key', () => {
+    const created = store.setRepo('default', { id: 'core', folder: 'example-core', commands: { build: 'make', test: 'make test' } });
+    assert.deepEqual(created, { id: 'core', name: 'core', folder: 'example-core', role: '', commands: { build: 'make', test: 'make test' }, rulesFile: 'CLAUDE.md' });
+    const updated = store.setRepo('default', { id: 'core', role: 'owner', commands: { test: 'make check', build: '' } });
+    assert.deepEqual(updated, { id: 'core', name: 'core', folder: 'example-core', role: 'owner', commands: { test: 'make check' }, rulesFile: 'CLAUDE.md' });
+    assert.deepEqual(store.getRepos('DEFAULT').repos, [updated]);
+  });
+
+  test('setRepo validates id, folder, rulesFile and folder uniqueness', () => {
+    assert.throws(() => store.setRepo('default', { id: 'Bad Id', folder: 'x' }), /Validation failed: repo id/);
+    assert.throws(() => store.setRepo('default', { id: 'core' }), /folder is required/);
+    for (const folder of ['a/b', 'a\\b', '.', '..', ' ']) {
+      assert.throws(() => store.setRepo('default', { id: 'core', folder }), /Validation failed: folder/, folder);
+    }
+    assert.throws(() => store.setRepo('default', { id: 'core', folder: 'x', rulesFile: '../CLAUDE.md' }), /rulesFile/);
+    assert.throws(() => store.setRepo('default', { id: 'core', folder: 'x', commands: { deploy: 'x' } as never }), /unknown command/);
+    assert.throws(() => store.setRepo('nope', { id: 'core', folder: 'x' }), /does not exist/);
+    store.setRepo('default', { id: 'core', folder: 'example-core' });
+    assert.throws(() => store.setRepo('default', { id: 'other', folder: 'EXAMPLE-CORE' }), /already registered as repo "core"/);
+  });
+
+  test('setContract validates owner and consumers; names match case-insensitively', () => {
+    seedRepos();
+    assert.throws(() => store.setContract('default', { name: 'New', owner: 'ghost' }), /not registered/);
+    assert.throws(() => store.setContract('default', { name: 'New', owner: 'core', consumers: ['core'] }), /cannot also be a consumer/);
+    assert.throws(() => store.setContract('default', { name: 'New' }), /owner is required/);
+    const c = store.setContract('default', { name: 'wire V1', rule: 'source first' });
+    assert.deepEqual(c, { name: 'Wire v1', owner: 'core', source: 'docs/wire/*.yaml', consumers: ['app-a', 'app-b'], rule: 'source first' });
+    assert.equal(store.deleteContract('default', 'WIRE v1'), true);
+    assert.equal(store.deleteContract('default', 'Wire v1'), false);
+  });
+
+  test('deleteRepo refuses while a task, a touches row or a contract uses it', () => {
+    seedRepos();
+    const { id } = makeTask({ repo: 'app-a', touches: ['app-b'] });
+    assert.throws(() => store.deleteRepo('default', 'app-a'), new RegExp(`used by tasks #${id}`));
+    store.update(id, { repo: null });
+    assert.throws(() => store.deleteRepo('default', 'app-b'), /used by tasks/);
+    store.update(id, { touches: null });
+    assert.throws(() => store.deleteRepo('default', 'app-b'), /still in contracts "Wire v1"/);
+    store.setContract('default', { name: 'Wire v1', consumers: ['app-a'] });
+    assert.equal(store.deleteRepo('default', 'app-b'), true);
+    assert.equal(store.deleteRepo('default', 'app-b'), false);
+  });
+
+  test('repo and touches are validated, touches deduped and never contain repo', () => {
+    seedRepos();
+    assert.throws(() => makeTask({ repo: 'ghost' }), /repo "ghost" is not registered/);
+    assert.throws(() => makeTask({ touches: ['ghost'] }), /repo "ghost" is not registered/);
+    const { id } = makeTask({ repo: 'core', touches: ['app-a', 'core', 'app-a'] });
+    const t = store.getById(id)!;
+    assert.equal(t.repo, 'core');
+    assert.deepEqual(t.touches, ['app-a']);
+    store.update(id, { repo: 'app-a' });
+    assert.equal(store.getById(id)!.touches, undefined, 'the new repo leaves touches');
+    store.update(id, { repo: '' });
+    assert.equal(store.getById(id)!.repo, undefined);
+  });
+
+  test('an epic child does not inherit the epic repo', () => {
+    seedRepos();
+    const epic = makeTask({ type: 'epic', repo: 'core', scope: 'example-scope' }).id;
+    const child = makeTask({ parentId: epic }).id;
+    const t = store.getById(child)!;
+    assert.equal(t.scope, 'example-scope');
+    assert.equal(t.repo, undefined);
+    assert.equal(t.touches, undefined);
+  });
+
+  test('the repo filter matches repo, touches and unassigned tasks', () => {
+    seedRepos();
+    const own = makeTask({ repo: 'app-a', priority: 'low' }).id;
+    const touching = makeTask({ repo: 'core', touches: ['app-a'], priority: 'low' }).id;
+    const unassigned = makeTask({ priority: 'low' }).id;
+    const other = makeTask({ repo: 'app-b', priority: 'critical' }).id;
+    const ids = (ts: { id: number }[]) => ts.map((t) => t.id).sort((a, b) => a - b);
+    assert.deepEqual(ids(store.getAll('default', { repo: 'app-a' })), [own, touching, unassigned]);
+    assert.deepEqual(ids(store.getAll('default')), [own, touching, unassigned, other]);
+    assert.notEqual(store.getNext('default', { repo: 'app-a' })?.id, other);
+    assert.equal(store.getNext('default')?.id, other);
+    assert.deepEqual(ids(store.getUpdates('default', { since: OLD, repo: 'app-a' }).tasks), [own, touching, unassigned]);
+  });
+
+  test('moving a task to another project needs its repos registered there', () => {
+    seedRepos();
+    store.createProject('Example Other');
+    const { id } = makeTask({ repo: 'core' });
+    assert.throws(() => store.update(id, { project: 'example-other' }), /not registered in project example-other — pass repo\/touches/);
+    store.setRepo('example-other', { id: 'core', folder: 'example-core' });
+    assert.equal(store.update(id, { project: 'example-other' })!.task.project, 'example-other');
+    const { id: id2 } = makeTask({ repo: 'app-a' });
+    assert.equal(store.update(id2, { project: 'example-other', repo: null })!.task.repo, undefined);
+  });
+
+  test('setting repo or touches bumps updated_at; resending them does not', () => {
+    seedRepos();
+    const { id } = makeTask();
+    const age = () => store.db.prepare('UPDATE tasks SET updated_at = ? WHERE id = ?').run(OLD, id);
+    age();
+    store.update(id, { repo: 'core' });
+    assert.notEqual(store.getById(id)!.updated_at, OLD);
+    age();
+    store.update(id, { touches: ['app-a'] });
+    assert.notEqual(store.getById(id)!.updated_at, OLD);
+    age();
+    store.update(id, { repo: 'core', touches: ['app-a'] });
+    assert.equal(store.getById(id)!.updated_at, OLD);
+    // Unchanged refs in the same patch must not mask the touches change.
+    store.update(id, { touches: ['app-b'], refs: [] });
+    assert.notEqual(store.getById(id)!.updated_at, OLD);
+  });
+
+  test('getById carries repoContext with contract roles; list reads do not', () => {
+    seedRepos();
+    const owner = makeTask({ repo: 'core', touches: ['app-b'] }).id;
+    const consumer = makeTask({ repo: 'app-a' }).id;
+    const ctx = store.getById(owner)!.repoContext!;
+    assert.equal(ctx.repo?.folder, 'example-core');
+    assert.deepEqual(ctx.repo?.commands, { build: 'make', test: 'make test' });
+    assert.deepEqual(ctx.touches.map((r) => r.id), ['app-b']);
+    assert.deepEqual(ctx.contracts.map((c) => [c.name, c.role]), [['Wire v1', 'owner']]);
+    assert.deepEqual(store.getById(consumer)!.repoContext!.contracts.map((c) => c.role), ['consumer']);
+    assert.ok(store.getAll('default').every((t) => !('repoContext' in t)));
+  });
+
+  test('a project without repos is unchanged: no repo, touches or repoContext keys', () => {
+    const epic = makeTask({ type: 'epic' }).id;
+    const { id } = makeTask({ parentId: epic, scope: 'example-scope' });
+    store.update(id, { title: 'Renamed' });
+    const reads = [store.getById(id)!, store.getById(epic)!, ...store.getAll('default'), store.getNext('default')!, ...store.load().active];
+    for (const t of reads) {
+      assert.ok(!('repo' in t) && !('touches' in t) && !('repoContext' in t), `task #${t.id} has repo keys`);
+    }
+    assert.deepEqual(store.getRepos('default'), { repos: [], contracts: [] });
+  });
+
+  test('resolveRepoByFolder matches case-insensitively, else null', () => {
+    seedRepos();
+    assert.equal(store.resolveRepoByFolder('default', 'Example-App-A')?.id, 'app-a');
+    assert.equal(store.resolveRepoByFolder('default', 'elsewhere'), null);
+  });
+
+  test('suggestFollowUps drafts one task per uncovered consumer', () => {
+    seedRepos();
+    const epic = makeTask({ type: 'epic', scope: 'example-scope' }).id;
+    const { id } = makeTask({ title: 'Add ping command', repo: 'core', touches: ['app-b'], parentId: epic, type: 'feature', priority: 'high' });
+    assert.deepEqual(store.suggestFollowUps(id, 'wire v1'), [{
+      title: 'app-a: Add ping command', type: 'feature', priority: 'high', repo: 'app-a',
+      refs: [{ id, relation: 'depends on' }], parentId: epic, scope: 'example-scope',
+    }]);
+    const consumer = makeTask({ repo: 'app-a' }).id;
+    assert.throws(() => store.suggestFollowUps(consumer, 'Wire v1'), /owned by repo "core"/);
+    assert.throws(() => store.suggestFollowUps(id, 'Nope'), /not registered/);
   });
 });

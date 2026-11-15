@@ -12,7 +12,7 @@ import type { Store } from '../tasks.js';
 
 // String args kept verbatim: enum values and identifiers. Every other string
 // is free text and is logged as its length only.
-const VERBATIM_KEYS = new Set(['status', 'type', 'priority', 'relation', 'field', 'project', 'scope']);
+const VERBATIM_KEYS = new Set(['status', 'type', 'priority', 'relation', 'field', 'project', 'scope', 'repo', 'touches', 'contract']);
 const ERROR_MAX = 500;
 // McpError(InvalidParams) text: schema rejection or unknown tool.
 const INVALID_PARAMS = `MCP error ${ErrorCode.InvalidParams}`;

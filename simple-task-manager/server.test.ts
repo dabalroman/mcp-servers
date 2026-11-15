@@ -29,6 +29,8 @@ import {
   handleGetOverview,
   handleGetScopes,
   handleGetProjects,
+  handleGetRepos,
+  handleWhoami,
   handleHealth,
 } from './mcp/queryHandlers.js';
 import {
@@ -43,6 +45,10 @@ import {
   handleCreateProject,
   handleUpdateProject,
   handleReorder,
+  handleSetRepo,
+  handleDeleteRepo,
+  handleSetContract,
+  handleDeleteContract,
 } from './mcp/mutationHandlers.js';
 import { withSchemaCheck, prsSchema, type MCPContent } from './mcp/shared.js';
 import Database from 'better-sqlite3';
@@ -1149,6 +1155,85 @@ describe('epics — MCP layer', () => {
 });
 
 // ── Instructions split + plugin rules hook ───────────────────────────────────
+
+describe('repo registry — MCP layer (#569)', () => {
+  function seed(): void {
+    assert.equal(handleSetRepo(store, { id: 'core', folder: 'example-core', role: 'owner', commands: { test: 'make test' } }, CTX).isError, undefined);
+    handleSetRepo(store, { id: 'app-a', folder: 'example-app-a' }, CTX);
+    handleSetRepo(store, { id: 'app-b', folder: 'example-app-b' }, CTX);
+    handleSetContract(store, { name: 'Wire v1', owner: 'core', consumers: ['app-a', 'app-b'], rule: 'source first' }, CTX);
+  }
+
+  test('setRepo/setContract echo the entry; getRepos lists both', async () => {
+    const r = decode(handleSetRepo(store, { id: 'core', folder: 'example-core' }, CTX));
+    assert.deepEqual(r, { success: true, repo: { id: 'core', name: 'core', folder: 'example-core', role: '', commands: {}, rulesFile: 'CLAUDE.md' } });
+    seed();
+    const reg = decode(await handleGetRepos(store, {}, CTX)) as { project: string; repos: { id: string }[]; contracts: { name: string }[] };
+    assert.equal(reg.project, 'default');
+    assert.deepEqual(reg.repos.map((x) => x.id), ['app-a', 'app-b', 'core']);
+    assert.deepEqual(reg.contracts.map((c) => c.name), ['Wire v1']);
+  });
+
+  test('validation errors are tool errors', () => {
+    assert.equal(handleSetRepo(store, { id: 'core', folder: 'a/b' }, CTX).isError, true);
+    assert.equal(handleSetContract(store, { name: 'X', owner: 'ghost' }, CTX).isError, true);
+    assert.equal(handleSetRepo(store, { id: 'core', folder: 'x', project: 'nope' }, CTX).isError, true);
+  });
+
+  test('whoami matches the folder, else repo null', async () => {
+    seed();
+    assert.deepEqual(decode(await handleWhoami(store, { cwdBasename: 'EXAMPLE-APP-A' }, CTX)), { project: 'default', repo: 'app-a' });
+    assert.deepEqual(decode(await handleWhoami(store, { cwdBasename: 'unrelated' }, CTX)), { project: 'default', repo: null });
+  });
+
+  test('add with contract returns one draft per consumer; a bad contract files nothing', () => {
+    seed();
+    const resp = decode(handleAdd(store, { type: 'feature', priority: 'medium', title: 'Add ping command', description: '', repo: 'core', contract: 'Wire v1' }, CTX)) as
+      { id: number; suggestedFollowUps: { title: string; repo: string; refs: unknown }[] };
+    assert.deepEqual(resp.suggestedFollowUps.map((d) => [d.title, d.repo]), [['app-a: Add ping command', 'app-a'], ['app-b: Add ping command', 'app-b']]);
+    assert.deepEqual(resp.suggestedFollowUps[0]!.refs, [{ id: resp.id, relation: 'depends on' }]);
+    const countBefore = store.load().active.length;
+    const bad = handleAdd(store, { type: 'feature', priority: 'medium', title: 'Consumer change', description: '', repo: 'app-a', contract: 'Wire v1' }, CTX);
+    assert.equal(bad.isError, true);
+    assert.equal(store.load().active.length, countBefore);
+    assert.deepEqual(Object.keys(decode(handleAdd(store, { type: 'bug', priority: 'low', title: 'Plain', description: '' }, CTX))), ['id']);
+  });
+
+  test('update with contract returns drafts; without it the key is absent', () => {
+    seed();
+    const { id } = addTask({ repo: 'core', touches: ['app-a'] });
+    const resp = decode(handleUpdate(store, { id, contract: 'wire v1' })) as { suggestedFollowUps: { repo: string }[] };
+    assert.deepEqual(resp.suggestedFollowUps.map((d) => d.repo), ['app-b']);
+    assert.ok(!('suggestedFollowUps' in decode(handleUpdate(store, { id, title: 'Renamed' }))));
+    const bad = handleUpdate(store, { id, title: 'Not applied', repo: 'app-a', touches: null, contract: 'Wire v1' });
+    assert.equal(bad.isError, true);
+    assert.equal(store.getById(id)!.title, 'Renamed', 'a failed contract rolls the update back');
+  });
+
+  test('getById carries repoContext; list tools strip it and filter by repo', async () => {
+    seed();
+    const { id } = addTask({ repo: 'app-a' });
+    const other = addTask({ repo: 'app-b', priority: 'critical' }).id;
+    const t = (decode(await handleGetById(store, { id })) as { task: { repo: string; repoContext: { repo: { folder: string }; contracts: { role: string }[] } } }).task;
+    assert.equal(t.repoContext.repo.folder, 'example-app-a');
+    assert.deepEqual(t.repoContext.contracts.map((c) => c.role), ['consumer']);
+    const next = decode(await handleGetNext(store, { repo: 'app-a' }, CTX)) as { task: { id: number } };
+    assert.equal(next.task.id, id);
+    assert.equal((decode(await handleGetNext(store, {}, CTX)) as { task: { id: number } }).task.id, other);
+    const all = decode(await handleGetAll(store, { repo: 'app-a' }, CTX)) as { tasks: { bug: Record<string, unknown>[] } };
+    assert.deepEqual(all.tasks.bug.map((x) => x['id']), [id]);
+    assert.ok(all.tasks.bug.every((x) => !('repoContext' in x)));
+  });
+
+  test('deleteRepo errors while in use; deleteContract/deleteRepo report unknown names', () => {
+    seed();
+    addTask({ repo: 'app-a' });
+    assert.match(String(decode(handleDeleteRepo(store, { id: 'app-a' }, CTX))['error']), /still used by tasks/);
+    assert.match(String(decode(handleDeleteRepo(store, { id: 'ghost' }, CTX))['error']), /not registered/);
+    assert.deepEqual(decode(handleDeleteContract(store, { name: 'Wire v1' }, CTX)), { success: true });
+    assert.equal(handleDeleteContract(store, { name: 'Wire v1' }, CTX).isError, true);
+  });
+});
 
 describe('reorder handler', () => {
   test('returns the children in execution order with their seq; getById(epic) matches', async () => {

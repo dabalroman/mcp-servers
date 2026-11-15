@@ -20,6 +20,7 @@ const SPLIT_PROJECT_MIGRATION = '20261106150000_split-project-id-name';
 const PR_PIPELINE_APPROVED_MIGRATION = '20261109120000_add-pr-pipeline-approved-status';
 const TASK_SEQ_MIGRATION = '20261112120000_add-task-seq';
 const PROJECT_DESCRIPTION_MIGRATION = '20261112130000_add-project-description';
+const PROJECT_REPOS_MIGRATION = '20261115120000_add-project-repos';
 
 let dir: string;
 let dbPath: string;
@@ -648,6 +649,51 @@ describe('add-project-description migration', () => {
     assert.ok(col, 'description column must exist');
     assert.equal(col.notnull, 1);
     assert.deepEqual(store.db.prepare("SELECT description FROM projects WHERE id = 'example-project'").all(), [{ description: '' }]);
+    store.close();
+  });
+});
+
+describe('add-project-repos + add-task-repo migrations (#569)', () => {
+  test('add the registry tables and a nullable tasks.repo; existing rows are unchanged', () => {
+    const db = new Database(dbPath);
+    db.exec(`CREATE TABLE schema_migrations (
+      version INTEGER PRIMARY KEY, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')));`);
+    const earlier = loadMigrations().filter((m) => m.name < PROJECT_REPOS_MIGRATION);
+    earlier.forEach((m, i) => {
+      m.up(db);
+      db.prepare('INSERT INTO schema_migrations (version, name) VALUES (?, ?)').run(i + 1, m.name);
+    });
+    db.pragma(`user_version = ${earlier.length}`);
+    db.prepare("INSERT INTO projects (id, name) VALUES ('example-project', 'Example')").run();
+    const ins = db.prepare("INSERT INTO tasks (title, type, status, priority, project, scope, description, parent_id, seq) VALUES (?, ?, 'todo', 'high', 'example-project', 'example-scope', 'Body', ?, ?)");
+    const epic = Number(ins.run('Epic', 'epic', null, null).lastInsertRowid);
+    const child = Number(ins.run('Child', 'feature', epic, 10).lastInsertRowid);
+    db.prepare("INSERT INTO refs (from_id, to_id, relation) VALUES (?, ?, 'relates to'), (?, ?, 'relates to')").run(child, epic, epic, child);
+    db.prepare("INSERT INTO notes (task_id, body) VALUES (?, 'A note')").run(child);
+    const snapshot = (d: Database.Database) => ({
+      tasks: d.prepare('SELECT id, title, type, status, priority, project, scope, summary, description, plan, parent_id, seq, external_id, created_at, updated_at FROM tasks ORDER BY id').all(),
+      refs: d.prepare('SELECT * FROM refs ORDER BY from_id, to_id').all(),
+      notes: d.prepare('SELECT * FROM notes ORDER BY id').all(),
+      projects: d.prepare('SELECT * FROM projects ORDER BY id').all(),
+    });
+    const before = snapshot(db);
+    db.close();
+
+    const store = createStore(dbPath);
+    assert.deepEqual(snapshot(store.db), before);
+    const repoCol = (store.db.pragma('table_info(tasks)') as { name: string; notnull: number; type: string }[]).find((c) => c.name === 'repo');
+    assert.ok(repoCol, 'repo column must exist');
+    assert.equal(repoCol.notnull, 0);
+    assert.deepEqual(store.db.prepare('SELECT DISTINCT repo FROM tasks').all(), [{ repo: null }]);
+    for (const table of ['project_repos', 'project_contracts', 'task_touches']) {
+      assert.deepEqual(store.db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get(), { n: 0 }, table);
+    }
+    const touchesFk = store.db.pragma('foreign_key_list(task_touches)') as { table: string; on_delete: string }[];
+    assert.deepEqual(touchesFk.map((f) => [f.table, f.on_delete]), [['tasks', 'CASCADE']]);
+    const reposFk = store.db.pragma('foreign_key_list(project_repos)') as { table: string; on_update: string }[];
+    assert.deepEqual(reposFk.map((f) => [f.table, f.on_update]), [['projects', 'CASCADE']]);
+    const t = store.getById(child)!;
+    assert.ok(!('repo' in t) && !('touches' in t) && !('repoContext' in t));
     store.close();
   });
 });

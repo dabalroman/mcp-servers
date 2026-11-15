@@ -2,11 +2,13 @@ import type { ReactNode } from 'react';
 import { ArrowUp, ArrowDown, ChevronDown } from 'lucide-react';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import type { GroupBy, SortBy, SortDir, ViewState } from '@/lib/taskView';
-import { DEFAULT_VIEW } from '@/lib/taskView';
+import type { GroupBy, SortBy, ViewState } from '@/lib/taskView';
+import { DEFAULT_VIEW, UNASSIGNED_REPO, activeRepoChoice, parseViewState } from '@/lib/taskView';
 
 type Props = {
   value: ViewState;
+  // Set only when the project has repos; the Repo picker is hidden otherwise.
+  repoFilter?: { project: string; repoIds: string[] };
   onChange: (v: ViewState) => void;
   children?: ReactNode;
 };
@@ -15,15 +17,7 @@ const STORAGE_KEY = 'task-manager-ui:view';
 
 export function loadViewState(): ViewState {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return DEFAULT_VIEW;
-    const parsed = JSON.parse(raw) as Partial<ViewState>;
-    return {
-      groupBy:  (parsed.groupBy  as GroupBy)  ?? DEFAULT_VIEW.groupBy,
-      groupDir: (parsed.groupDir as SortDir)  ?? DEFAULT_VIEW.groupDir,
-      sortBy:   (parsed.sortBy   as SortBy)   ?? DEFAULT_VIEW.sortBy,
-      sortDir:  (parsed.sortDir  as SortDir)  ?? DEFAULT_VIEW.sortDir,
-    };
+    return parseViewState(localStorage.getItem(STORAGE_KEY));
   } catch {
     return DEFAULT_VIEW;
   }
@@ -40,6 +34,9 @@ function saveViewState(v: ViewState): void {
 const KEY_CELL = 'flex items-center px-3 py-2 text-2xs tracking-widest uppercase text-muted-foreground bg-card border-r border-border select-none whitespace-nowrap';
 const VAL_SELECT = 'flex items-center justify-between gap-2 px-3 py-2 bg-background text-foreground text-xs focus:outline-none focus-visible:ring-2 focus-visible:ring-ring cursor-pointer hover:bg-accent/20 transition-colors';
 const DIR_BTN = 'flex items-center px-3 py-2 text-muted-foreground hover:text-foreground hover:bg-accent/20 transition-colors cursor-pointer';
+
+// Picker values can't be undefined; this stands for "no filter" and is never stored.
+const ALL_REPOS = '(all)';
 
 const GROUP_OPTIONS: readonly { value: GroupBy; label: string }[] = [
   { value: 'none', label: '—' },
@@ -83,7 +80,7 @@ function ValuePicker<T extends string>({ value, options, onChange }: {
   );
 }
 
-export function TaskListControls({ value, onChange, children }: Props) {
+export function TaskListControls({ value, repoFilter, onChange, children }: Props) {
   function set(patch: Partial<ViewState>) {
     const next = { ...value, ...patch };
     saveViewState(next);
@@ -94,7 +91,7 @@ export function TaskListControls({ value, onChange, children }: Props) {
     <div className="flex flex-wrap items-center gap-2">
 
       {/* Full-width below sm so the actions wrap beneath; min width keeps the blocks usable beside the buttons */}
-      <div className="flex flex-[1_1_100%] sm:flex-1 sm:min-w-[20rem] gap-2 min-w-0">
+      <div className="flex flex-wrap flex-[1_1_100%] sm:flex-1 sm:min-w-[20rem] gap-2 min-w-0">
 
         {/* Group block */}
         <div className="flex flex-1 min-w-0 items-stretch border border-border overflow-hidden">
@@ -129,6 +126,25 @@ export function TaskListControls({ value, onChange, children }: Props) {
             }
           </button>
         </div>
+
+        {/* Repo block */}
+        {repoFilter && (
+          <div className="flex flex-[1_1_100%] min-w-0 items-stretch border border-border overflow-hidden">
+            <span className={KEY_CELL}>Repo</span>
+            <ValuePicker
+              value={activeRepoChoice(value.repos[repoFilter.project], repoFilter.repoIds) ?? ALL_REPOS}
+              options={[
+                { value: ALL_REPOS, label: 'All' },
+                ...repoFilter.repoIds.map((id) => ({ value: id, label: id })),
+                { value: UNASSIGNED_REPO, label: 'Unassigned' },
+              ]}
+              onChange={(choice) => {
+                const { [repoFilter.project]: _old, ...rest } = value.repos;
+                set({ repos: choice === ALL_REPOS ? rest : { ...rest, [repoFilter.project]: choice } });
+              }}
+            />
+          </div>
+        )}
 
       </div>
 

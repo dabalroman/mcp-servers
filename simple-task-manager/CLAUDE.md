@@ -31,7 +31,7 @@ Not loaded by default. **Read the file before working on its topic.**
 
 | Topic | Read | When |
 |---|---|---|
-| SQLite store, migrations, epics, external IDs, `Store` consumers | `docs/claude/storage-and-migrations.md` | Touching `tasks.ts`, `migrations/`, a schema change, a new `Store` method, or epic/notes/refs storage |
+| SQLite store, migrations, epics, external IDs, `Store` consumers | `docs/claude/storage-and-migrations.md` | Touching `tasks.ts`, `migrations/`, a schema change, a new `Store` method, epic/notes/refs storage, or the repo registry (`project_repos`/`project_contracts`/`task_touches`) |
 | Projects (#360/#369/#370) | `docs/claude/projects.md` | Anything about project binding, project-aware handlers, `PROJECT_NAME`, or the UI's project tabs/URLs |
 | MCP tools and handlers | `docs/claude/mcp-tools.md` | Adding or changing a tool, handler, list output, summary gate, or `updateCheck` |
 | Bundled vs client mode, UI spawn, `--server on/off`, pm2 | `docs/claude/run-modes-and-server-setup.md` | `server.ts` startup/shutdown, `mcp/uiChild.ts`, `serverSetup.ts`, `/api/config`, `TASK_UI_MODE`, pm2 app names |

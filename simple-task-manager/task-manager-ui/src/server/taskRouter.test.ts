@@ -148,6 +148,50 @@ describe('/api/projects', () => {
   });
 });
 
+describe('/api/projects/:id/repos and /contracts (#569)', () => {
+  it('PUT upserts repos and contracts, GET lists them, DELETE removes them', async () => {
+    const empty = await request(app).get('/api/projects/default/repos');
+    expect(empty.status).toBe(200);
+    expect(empty.body).toEqual({ repos: [], contracts: [] });
+
+    const put = await request(app).put('/api/projects/default/repos/core').send({ id: 'ignored', folder: 'example-core', commands: { test: 'make test' } });
+    expect(put.status).toBe(200);
+    expect(put.body).toEqual({ id: 'core', name: 'core', folder: 'example-core', role: '', commands: { test: 'make test' }, rulesFile: 'CLAUDE.md' });
+    await request(app).put('/api/projects/default/repos/app-a').send({ folder: 'example-app-a' });
+    const contract = await request(app).put(`/api/projects/default/contracts/${encodeURIComponent('Wire v1')}`).send({ owner: 'core', consumers: ['app-a'] });
+    expect(contract.status).toBe(200);
+    expect(contract.body).toEqual({ name: 'Wire v1', owner: 'core', source: '', consumers: ['app-a'], rule: '' });
+
+    const list = await request(app).get('/api/projects/default/repos');
+    expect(list.body.repos.map((r: { id: string }) => r.id)).toEqual(['app-a', 'core']);
+    expect(list.body.contracts).toHaveLength(1);
+
+    expect((await request(app).delete('/api/projects/default/repos/core')).status).toBe(400);
+    expect((await request(app).delete(`/api/projects/default/contracts/${encodeURIComponent('Wire v1')}`)).body).toEqual({ ok: true });
+    expect((await request(app).delete(`/api/projects/default/contracts/${encodeURIComponent('Wire v1')}`)).status).toBe(404);
+    expect((await request(app).delete('/api/projects/default/repos/core')).body).toEqual({ ok: true });
+    expect((await request(app).delete('/api/projects/default/repos/core')).status).toBe(404);
+  });
+
+  it('a validation error is 400 with the reason', async () => {
+    const res = await request(app).put('/api/projects/default/repos/core').send({ folder: '../escape' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toMatch(/folder/);
+    expect((await request(app).get('/api/projects/nope/repos')).status).toBe(400);
+    expect((await request(app).put('/api/projects/default/repos/%E0%A4%A').send({ folder: 'x' })).status).toBe(400);
+  });
+
+  it('task POST/PATCH carry repo and touches through', async () => {
+    await request(app).put('/api/projects/default/repos/core').send({ folder: 'example-core' });
+    await request(app).put('/api/projects/default/repos/app-a').send({ folder: 'example-app-a' });
+    const { body } = await request(app).post('/api/tasks/').send({ project: 'default', type: 'bug', priority: 'high', title: 'T', repo: 'core' });
+    expect((await request(app).patch(`/api/tasks/${body.id}`).send({ touches: ['app-a'] })).status).toBe(200);
+    const task = (await request(app).get('/api/tasks/')).body.active.find((t: { id: number }) => t.id === body.id);
+    expect(task).toMatchObject({ repo: 'core', touches: ['app-a'] });
+    expect((await request(app).patch(`/api/tasks/${body.id}`).send({ repo: 'ghost' })).status).toBe(400);
+  });
+});
+
 describe('DB migrated past this build mid-session', () => {
   it('refuses writes with 409 and the rebuild/restart message, but still serves reads', async () => {
     const other = createStore(dbPath);

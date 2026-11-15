@@ -208,6 +208,13 @@ export function TaskCard({ task, view, onViewChange, onStatus, onEdit, onAddChil
               </span>
             )}
 
+            {(task.repo || task.touches?.length) && (
+              <span title={task.touches?.length ? `Also touches ${task.touches.join(', ')}` : undefined} className="inline-flex items-center gap-1.5 text-xs tracking-widest text-foreground/80 border border-border px-2 py-1 shrink-0">
+                {task.repo}
+                {task.touches?.map((id) => <span key={id} className="text-2xs text-muted-foreground">+{id}</span>)}
+              </span>
+            )}
+
             <span className="text-xs tracking-widest text-muted-foreground border border-border px-2 py-1 shrink-0">
               {TYPE_LABELS[task.type] ?? task.type.toUpperCase()}
             </span>

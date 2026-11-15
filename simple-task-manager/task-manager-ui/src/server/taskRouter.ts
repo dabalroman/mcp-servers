@@ -35,7 +35,7 @@ function withBody(api: TaskApi, route: Dispatch, { stream }: { stream: boolean }
       return api.stream(req, res);
     }
 
-    if (method === 'POST' || method === 'PATCH' || method === 'DELETE') {
+    if (method === 'POST' || method === 'PATCH' || method === 'PUT' || method === 'DELETE') {
       if (req.body !== undefined) return void route(req, res, next, pathname, method, api);
 
       let raw = '';
@@ -60,9 +60,25 @@ async function dispatchProjects(
   api: TaskApi,
 ): Promise<void> {
   const projectMatch = pathname.match(/^\/([^/]+)$/);
+  const reposMatch = pathname.match(/^\/([^/]+)\/repos$/);
+  const repoMatch = pathname.match(/^\/([^/]+)\/repos\/([^/]+)$/);
+  const contractMatch = pathname.match(/^\/([^/]+)\/contracts\/([^/]+)$/);
+  const body = (req.body ?? {}) as Record<string, unknown>;
   let result: unknown;
   try {
-    if (method === 'GET' && pathname === '/') {
+    if (method === 'GET' && reposMatch) {
+      result = api.repos(decodeURIComponent(reposMatch[1]!));
+    } else if (method === 'PUT' && repoMatch) {
+      result = await api.setRepo(decodeURIComponent(repoMatch[1]!), decodeURIComponent(repoMatch[2]!), withoutKey(body, 'id'));
+    } else if (method === 'DELETE' && repoMatch) {
+      if (!(await api.deleteRepo(decodeURIComponent(repoMatch[1]!), decodeURIComponent(repoMatch[2]!)))) return sendNotFound(res, 'repo not found');
+      result = { ok: true };
+    } else if (method === 'PUT' && contractMatch) {
+      result = await api.setContract(decodeURIComponent(contractMatch[1]!), decodeURIComponent(contractMatch[2]!), withoutKey(body, 'name'));
+    } else if (method === 'DELETE' && contractMatch) {
+      if (!(await api.deleteContract(decodeURIComponent(contractMatch[1]!), decodeURIComponent(contractMatch[2]!)))) return sendNotFound(res, 'contract not found');
+      result = { ok: true };
+    } else if (method === 'GET' && pathname === '/') {
       result = api.projects();
     } else if (method === 'POST' && pathname === '/') {
       result = await api.createProject(req.body as { name?: unknown; description?: unknown });
@@ -122,11 +138,24 @@ async function dispatchKeys(
   res.end(JSON.stringify(result));
 }
 
+// The URL segment is the key; a body copy of it must not rename the entry.
+function withoutKey(body: Record<string, unknown>, key: string): Record<string, unknown> {
+  const { [key]: _key, ...rest } = body;
+  return rest;
+}
+
+function sendNotFound(res: ServerResponse, error: string): void {
+  res.statusCode = 404;
+  res.setHeader('Content-Type', 'application/json');
+  res.end(JSON.stringify({ error }));
+}
+
 function sendError(res: ServerResponse, err: unknown): void {
   const e = err as Error;
   console.error('[task-api]', e);
   res.statusCode = 500;
-  if (isValidationError(err)) res.statusCode = 400;
+  // URIError: a malformed %-escape in a path segment is the client's fault.
+  if (isValidationError(err) || err instanceof URIError) res.statusCode = 400;
   else if (isStaleSchemaError(err)) res.statusCode = 409;
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({ error: e.message }));

@@ -1,11 +1,22 @@
 import { text, errorText, notFoundError, probeTcp, resolveProject, type MCPContent, type SessionContext } from './shared.js';
-import type { AddInput, Store, TaskStatus, UpdatePatch } from '../tasks.js';
+import type { AddInput, ContractInput, FollowUpDraft, RepoInput, Store, TaskStatus, UpdatePatch } from '../tasks.js';
 import { checkPlanText } from './planText.js';
 import { uiPkgDir, uiServerEntry, getUiChild, setUiChild, spawnUi } from './uiChild.js';
 
 const UI_PORT = parseInt(process.env['TASK_UI_PORT'] ?? '7374', 10);
 
-export function handleAdd(store: Store, { project, ...args }: Omit<AddInput, 'project'> & { project?: string }, ctx: SessionContext): MCPContent {
+// One transaction with the write, so a bad contract name files nothing.
+function followUps(store: Store, id: number, contract: string | undefined): { suggestedFollowUps?: FollowUpDraft[] } {
+  if (contract === undefined) return {};
+  const drafts = store.suggestFollowUps(id, contract);
+  return drafts.length ? { suggestedFollowUps: drafts } : {};
+}
+
+export function handleAdd(
+  store: Store,
+  { project, contract, ...args }: Omit<AddInput, 'project'> & { project?: string; contract?: string },
+  ctx: SessionContext,
+): MCPContent {
   const p = resolveProject(store, ctx, project);
   if (typeof p !== 'string') return p;
   if (args.plan !== undefined) {
@@ -14,22 +25,29 @@ export function handleAdd(store: Store, { project, ...args }: Omit<AddInput, 'pr
     args = { ...args, plan: checked.text };
   }
   try {
-    const { id } = store.add({ ...args, project: p });
-    return text({ id });
+    return text(store.db.transaction(() => {
+      const { id } = store.add({ ...args, project: p });
+      return { id, ...followUps(store, id, contract) };
+    })());
   } catch (err) {
     return errorText({ error: err instanceof Error ? err.message : String(err) });
   }
 }
 
-export function handleUpdate(store: Store, { id, ...patch }: UpdatePatch & { id: number }): MCPContent {
+export function handleUpdate(store: Store, { id, contract, ...patch }: UpdatePatch & { id: number; contract?: string }): MCPContent {
   if (typeof patch.plan === 'string') {
     const checked = checkPlanText(patch.plan, { allowEmpty: true });
     if (!checked.ok) return errorText({ error: checked.error });
     patch = { ...patch, plan: checked.text };
   }
   let result: ReturnType<Store['update']>;
+  let drafts: ReturnType<typeof followUps> = {};
   try {
-    result = store.update(id, patch);
+    result = store.db.transaction(() => {
+      const r = store.update(id, patch);
+      if (r) drafts = followUps(store, id, contract);
+      return r;
+    })();
   } catch (err) {
     return errorText({ error: err instanceof Error ? err.message : String(err) });
   }
@@ -37,9 +55,10 @@ export function handleUpdate(store: Store, { id, ...patch }: UpdatePatch & { id:
   // plan and note bodies omitted from the echo (can be large); getById returns them
   const { plan: _plan, notes, ...rest } = result.task;
   const task = notes ? { ...rest, noteCount: notes.length } : rest;
-  const response: { success: true; task: typeof task; summaryReminder?: string } = {
+  const response: { success: true; task: typeof task; summaryReminder?: string; suggestedFollowUps?: FollowUpDraft[] } = {
     success: true,
     task,
+    ...drafts,
   };
   if (result.task.status === 'refinement' && !result.task.summary && !('summary' in patch)) {
     response.summaryReminder = 'This task is in refinement. Before promoting to todo, add a 2–3 line summary via update({ id, summary: "..." }).';
@@ -131,6 +150,48 @@ export function handleCreateProject(store: Store, { name, description }: { name:
 export function handleUpdateProject(store: Store, { project, trackPrs, description }: { project: string; trackPrs?: boolean; description?: string }): MCPContent {
   try {
     return text({ success: true, project: store.updateProject(project, { trackPrs, description }) });
+  } catch (err) {
+    return errorText({ error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+export function handleSetRepo(store: Store, { project, ...entry }: RepoInput & { project?: string }, ctx: SessionContext): MCPContent {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
+  try {
+    return text({ success: true, repo: store.setRepo(p, entry) });
+  } catch (err) {
+    return errorText({ error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+export function handleDeleteRepo(store: Store, { id, project }: { id: string; project?: string }, ctx: SessionContext): MCPContent {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
+  try {
+    if (!store.deleteRepo(p, id)) return errorText({ error: `Repo "${id}" is not registered in project ${p}.` });
+    return text({ success: true });
+  } catch (err) {
+    return errorText({ error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+export function handleSetContract(store: Store, { project, ...contract }: ContractInput & { project?: string }, ctx: SessionContext): MCPContent {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
+  try {
+    return text({ success: true, contract: store.setContract(p, contract) });
+  } catch (err) {
+    return errorText({ error: err instanceof Error ? err.message : String(err) });
+  }
+}
+
+export function handleDeleteContract(store: Store, { name, project }: { name: string; project?: string }, ctx: SessionContext): MCPContent {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
+  try {
+    if (!store.deleteContract(p, name)) return errorText({ error: `Contract "${name}" is not registered in project ${p}.` });
+    return text({ success: true });
   } catch (err) {
     return errorText({ error: err instanceof Error ? err.message : String(err) });
   }

@@ -9,6 +9,8 @@ export type ViewState = {
   groupDir: SortDir;
   sortBy: SortBy;
   sortDir: SortDir;
+  // Repo filter choice per project id; a missing entry means All.
+  repos: Record<string, string>;
 };
 
 export type GroupSection = {
@@ -26,7 +28,35 @@ const TYPE_ORDER: TaskType[] = ['bug', 'tool', 'feature', 'idea', 'other', 'epic
 
 export const NO_SCOPE = '(no scope)';
 
-export const DEFAULT_VIEW: ViewState = { groupBy: 'scope', groupDir: 'asc', sortBy: 'priority', sortDir: 'desc' };
+export const DEFAULT_VIEW: ViewState = { groupBy: 'scope', groupDir: 'asc', sortBy: 'priority', sortDir: 'desc', repos: {} };
+
+const GROUP_BY_VALUES: readonly string[] = ['none', 'scope', 'status', 'type', 'priority'];
+const SORT_BY_VALUES: readonly string[] = ['priority', 'status', 'created_at', 'updated_at'];
+const DIR_VALUES: readonly string[] = ['asc', 'desc'];
+
+// Anything missing or malformed in the stored JSON falls back to the default, field by field.
+export function parseViewState(raw: string | null): ViewState {
+  if (!raw) return DEFAULT_VIEW;
+  try {
+    const p = JSON.parse(raw) as Partial<Record<keyof ViewState, unknown>> | null;
+    if (typeof p !== 'object' || p === null) return DEFAULT_VIEW;
+    const pick = <T extends string>(v: unknown, allowed: readonly string[], fallback: T): T =>
+      typeof v === 'string' && allowed.includes(v) ? v as T : fallback;
+    const repos: Record<string, string> = {};
+    if (typeof p.repos === 'object' && p.repos !== null) {
+      for (const [project, choice] of Object.entries(p.repos)) if (typeof choice === 'string') repos[project] = choice;
+    }
+    return {
+      groupBy: pick(p.groupBy, GROUP_BY_VALUES, DEFAULT_VIEW.groupBy),
+      groupDir: pick(p.groupDir, DIR_VALUES, DEFAULT_VIEW.groupDir),
+      sortBy: pick(p.sortBy, SORT_BY_VALUES, DEFAULT_VIEW.sortBy),
+      sortDir: pick(p.sortDir, DIR_VALUES, DEFAULT_VIEW.sortDir),
+      repos,
+    };
+  } catch {
+    return DEFAULT_VIEW;
+  }
+}
 
 export function sortTasks(tasks: Task[], sortBy: SortBy, sortDir: SortDir): Task[] {
   const dir = sortDir === 'asc' ? 1 : -1;
@@ -226,6 +256,29 @@ export function filterByProject(tasks: Task[], project: string): Task[] {
   return tasks.filter((t) => t.project.toLowerCase() === key);
 }
 
+// Not a valid repo slug, so it can't collide with a registered id.
+export const UNASSIGNED_REPO = '(unassigned)';
+
+// Same rule as the server's repo filter: the repo, its touches, or no repo at all. `choice`
+// undefined = All; UNASSIGNED_REPO = only tasks with no repo. An epic also stays when any of
+// its children in `tasks` matches, so the matching children keep their container.
+export function filterByRepo(tasks: Task[], choice: string | undefined): Task[] {
+  if (choice === undefined) return tasks;
+  const matches = choice === UNASSIGNED_REPO
+    ? (t: Task) => t.repo === undefined
+    : (t: Task) => t.repo === undefined || t.repo === choice || (t.touches?.includes(choice) ?? false);
+  const parentsOfMatches = new Set<number>();
+  for (const t of tasks) if (t.parentId != null && matches(t)) parentsOfMatches.add(t.parentId);
+  return tasks.filter((t) => matches(t) || parentsOfMatches.has(t.id));
+}
+
+// The stored choice if it still names a registered repo (or Unassigned), else All.
+export function activeRepoChoice(stored: string | undefined, repoIds: readonly string[]): string | undefined {
+  // With no repos the picker is hidden, so a stored choice (Unassigned included) must not filter.
+  if (repoIds.length === 0) return undefined;
+  return stored === UNASSIGNED_REPO || (stored !== undefined && repoIds.includes(stored)) ? stored : undefined;
+}
+
 // Task-picker search: matches "#<id>" substrings or the title, ignoring case.
 export function matchesTaskQuery(task: Task, query: string): boolean {
   return query === '' ||
@@ -254,6 +307,15 @@ export function projectFromPath(pathname: string): string | null {
 
 export function projectPath(name: string): string {
   return `/${encodeURIComponent(name)}`;
+}
+
+// Settings live one segment below the project: /<project>/settings.
+export function settingsPath(name: string): string {
+  return `${projectPath(name)}/settings`;
+}
+
+export function isSettingsPath(pathname: string): boolean {
+  return pathname.split('/').filter((s) => s !== '')[1] === 'settings';
 }
 
 export type CardView = 'compact' | 'collapsed' | 'full';

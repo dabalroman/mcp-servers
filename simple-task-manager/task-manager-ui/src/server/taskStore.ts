@@ -2,10 +2,14 @@
 // run on first open inside createStore() — no vendor mirror, no EXPECTED_MIGRATIONS
 // validation. When the MCP and the UI both open the same DB, whichever opens
 // first applies pending migrations; the other sees the migrated schema.
-import { createStore, StaleSchemaError, type AddInput, type UpdatePatch, type LoadResult, type ProjectEntry, type ProjectSettings, type ApiKey, type EpicChild, type Store } from '../../../tasks.js';
+import {
+  createStore, StaleSchemaError,
+  type AddInput, type UpdatePatch, type LoadResult, type ProjectEntry, type ProjectSettings, type ApiKey, type EpicChild, type Store,
+  type RepoRegistry, type RepoInput, type RepoEntry, type ContractInput, type Contract,
+} from '../../../tasks.js';
 import type { TaskStatus } from '@/types/task';
 
-export type { AddInput, UpdatePatch, LoadResult, ProjectEntry, ProjectSettings, ApiKey, EpicChild };
+export type { AddInput, UpdatePatch, LoadResult, ProjectEntry, ProjectSettings, ApiKey, EpicChild, RepoRegistry, RepoInput, RepoEntry, ContractInput, Contract };
 
 export type TaskStoreOptions = { dbPath: string };
 
@@ -52,6 +56,26 @@ export function createTaskStore({ dbPath }: TaskStoreOptions) {
     return store.updateProject(id, settings);
   }
 
+  function getRepos(project: string): RepoRegistry {
+    return store.getRepos(project);
+  }
+
+  async function setRepo(project: string, entry: RepoInput): Promise<RepoEntry> {
+    return store.setRepo(project, entry);
+  }
+
+  async function deleteRepo(project: string, id: string): Promise<boolean> {
+    return store.deleteRepo(project, id);
+  }
+
+  async function setContract(project: string, contract: ContractInput): Promise<Contract> {
+    return store.setContract(project, contract);
+  }
+
+  async function deleteContract(project: string, name: string): Promise<boolean> {
+    return store.deleteContract(project, name);
+  }
+
   function listApiKeys(): ApiKey[] {
     return store.listApiKeys();
   }
@@ -72,7 +96,11 @@ export function createTaskStore({ dbPath }: TaskStoreOptions) {
     store.close();
   }
 
-  return { load, loadWithNotes, add, setStatus, updateTask, deleteTask, reorder, getProjects, createProject, updateProject, listApiKeys, createApiKey, revokeApiKey, dataVersion, close };
+  return {
+    load, loadWithNotes, add, setStatus, updateTask, deleteTask, reorder, getProjects, createProject, updateProject,
+    getRepos, setRepo, deleteRepo, setContract, deleteContract,
+    listApiKeys, createApiKey, revokeApiKey, dataVersion, close,
+  };
 }
 
 export type TaskStore = ReturnType<typeof createTaskStore>;

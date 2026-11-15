@@ -1,5 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { createTaskStore, type AddInput, type ProjectSettings, type UpdatePatch } from './taskStore.js';
+import { createTaskStore, type AddInput, type ContractInput, type ProjectSettings, type RepoInput, type UpdatePatch } from './taskStore.js';
 import type { TaskStatus } from '@/types/task';
 
 export type TaskApiOptions = { dbPath: string };
@@ -101,6 +101,35 @@ export function createTaskApi({ dbPath }: TaskApiOptions) {
       const project = await store.updateProject(id, settings);
       broadcast();
       return project;
+    },
+
+    repos(project: string) {
+      return store.getRepos(project);
+    },
+
+    // The id/name comes from the URL; the store validates every body field.
+    async setRepo(project: string, id: string, body: Omit<RepoInput, 'id'>) {
+      const repo = await store.setRepo(project, { ...body, id });
+      broadcast();
+      return repo;
+    },
+
+    async deleteRepo(project: string, id: string) {
+      const ok = await store.deleteRepo(project, id);
+      if (ok) broadcast();
+      return ok;
+    },
+
+    async setContract(project: string, name: string, body: Omit<ContractInput, 'name'>) {
+      const contract = await store.setContract(project, { ...body, name });
+      broadcast();
+      return contract;
+    },
+
+    async deleteContract(project: string, name: string) {
+      const ok = await store.deleteContract(project, name);
+      if (ok) broadcast();
+      return ok;
     },
 
     // No broadcast: keys aren't task data.

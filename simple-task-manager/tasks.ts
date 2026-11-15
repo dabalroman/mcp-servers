@@ -49,6 +49,10 @@ export type Task = {
   seq?: number;
   // Always present (null when unset), unlike the other optionals, so agents can rely on the key.
   externalId: string | null;
+  // Registered repo ids (#569); never inherited from the epic. touches never contains repo.
+  repo?: string;
+  touches?: string[];
+  repoContext?: RepoContext;
   epicTitle?: string;
   epic?: EpicContext;
   children?: EpicChild[];
@@ -81,6 +85,52 @@ export type Note = {
   body: string;
   created_at: string;
   updated_at: string;
+};
+
+export const REPO_COMMAND_KEYS = ['build', 'test', 'lint'] as const;
+export type RepoCommands = Partial<Record<typeof REPO_COMMAND_KEYS[number], string>>;
+
+export type RepoEntry = {
+  id: string;
+  name: string;
+  // Sibling directory name only; agents resolve ../<folder> from their cwd.
+  folder: string;
+  role: string;
+  commands: RepoCommands;
+  rulesFile: string;
+};
+
+// commands merges per key ('' removes one); every other omitted field keeps its value.
+export type RepoInput = { id: string; name?: string; folder?: string; role?: string; commands?: RepoCommands; rulesFile?: string };
+
+export type Contract = {
+  name: string;
+  owner: string;
+  // Descriptive glob in the owner repo; never validated against files.
+  source: string;
+  consumers: string[];
+  rule: string;
+};
+
+export type ContractInput = { name: string; owner?: string; source?: string; consumers?: string[]; rule?: string };
+
+export type RepoRegistry = { repos: RepoEntry[]; contracts: Contract[] };
+
+export type RepoContext = {
+  repo: RepoEntry | null;
+  touches: RepoEntry[];
+  // owner = the task's repo or one of its touches owns the contract.
+  contracts: (Contract & { role: 'owner' | 'consumer' })[];
+};
+
+export type FollowUpDraft = {
+  title: string;
+  type: TaskType;
+  priority: TaskPriority;
+  repo: string;
+  refs: { id: number; relation: 'depends on' }[];
+  parentId?: number;
+  scope?: string;
 };
 
 const PRIORITY_ORDER: Record<TaskPriority, number> = { critical: 4, high: 3, medium: 2, low: 1 };
@@ -257,7 +307,7 @@ function runMigrations(db: DB): Set<string> {
 }
 
 // ── Schema ────────────────────────────────────────────────────────────────────
-// Current shape after every migration in ./migrations/ (last: 20261112120000_add-task-seq).
+// Current shape after every migration in ./migrations/ (last: 20261115120001_add-task-repo).
 // Hand-kept: update it in the same commit as any migration. Timestamps are TEXT
 // datetime('now') (UTC), booleans INTEGER 0/1. Behaviour: docs/claude/storage-and-migrations.md.
 //
@@ -270,6 +320,7 @@ function runMigrations(db: DB): Set<string> {
 //   parent_id INTEGER NULL FK tasks(id) ON DELETE SET NULL — the task's epic
 //   seq INTEGER NULL — step among the epic's children (#570); ignored on read when parent_id is NULL
 //   project TEXT NOT NULL COLLATE NOCASE FK projects(id) ON UPDATE CASCADE — no default, on purpose
+//   repo TEXT NULL — a project_repos id of the task's project (#569); not inherited from the epic
 //   created_at, updated_at TEXT NOT NULL DEFAULT now
 //   indexes: status, type, scope, project, parent_id, lower(external_id)
 //   widening a CHECK needs a table rebuild (see 20260519010000_add-plan-status)
@@ -292,11 +343,27 @@ function runMigrations(db: DB): Set<string> {
 //   created_at, updated_at TEXT NOT NULL DEFAULT now
 //   index: number (getByPr)
 //
+// task_touches — other registered repos a task edits (#569); never the task's own repo
+//   task_id INTEGER NOT NULL FK tasks(id) ON DELETE CASCADE; repo TEXT NOT NULL; PK (task_id, repo)
+//   index: repo
+//
 // projects
 //   id TEXT PK COLLATE NOCASE — the identity every FK, PROJECT_NAME, X-Project and UI URL uses; immutable except adoptDefaultProject
 //   name TEXT NOT NULL DEFAULT '' COLLATE NOCASE — display only, never a lookup key; created_at TEXT NOT NULL DEFAULT now
 //   track_prs INTEGER NOT NULL DEFAULT 0 — only decides whether agents are told to record PRs
 //   description TEXT NOT NULL DEFAULT '' — what the project covers (≤ PROJECT_DESCRIPTION_MAX); getProjects only, never in instructions
+//
+// project_repos — a project's sibling repos (#569)
+//   project TEXT NOT NULL COLLATE NOCASE FK projects(id) ON UPDATE CASCADE; id TEXT NOT NULL (slug); PK (project, id)
+//   name, role TEXT NOT NULL DEFAULT ''; folder TEXT NOT NULL — bare directory name
+//   commands TEXT NOT NULL DEFAULT '{}' — JSON { build?, test?, lint? }; rules_file TEXT NOT NULL DEFAULT 'CLAUDE.md'
+//   created_at, updated_at TEXT NOT NULL DEFAULT now
+//   unique index: (project, folder COLLATE NOCASE)
+//
+// project_contracts — interfaces one repo owns and others consume (#569)
+//   project TEXT NOT NULL COLLATE NOCASE FK projects(id) ON UPDATE CASCADE; name TEXT NOT NULL COLLATE NOCASE; PK (project, name)
+//   owner TEXT NOT NULL — repo id; consumers TEXT NOT NULL DEFAULT '[]' — JSON repo ids (store-checked, no FK)
+//   source, rule TEXT NOT NULL DEFAULT ''; created_at, updated_at TEXT NOT NULL DEFAULT now
 //
 // api_keys — HTTP MCP keys (docs/claude/mcp-over-http.md)
 //   id INTEGER PK AUTOINCREMENT; label TEXT NOT NULL
@@ -326,6 +393,7 @@ type TaskRow = {
   parent_id: number | null;
   seq: number | null;
   external_id: string | null;
+  repo: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -351,6 +419,7 @@ function rowToTask(row: TaskRow, refs: Ref[]): Task {
   if (row.parent_id !== null) t.parentId = row.parent_id;
   // An epic delete detaches children via ON DELETE SET NULL and leaves their seq behind.
   if (row.parent_id !== null && row.seq !== null) t.seq = row.seq;
+  if (row.repo) t.repo = row.repo;
   if (refs && refs.length) t.refs = refs;
   return t;
 }
@@ -417,6 +486,8 @@ export type AddInput = {
   parentId?: number;
   seq?: number;
   externalId?: string;
+  repo?: string;
+  touches?: string[];
 };
 
 export type UpdatePatch = {
@@ -436,6 +507,10 @@ export type UpdatePatch = {
   // undefined keeps it, but any parentId change clears it unless the same patch sets one.
   seq?: number | null;
   externalId?: string | null;
+  // null or '' clears.
+  repo?: string | null;
+  // Full replacement list; null or [] clears, undefined keeps.
+  touches?: string[] | null;
 };
 
 export type LoadResult = {
@@ -456,9 +531,11 @@ export type ScopeEntry = { scope: string; total: number; open: number };
 export type ProjectEntry = { id: string; name: string; description: string; total: number; open: number; trackPrs: boolean };
 
 export type StatusFilter = TaskStatus | 'open';
-export type ListFilter = { status?: StatusFilter; type?: TaskType; scope?: string };
+// repo matches the task's repo, its touches, or no repo at all (unassigned tasks stay visible).
+export type ListFilter = { status?: StatusFilter; type?: TaskType; scope?: string; repo?: string };
+export type NextFilter = { type?: TaskType; repo?: string };
 
-export type GetUpdatesFilter = { since: string | number; ids?: number[]; epicId?: number; scope?: string };
+export type GetUpdatesFilter = { since: string | number; ids?: number[]; epicId?: number; scope?: string; repo?: string };
 export type GetUpdatesResult = { asOf: string; tasks: Task[]; missing: number[] };
 
 const SQLITE_DATETIME_RE = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
@@ -504,7 +581,7 @@ export type Store = {
   getByStatus(project: string, status: TaskStatus, scope?: string): Task[];
   getByExternalId(externalId: string): Task[];
   getByPr(input: PrQuery): PrMatch[];
-  getNext(project: string, type?: TaskType): Task | null;
+  getNext(project: string, filter?: NextFilter): Task | null;
   reorder(epicId: number, order: (number | number[])[]): EpicChild[];
   getOverview(project: string, status?: StatusFilter): OverviewEntry[];
   getRelated(id: number, status?: StatusFilter): RelatedResult | null;
@@ -512,6 +589,13 @@ export type Store = {
   getById(id: number): Task | null;
   getAll(project: string, filter?: ListFilter): Task[];
   getUpdates(project: string, filter: GetUpdatesFilter): GetUpdatesResult;
+  getRepos(project: string): RepoRegistry;
+  setRepo(project: string, entry: RepoInput): RepoEntry;
+  deleteRepo(project: string, id: string): boolean;
+  setContract(project: string, contract: ContractInput): Contract;
+  deleteContract(project: string, name: string): boolean;
+  resolveRepoByFolder(project: string, folder: string): RepoEntry | null;
+  suggestFollowUps(taskId: number, contractName: string): FollowUpDraft[];
   getProjects(): ProjectEntry[];
   createProject(name: string, description?: string): { id: string; name: string; description: string };
   updateProject(id: string, settings: ProjectSettings): { id: string; name: string; description: string; trackPrs: boolean };
@@ -608,6 +692,60 @@ function assertSeq(seq: unknown, parentId: number | null): void {
   if (parentId === null) throw new Error('Validation failed: seq needs a parentId (it orders an epic\'s children).');
 }
 
+const REPO_ID_MAX = 64;
+const REPO_TEXT_MAX = 280;
+const REPO_ID_RE = /^[a-z0-9][a-z0-9-]*$/;
+
+function validRepoId(id: unknown): string {
+  const trimmed = typeof id === 'string' ? id.trim() : '';
+  if (!REPO_ID_RE.test(trimmed) || trimmed.length > REPO_ID_MAX) {
+    throw new Error(`Validation failed: repo id "${String(id)}" must be a slug (a–z, 0–9, '-', starting with a letter or digit, ≤ ${REPO_ID_MAX}).`);
+  }
+  return trimmed;
+}
+
+// A bare sibling directory name: paths would leak the user's layout and break on other machines.
+function validFolder(folder: unknown): string {
+  const trimmed = typeof folder === 'string' ? folder.trim() : '';
+  if (!trimmed || trimmed === '.' || trimmed === '..' || /[\\/]/.test(trimmed) || trimmed.length > 255) {
+    throw new Error(`Validation failed: folder "${String(folder)}" must be a bare directory name (no / or \\, not . or ..).`);
+  }
+  return trimmed;
+}
+
+function validRepoText(value: unknown, field: string): string {
+  if (typeof value !== 'string') throw new Error(`Validation failed: ${field} must be a string.`);
+  const trimmed = value.trim();
+  if (trimmed.length > REPO_TEXT_MAX || /[\r\n]/.test(trimmed)) {
+    throw new Error(`Validation failed: ${field} must be one line of at most ${REPO_TEXT_MAX} characters.`);
+  }
+  return trimmed;
+}
+
+// Relative to the repo root; absolute paths and .. segments would point outside it.
+function validRulesFile(value: unknown): string {
+  const trimmed = validRepoText(value, 'rulesFile');
+  if (!trimmed || /^[\\/]|^[A-Za-z]:/.test(trimmed) || trimmed.split(/[\\/]/).includes('..')) {
+    throw new Error(`Validation failed: rulesFile "${trimmed}" must be a path inside the repo (e.g. CLAUDE.md).`);
+  }
+  return trimmed;
+}
+
+function mergeCommands(current: RepoCommands, patch: unknown): RepoCommands {
+  if (patch === null || typeof patch !== 'object' || Array.isArray(patch)) throw new Error('Validation failed: commands must be an object { build?, test?, lint? }.');
+  const out: RepoCommands = { ...current };
+  for (const [key, value] of Object.entries(patch)) {
+    if (!(REPO_COMMAND_KEYS as readonly string[]).includes(key)) {
+      throw new Error(`Validation failed: unknown command "${key}" (use ${REPO_COMMAND_KEYS.join(', ')}).`);
+    }
+    const k = key as keyof RepoCommands;
+    const v = validRepoText(value, `commands.${key}`);
+    if (v) out[k] = v;
+    else delete out[k];
+  }
+  return out;
+}
+
 export function unknownProjectMessage(name: string): string {
   return `project "${name}" does not exist — create it with createProject or in the task-manager UI, or call getProjects to list existing ones.`;
 }
@@ -647,7 +785,7 @@ export function createStore(dbPath: string): Store {
 
   // Prepared statements
   const stmtInsertTask      = db.prepare(
-    'INSERT INTO tasks (title, type, status, priority, project, scope, summary, description, plan, parent_id, seq, external_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO tasks (title, type, status, priority, project, scope, summary, description, plan, parent_id, seq, external_id, repo) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   );
   const stmtSelectTask      = db.prepare('SELECT * FROM tasks WHERE id = ?');
   const stmtAppliedMigrations = db.prepare('SELECT name, applied_at FROM schema_migrations ORDER BY version');
@@ -669,7 +807,7 @@ export function createStore(dbPath: string): Store {
   const stmtDeleteMirror    = db.prepare('DELETE FROM refs WHERE from_id = ? AND to_id = ? AND relation = ?');
   const stmtUpdateTask      = db.prepare(`
     UPDATE tasks
-    SET title = ?, type = ?, priority = ?, project = ?, scope = ?, summary = ?, description = ?, plan = ?, parent_id = ?, seq = ?, external_id = ?, updated_at = datetime('now')
+    SET title = ?, type = ?, priority = ?, project = ?, scope = ?, summary = ?, description = ?, plan = ?, parent_id = ?, seq = ?, external_id = ?, repo = ?, updated_at = datetime('now')
     WHERE id = ?
   `);
   const stmtSetTaskStatus   = db.prepare(`UPDATE tasks SET status = ?, updated_at = datetime('now') WHERE id = ?`);
@@ -702,6 +840,29 @@ export function createStore(dbPath: string): Store {
     FROM api_keys WHERE hash = ? AND revoked_at IS NULL
   `);
   const stmtTouchApiKey     = db.prepare(`UPDATE api_keys SET last_used_at = datetime('now') WHERE id = ?`);
+  const stmtTouchesFor      = db.prepare('SELECT repo FROM task_touches WHERE task_id = ? ORDER BY rowid');
+  const stmtDeleteTouchesFor = db.prepare('DELETE FROM task_touches WHERE task_id = ?');
+  const stmtInsertTouch     = db.prepare('INSERT INTO task_touches (task_id, repo) VALUES (?, ?)');
+  const stmtReposOf         = db.prepare('SELECT * FROM project_repos WHERE project = ? ORDER BY id');
+  const stmtSelectRepo      = db.prepare('SELECT * FROM project_repos WHERE project = ? AND id = ?');
+  const stmtRepoByFolder    = db.prepare('SELECT * FROM project_repos WHERE project = ? AND folder = ? COLLATE NOCASE');
+  const stmtUpsertRepo      = db.prepare(`
+    INSERT INTO project_repos (project, id, name, folder, role, commands, rules_file) VALUES (@project, @id, @name, @folder, @role, @commands, @rulesFile)
+    ON CONFLICT (project, id) DO UPDATE SET name = @name, folder = @folder, role = @role, commands = @commands, rules_file = @rulesFile, updated_at = datetime('now')
+  `);
+  const stmtDeleteRepo      = db.prepare('DELETE FROM project_repos WHERE project = ? AND id = ?');
+  const stmtContractsOf     = db.prepare('SELECT * FROM project_contracts WHERE project = ? ORDER BY name COLLATE NOCASE');
+  const stmtSelectContract  = db.prepare('SELECT * FROM project_contracts WHERE project = ? AND name = ?');
+  const stmtUpsertContract  = db.prepare(`
+    INSERT INTO project_contracts (project, name, owner, source, consumers, rule) VALUES (@project, @name, @owner, @source, @consumers, @rule)
+    ON CONFLICT (project, name) DO UPDATE SET owner = @owner, source = @source, consumers = @consumers, rule = @rule, updated_at = datetime('now')
+  `);
+  const stmtDeleteContract  = db.prepare('DELETE FROM project_contracts WHERE project = ? AND name = ?');
+  const stmtRepoTaskUse     = db.prepare(`
+    SELECT id FROM tasks WHERE project = @project AND repo = @repo
+    UNION SELECT t.id FROM task_touches x JOIN tasks t ON t.id = x.task_id WHERE t.project = @project AND x.repo = @repo
+    ORDER BY id LIMIT 5
+  `);
 
   function readRefsFor(id: number): Ref[] {
     return (stmtRefsFrom.all(id) as RefRow[]).map(refRowToObj);
@@ -715,6 +876,8 @@ export function createStore(dbPath: string): Store {
     const task = rowToTask(row, refs);
     const prs = stmtPrsFor.all(id) as PullRequest[];
     if (prs.length) task.prs = prs;
+    const touches = readTouches(id);
+    if (touches.length) task.touches = touches;
     const notes = stmtNotesFor.all(id) as Note[];
     if (notes.length) task.notes = notes;
     if (row.parent_id !== null) {
@@ -792,6 +955,15 @@ export function createStore(dbPath: string): Store {
       arr.push(pr);
       prsByTask.set(task_id, arr);
     }
+    const touchesByTask = new Map<number, string[]>();
+    const touchRows = db.prepare(
+      `SELECT task_id, repo FROM task_touches WHERE task_id IN (${placeholders}) ORDER BY rowid`
+    ).all(...ids) as { task_id: number; repo: string }[];
+    for (const r of touchRows) {
+      const arr = touchesByTask.get(r.task_id) ?? [];
+      arr.push(r.repo);
+      touchesByTask.set(r.task_id, arr);
+    }
     const countRows = db.prepare(
       `SELECT task_id, COUNT(*) AS n FROM notes WHERE task_id IN (${placeholders}) GROUP BY task_id`
     ).all(...ids) as { task_id: number; n: number }[];
@@ -821,6 +993,8 @@ export function createStore(dbPath: string): Store {
       if (epicTitle !== undefined) task.epicTitle = epicTitle;
       const prs = prsByTask.get(row.id);
       if (prs) task.prs = prs;
+      const touches = touchesByTask.get(row.id);
+      if (touches) task.touches = touches;
       const n = noteCounts.get(row.id);
       if (n) task.noteCount = n;
       const notes = notesByTask.get(row.id);
@@ -835,6 +1009,43 @@ export function createStore(dbPath: string): Store {
     const createdAt = new Map((stmtPrCreatedAt.all(taskId) as { url: string; created_at: string }[]).map((r) => [r.url, r.created_at]));
     stmtDeletePrsFor.run(taskId);
     for (const pr of prs) stmtInsertPr.run(taskId, pr.url, pr.number, pr.status, createdAt.get(pr.url) ?? null);
+  }
+
+  function readTouches(taskId: number): string[] {
+    return (stmtTouchesFor.all(taskId) as { repo: string }[]).map((r) => r.repo);
+  }
+
+  // Callers wrap in a transaction; `touches` is already normalised.
+  function applyTouches(taskId: number, touches: string[]): void {
+    stmtDeleteTouchesFor.run(taskId);
+    for (const repo of touches) stmtInsertTouch.run(taskId, repo);
+  }
+
+  // Returns the stored repo and touches (deduped, repo dropped); throws on an id
+  // the project hasn't registered. `moving` only rewords the error.
+  function assertTaskRepos(project: string, repo: unknown, touches: unknown, moving = false): { repo: string | null; touches: string[] } {
+    if (repo !== null && repo !== undefined && typeof repo !== 'string') throw new Error('Validation failed: repo must be a string or null.');
+    if (touches !== null && touches !== undefined && (!Array.isArray(touches) || touches.some((t) => typeof t !== 'string'))) {
+      throw new Error('Validation failed: touches must be an array of repo ids.');
+    }
+    const r = (repo as string | null | undefined)?.trim() || null;
+    const list = [...new Set(((touches as string[] | null | undefined) ?? []).map((t) => t.trim()))].filter((t) => t !== r);
+    const hint = moving ? ' — pass repo/touches (or null) for the target project in the same update' : ' — register it with setRepo first';
+    for (const id of r === null ? list : [r, ...list]) {
+      if (!stmtSelectRepo.get(project, id)) throw new Error(`Validation failed: repo "${id}" is not registered in project ${project}${hint}.`);
+    }
+    return { repo: r, touches: list };
+  }
+
+  type RepoRow = { project: string; id: string; name: string; folder: string; role: string; commands: string; rules_file: string };
+  type ContractRow = { project: string; name: string; owner: string; source: string; consumers: string; rule: string };
+
+  function rowToRepo(r: RepoRow): RepoEntry {
+    return { id: r.id, name: r.name, folder: r.folder, role: r.role, commands: JSON.parse(r.commands) as RepoCommands, rulesFile: r.rules_file };
+  }
+
+  function rowToContract(r: ContractRow): Contract {
+    return { name: r.name, owner: r.owner, source: r.source, consumers: JSON.parse(r.consumers) as string[], rule: r.rule };
   }
 
   function getValidIds(): Set<number> {
@@ -908,7 +1119,7 @@ export function createStore(dbPath: string): Store {
 
   function add(input: AddInput): { id: number } {
     assertSchemaCurrent();
-    const { project, type, priority, title, description = '', scope, summary, plan, refs, prs, status = 'refinement', parentId, seq, externalId } = input;
+    const { project, type, priority, title, description = '', scope, summary, plan, refs, prs, status = 'refinement', parentId, seq, externalId, repo, touches } = input;
     const trimmedTitle = String(title ?? '').trim();
     if (!trimmedTitle) throw new Error('Validation failed: title must not be empty or whitespace-only.');
     const validPrs = prs?.length ? validatePrs(prs) : [];
@@ -917,6 +1128,8 @@ export function createStore(dbPath: string): Store {
     return db.transaction(() => {
       const canonical = canonicalProject(project);
       const parent = assertParent(type, parentId ?? null, canonical);
+      // Unlike scope, repo/touches are never taken from the epic: its children span repos.
+      const repos = assertTaskRepos(canonical, repo, touches);
       const info = stmtInsertTask.run(
         trimmedTitle,
         type,
@@ -929,9 +1142,11 @@ export function createStore(dbPath: string): Store {
         plan?.trim() || null,
         parentId ?? null,
         seq ?? null,
-        externalId?.trim() || null
+        externalId?.trim() || null,
+        repos.repo
       );
       const newId = Number(info.lastInsertRowid);
+      if (repos.touches.length) applyTouches(newId, repos.touches);
       if (parentId != null) syncEpicStatus(parentId, status);
 
       if (refs?.length) {
@@ -971,6 +1186,7 @@ export function createStore(dbPath: string): Store {
         externalId: patch.externalId === null
           ? null
           : patch.externalId !== undefined ? (patch.externalId.trim() || null) : existing.external_id,
+        repo: existing.repo,
       };
 
       if (patch.seq !== undefined && patch.seq !== null) assertSeq(patch.seq, next.parentId);
@@ -981,12 +1197,26 @@ export function createStore(dbPath: string): Store {
       if (linkChanged) parent = assertParent(next.type, next.parentId, next.project, { id, type: existing.type, project: existing.project });
       else if (next.parentId !== null) parent = stmtSelectTask.get(next.parentId) as TaskRow | undefined;
       if (parent) next.scope = parent.scope;
+
+      const oldTouches = readTouches(id);
+      let nextTouches = oldTouches;
+      if (patch.repo !== undefined || patch.touches !== undefined || next.project !== existing.project) {
+        const repos = assertTaskRepos(
+          next.project,
+          patch.repo !== undefined ? patch.repo : existing.repo,
+          patch.touches !== undefined ? patch.touches : oldTouches,
+          next.project !== existing.project,
+        );
+        next.repo = repos.repo;
+        nextTouches = repos.touches;
+      }
       const current = {
         title: existing.title, type: existing.type, priority: existing.priority, project: existing.project, scope: existing.scope,
         summary: existing.summary, description: existing.description, plan: existing.plan, parentId: existing.parent_id, seq: existing.seq, externalId: existing.external_id,
+        repo: existing.repo,
       };
       const columnsChanged = (Object.keys(next) as (keyof typeof next)[]).some((k) => next[k] !== current[k]);
-      if (columnsChanged) stmtUpdateTask.run(next.title, next.type, next.priority, next.project, next.scope, next.summary, next.description, next.plan, next.parentId, next.seq, next.externalId, id);
+      if (columnsChanged) stmtUpdateTask.run(next.title, next.type, next.priority, next.project, next.scope, next.summary, next.description, next.plan, next.parentId, next.seq, next.externalId, next.repo, id);
       if (next.parentId !== existing.parent_id) {
         if (existing.parent_id !== null) syncEpicStatus(existing.parent_id, null);
         if (next.parentId !== null) syncEpicStatus(next.parentId, existing.status);
@@ -994,11 +1224,15 @@ export function createStore(dbPath: string): Store {
       if (next.type === 'epic' && next.scope !== existing.scope) stmtRescopeChildren.run({ scope: next.scope, id });
 
       let linksChanged = false;
+      if (nextTouches.join('\0') !== oldTouches.join('\0')) {
+        applyTouches(id, nextTouches);
+        linksChanged = true;
+      }
       if (patch.refs !== undefined) {
         const oldRefs = readRefsFor(id);
         const nextRefs: Ref[] = patch.refs === null || patch.refs.length === 0 ? [] : patch.refs;
         applyRefsImpl(id, next.project, oldRefs, nextRefs);
-        linksChanged = refsKey(oldRefs) !== refsKey(readRefsFor(id));
+        linksChanged ||= refsKey(oldRefs) !== refsKey(readRefsFor(id));
       }
       if (nextPrs !== undefined) {
         const oldPrs = JSON.stringify(stmtPrsFor.all(id));
@@ -1131,22 +1365,15 @@ export function createStore(dbPath: string): Store {
     })();
   }
 
-  function getNext(project: string, type?: TaskType): Task | null {
-    let rows: TaskRow[];
-    if (type) {
-      rows = db.prepare(`
-        SELECT * FROM tasks
-        WHERE project = ? AND status IN ('todo', 'in_progress', 'refinement', 'plan')
-        AND type = ? AND type != 'epic'
-      `).all(project, type) as TaskRow[];
-    } else {
-      rows = db.prepare(`
-        SELECT * FROM tasks
-        WHERE project = ? AND status IN ('todo', 'in_progress', 'refinement', 'plan')
-        AND type != 'epic'
-      `).all(project) as TaskRow[];
-    }
-    const tasks = attachRefs(rows);
+  // Unassigned tasks match any repo, so a repo-bound session never loses them.
+  const REPO_CLAUSE = ' AND (repo = ? OR repo IS NULL OR id IN (SELECT task_id FROM task_touches WHERE repo = ?))';
+
+  function getNext(project: string, { type, repo }: NextFilter = {}): Task | null {
+    let sql = `SELECT * FROM tasks WHERE project = ? AND status IN ('todo', 'in_progress', 'refinement', 'plan') AND type != 'epic'`;
+    const params: string[] = [project];
+    if (type) { sql += ' AND type = ?'; params.push(type); }
+    if (repo !== undefined) { sql += REPO_CLAUSE; params.push(repo, repo); }
+    const tasks = attachRefs(db.prepare(sql).all(...params) as TaskRow[]);
     const sorted = sortForNext(tasks);
     return sorted[0] ?? null;
   }
@@ -1206,16 +1433,153 @@ export function createStore(dbPath: string): Store {
       }
     }
     if (task.type === 'epic') task.children = childrenOf(id);
+    if (task.repo !== undefined || task.touches !== undefined) task.repoContext = repoContextFor(task);
     return task;
   }
 
-  function getAll(project: string, { status, type, scope }: ListFilter = {}): Task[] {
+  function repoContextFor(task: Task): RepoContext {
+    const lookup = (id: string) => {
+      const row = stmtSelectRepo.get(task.project, id) as RepoRow | undefined;
+      return row ? rowToRepo(row) : undefined;
+    };
+    const own = new Set([...(task.repo !== undefined ? [task.repo] : []), ...(task.touches ?? [])]);
+    const contracts = (stmtContractsOf.all(task.project) as ContractRow[]).map(rowToContract).flatMap((c): RepoContext['contracts'] => {
+      if (own.has(c.owner)) return [{ ...c, role: 'owner' }];
+      return c.consumers.some((id) => own.has(id)) ? [{ ...c, role: 'consumer' }] : [];
+    });
+    return {
+      repo: task.repo !== undefined ? lookup(task.repo) ?? null : null,
+      touches: (task.touches ?? []).flatMap((id) => lookup(id) ?? []),
+      contracts,
+    };
+  }
+
+  function getRepos(project: string): RepoRegistry {
+    const canonical = canonicalProject(project);
+    return {
+      repos: (stmtReposOf.all(canonical) as RepoRow[]).map(rowToRepo),
+      contracts: (stmtContractsOf.all(canonical) as ContractRow[]).map(rowToContract),
+    };
+  }
+
+  function setRepo(project: string, entry: RepoInput): RepoEntry {
+    assertSchemaCurrent();
+    return db.transaction(() => {
+      const canonical = canonicalProject(project);
+      const id = validRepoId(entry?.id);
+      const prev = stmtSelectRepo.get(canonical, id) as RepoRow | undefined;
+      const old = prev ? rowToRepo(prev) : undefined;
+      if (!old && entry.folder === undefined) throw new Error(`Validation failed: folder is required for new repo "${id}".`);
+      const folder = entry.folder !== undefined ? validFolder(entry.folder) : old!.folder;
+      const clash = stmtRepoByFolder.get(canonical, folder) as RepoRow | undefined;
+      if (clash && clash.id !== id) throw new Error(`Validation failed: folder "${folder}" is already registered as repo "${clash.id}".`);
+      const next: RepoEntry = {
+        id,
+        name: entry.name !== undefined ? validRepoText(entry.name, 'name') || id : old?.name ?? id,
+        folder,
+        role: entry.role !== undefined ? validRepoText(entry.role, 'role') : old?.role ?? '',
+        commands: entry.commands !== undefined ? mergeCommands(old?.commands ?? {}, entry.commands) : old?.commands ?? {},
+        rulesFile: entry.rulesFile !== undefined ? validRulesFile(entry.rulesFile) : old?.rulesFile ?? 'CLAUDE.md',
+      };
+      if (!old || JSON.stringify(old) !== JSON.stringify(next)) {
+        stmtUpsertRepo.run({ project: canonical, ...next, commands: JSON.stringify(next.commands) });
+      }
+      return next;
+    })();
+  }
+
+  // Refuses while anything points at the repo, so no task or contract is left with a dangling id.
+  function deleteRepo(project: string, id: string): boolean {
+    assertSchemaCurrent();
+    return db.transaction(() => {
+      const canonical = canonicalProject(project);
+      if (!stmtSelectRepo.get(canonical, id)) return false;
+      const tasks = (stmtRepoTaskUse.all({ project: canonical, repo: id }) as { id: number }[]).map((r) => `#${r.id}`);
+      if (tasks.length) throw new Error(`Validation failed: repo "${id}" is still used by tasks ${tasks.join(', ')} — reassign them first.`);
+      const contracts = (stmtContractsOf.all(canonical) as ContractRow[]).map(rowToContract)
+        .filter((c) => c.owner === id || c.consumers.includes(id)).map((c) => `"${c.name}"`);
+      if (contracts.length) throw new Error(`Validation failed: repo "${id}" is still in contracts ${contracts.join(', ')} — change or delete them first.`);
+      stmtDeleteRepo.run(canonical, id);
+      return true;
+    })();
+  }
+
+  function setContract(project: string, input: ContractInput): Contract {
+    assertSchemaCurrent();
+    return db.transaction(() => {
+      const canonical = canonicalProject(project);
+      const name = validRepoText(input?.name ?? '', 'contract name');
+      if (!name) throw new Error('Validation failed: contract name must not be empty.');
+      const prev = stmtSelectContract.get(canonical, name) as ContractRow | undefined;
+      const old = prev ? rowToContract(prev) : undefined;
+      if (!old && input.owner === undefined) throw new Error(`Validation failed: owner is required for new contract "${name}".`);
+      const owner = input.owner !== undefined ? validRepoId(input.owner) : old!.owner;
+      if (input.consumers !== undefined && (!Array.isArray(input.consumers) || input.consumers.some((c) => typeof c !== 'string'))) {
+        throw new Error('Validation failed: consumers must be an array of repo ids.');
+      }
+      const consumers = input.consumers !== undefined ? [...new Set(input.consumers.map((c) => c.trim()))] : old?.consumers ?? [];
+      if (consumers.includes(owner)) throw new Error(`Validation failed: owner "${owner}" cannot also be a consumer.`);
+      for (const id of [owner, ...consumers]) {
+        if (!stmtSelectRepo.get(canonical, id)) throw new Error(`Validation failed: repo "${id}" is not registered in project ${canonical} — register it with setRepo first.`);
+      }
+      const next: Contract = {
+        // Keeps the stored spelling: the key is case-insensitive.
+        name: old?.name ?? name,
+        owner,
+        source: input.source !== undefined ? validRepoText(input.source, 'source') : old?.source ?? '',
+        consumers,
+        rule: input.rule !== undefined ? validRepoText(input.rule, 'rule') : old?.rule ?? '',
+      };
+      if (!old || JSON.stringify(old) !== JSON.stringify(next)) {
+        stmtUpsertContract.run({ project: canonical, ...next, consumers: JSON.stringify(next.consumers) });
+      }
+      return next;
+    })();
+  }
+
+  function deleteContract(project: string, name: string): boolean {
+    assertSchemaCurrent();
+    return stmtDeleteContract.run(canonicalProject(project), String(name ?? '').trim()).changes > 0;
+  }
+
+  function resolveRepoByFolder(project: string, folder: string): RepoEntry | null {
+    const row = stmtRepoByFolder.get(project, String(folder ?? '').trim()) as RepoRow | undefined;
+    return row ? rowToRepo(row) : null;
+  }
+
+  // Drafts only: nothing is filed. Consumers the task already covers (repo or touches) are skipped.
+  function suggestFollowUps(taskId: number, contractName: string): FollowUpDraft[] {
+    const task = readTask(taskId);
+    if (!task) throw new Error(`Validation failed: task #${taskId} does not exist.`);
+    const row = stmtSelectContract.get(task.project, String(contractName ?? '').trim()) as ContractRow | undefined;
+    if (!row) throw new Error(`Validation failed: contract "${contractName}" is not registered in project ${task.project}.`);
+    const contract = rowToContract(row);
+    const own = new Set([...(task.repo !== undefined ? [task.repo] : []), ...(task.touches ?? [])]);
+    if (!own.has(contract.owner)) {
+      throw new Error(`Validation failed: contract "${contract.name}" is owned by repo "${contract.owner}"; set repo or touches to it to flag a change.`);
+    }
+    return contract.consumers.filter((c) => !own.has(c)).map((repo) => {
+      const draft: FollowUpDraft = {
+        title: `${repo}: ${task.title}`,
+        type: task.type,
+        priority: task.priority,
+        repo,
+        refs: [{ id: task.id, relation: 'depends on' }],
+      };
+      if (task.parentId !== undefined) draft.parentId = task.parentId;
+      if (task.scope !== undefined) draft.scope = task.scope;
+      return draft;
+    });
+  }
+
+  function getAll(project: string, { status, type, scope, repo }: ListFilter = {}): Task[] {
     const resolved = resolveStatusFilter(status);
     const statuses = Array.isArray(resolved) ? resolved : [resolved];
     let sql = `SELECT * FROM tasks WHERE project = ? AND status IN (${statuses.map(() => '?').join(', ')})`;
     const params: string[] = [project, ...statuses];
     if (type !== undefined) { sql += ' AND type = ?'; params.push(type); }
     if (scope !== undefined) { sql += ' AND scope = ?'; params.push(scope); }
+    if (repo !== undefined) { sql += REPO_CLAUSE; params.push(repo, repo); }
     return sortByPriority(attachRefs(db.prepare(sql).all(...params) as TaskRow[]));
   }
 
@@ -1230,6 +1594,7 @@ export function createStore(dbPath: string): Store {
     let sql = 'SELECT * FROM tasks WHERE project = ? AND updated_at >= ?';
     const params: (string | number)[] = [project, since];
     if (filter.scope !== undefined) { sql += ' AND scope = ?'; params.push(filter.scope); }
+    if (filter.repo !== undefined) { sql += REPO_CLAUSE; params.push(filter.repo, filter.repo); }
     if ((filter.ids?.length ?? 0) > 0 || filter.epicId !== undefined) {
       const clauses: string[] = [];
       if (filter.ids?.length) {
@@ -1513,6 +1878,13 @@ export function createStore(dbPath: string): Store {
     getById,
     getAll,
     getUpdates,
+    getRepos,
+    setRepo,
+    deleteRepo,
+    setContract,
+    deleteContract,
+    resolveRepoByFolder,
+    suggestFollowUps,
     getProjects,
     createProject,
     updateProject,

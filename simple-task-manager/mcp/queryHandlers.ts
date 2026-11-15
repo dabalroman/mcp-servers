@@ -20,17 +20,21 @@ export async function handleGetOverview(store: Store, { status, project }: { sta
   return text({ overview: store.getOverview(p, status) });
 }
 
-export async function handleGetNext(store: Store, { type, project }: { type?: TaskType; project?: string }, ctx: SessionContext): Promise<MCPContent> {
+export async function handleGetNext(store: Store, { type, repo, project }: { type?: TaskType; repo?: string; project?: string }, ctx: SessionContext): Promise<MCPContent> {
   const p = resolveProject(store, ctx, project);
   if (typeof p !== 'string') return p;
-  const task = store.getNext(p, type);
+  const task = store.getNext(p, { type, repo });
   return text({ task: task ? toListTask(task) : null });
 }
 
-export async function handleGetAll(store: Store, { status, type, scope, project }: { status?: StatusFilter; type?: TaskType; scope?: string; project?: string }, ctx: SessionContext): Promise<MCPContent> {
+export async function handleGetAll(
+  store: Store,
+  { status, type, scope, repo, project }: { status?: StatusFilter; type?: TaskType; scope?: string; repo?: string; project?: string },
+  ctx: SessionContext,
+): Promise<MCPContent> {
   const p = resolveProject(store, ctx, project);
   if (typeof p !== 'string') return p;
-  const tasks = store.getAll(p, { status, type, scope });
+  const tasks = store.getAll(p, { status, type, scope, repo });
   const grouped: Partial<Record<TaskType, (Task | Omit<Task, 'description'>)[]>> = {};
   for (const t of ALL_TYPES) {
     const ofType = tasks.filter((task) => task.type === t).map(toListTask);
@@ -73,14 +77,14 @@ export async function handleGetRelated(store: Store, { id, status }: { id: numbe
 
 export async function handleGetUpdates(
   store: Store,
-  { since, ids, epicId, scope, project }: { since: string | number; ids?: number[]; epicId?: number; scope?: string; project?: string },
+  { since, ids, epicId, scope, repo, project }: { since: string | number; ids?: number[]; epicId?: number; scope?: string; repo?: string; project?: string },
   ctx: SessionContext
 ): Promise<MCPContent> {
   const p = resolveProject(store, ctx, project);
   if (typeof p !== 'string') return p;
   try {
     const normalizedSince = parseSince(since);
-    const result = store.getUpdates(p, { since, ids, epicId, scope });
+    const result = store.getUpdates(p, { since, ids, epicId, scope, repo });
     const tasks = result.tasks.map((task) => {
       const recentNotes = (task.notes ?? []).filter((n) => n.created_at >= normalizedSince || n.updated_at >= normalizedSince);
       return { ...toListTask(task), ...(recentNotes.length ? { notes: recentNotes } : {}) };
@@ -95,6 +99,19 @@ export async function handleGetScopes(store: Store, { project }: { project?: str
   const p = resolveProject(store, ctx, project);
   if (typeof p !== 'string') return p;
   return text({ project: p, scopes: store.getScopes(p) });
+}
+
+export async function handleGetRepos(store: Store, { project }: { project?: string }, ctx: SessionContext): Promise<MCPContent> {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
+  return text({ project: p, ...store.getRepos(p) });
+}
+
+// Fails quiet: an unregistered folder is repo null, never an error.
+export async function handleWhoami(store: Store, { cwdBasename, project }: { cwdBasename: string; project?: string }, ctx: SessionContext): Promise<MCPContent> {
+  const p = resolveProject(store, ctx, project);
+  if (typeof p !== 'string') return p;
+  return text({ project: p, repo: store.resolveRepoByFolder(p, cwdBasename)?.id ?? null });
 }
 
 export async function handleGetProjects(store: Store, ctx: SessionContext): Promise<MCPContent> {

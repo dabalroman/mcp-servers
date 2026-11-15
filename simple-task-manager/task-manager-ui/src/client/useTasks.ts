@@ -18,6 +18,8 @@ export type NewTaskInput = {
   summary?: string;
   plan?: string;
   scope?: string;
+  repo?: string;
+  touches?: string[];
   parentId?: number;
   externalId?: string;
   refs?: TaskRef[];
@@ -34,6 +36,8 @@ export type TaskPatch = Partial<{
   summary: string | null;
   plan: string | null;
   scope: string | null;
+  repo: string | null;
+  touches: string[] | null;
   parentId: number | null;
   externalId: string | null;
   refs: TaskRef[] | null;

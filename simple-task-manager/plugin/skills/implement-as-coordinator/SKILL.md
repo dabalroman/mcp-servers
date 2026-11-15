@@ -41,6 +41,7 @@ Tasks named later ("add 46 to your queue") join the live queue: re-plan, don't r
 
 ## Step 1 — Build the queue
 
+0. **Repo binding.** `whoami({ cwdBasename })` with the main worktree's basename (parent of the absolute `git rev-parse --git-common-dir`). With a `repo` back, flag in the queue message every task whose `repo` differs, with its `../<folder>` from `repoContext`; never dispatch one into the wrong checkout. `repo: null` → no flags.
 1. `getById` every task; read **description, summary, plan AND notes** (refinement often lives in `plan` or `notes`; notes are as authoritative as the description, newest statement wins).
 2. **Status gate.**
    - `todo` → queue it. `plan` → skip (plan awaits the user's approval), list in the final report.
@@ -67,6 +68,7 @@ The brief must contain:
 - "Invoke the `tm:implement` skill for task **NN**, and carry on through to completion without stopping."
 - "Work directly in the checkout; do NOT create or enter a git worktree."
 - "The task's `plan` / locked Changes are the plan; follow them."
+- With `repoContext`: the repo folder, its registry commands as the checks to run, and each contract it owns or consumes.
 - Each Step 1.4 correction as "the plan predates commit X; do Y instead of Z".
 - **Lane boundaries** when another agent runs in parallel: its files, forbidden; shared files (e.g. an entry point) only as minimal Edit-tool changes, never rewrites.
 - Hazard guards as stop conditions ("before removing X, confirm from code that Y still exists on every target; if not, stop and report"), naming the project's unrecoverable failure (CLAUDE.md) if the task is anywhere near it.

@@ -36,12 +36,12 @@ export function withSchemaCheck<A extends unknown[]>(
 // adds noise without value. Agents that need the body call getById.
 // plan is always stripped from list responses regardless of summary — plans can be
 // long markdown documents and are only needed during /tm:implement (use getById).
-// notes, epic and children are stripped too (lists carry noteCount and
-// parentId/epicTitle); the store never attaches them to list reads, this is a
-// guard against leaking bodies.
-type ListOmit = 'plan' | 'notes' | 'epic' | 'children';
+// notes, epic, children and repoContext are stripped too (lists carry noteCount,
+// parentId/epicTitle and repo/touches ids); the store never attaches them to
+// list reads, this is a guard against leaking bodies.
+type ListOmit = 'plan' | 'notes' | 'epic' | 'children' | 'repoContext';
 export function toListTask<T extends Task>(task: T): Omit<T, ListOmit> | Omit<T, ListOmit | 'description'> {
-  const { plan: _plan, notes: _notes, epic: _epic, children: _children, ...withoutPlan } = task;
+  const { plan: _plan, notes: _notes, epic: _epic, children: _children, repoContext: _repoContext, ...withoutPlan } = task;
   if (!withoutPlan.summary) return withoutPlan as Omit<T, ListOmit>;
   const { description: _desc, ...rest } = withoutPlan;
   return rest as Omit<T, ListOmit | 'description'>;

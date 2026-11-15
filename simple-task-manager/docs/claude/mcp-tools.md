@@ -16,12 +16,13 @@ Read before adding or changing a tool, a handler, or a list output.
 - `handleReplace` counts overlapping matches by stepping 1 char and splices with `slice`, not `String.replace`, so `$&` in `replace_with` stays literal. A replace that empties the plan clears it to `null` because `store.update` trims.
 - Unknown note ids return `Note #N not found.` without listing ids.
 - `handleSetStatus` emits `knowledgeReminder` on `done`.
+- Repo registry (#569): `getRepos`, `whoami`, `setRepo`, `deleteRepo`, `setContract`, `deleteContract` are project-aware (`resolveProject`) and available over HTTP. `whoami` fails quiet: an unmatched `cwdBasename` is `repo: null`, never an error. `add`/`update` take a non-persisted `contract`; `suggestedFollowUps` appears only when the list is non-empty (like `epicStatus`), and the drafts are never filed by the server.
 
 ## Summary field
 
 The token saving lives entirely in the MCP layer, not in `tasks.ts` (which always returns complete tasks):
 
-- `toListTask` (`mcp/shared.ts`) **always drops `plan` and `notes`** (lists carry `noteCount`) and drops `description` when `summary` is present. Every list result goes through it, including `getRelated`'s anchor; only `getById` returns all fields. **A new list tool must `.map(toListTask)` its results.**
+- `toListTask` (`mcp/shared.ts`) **always drops `plan`, `notes` and `repoContext`** (lists carry `noteCount`) and drops `description` when `summary` is present. Every list result goes through it, including `getRelated`'s anchor; only `getById` returns all fields. **A new list tool must `.map(toListTask)` its results.**
 - `handleSetStatus` blocks `refinement → todo` when the task has no summary; `handleUpdate` on a summary-less refinement task returns a `summaryReminder`. The refine skill writes the summary (its step 3b) before promoting.
 
 ## Update check

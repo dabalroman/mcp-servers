@@ -17,6 +17,10 @@ Work through `todo` tasks one at a time: simple ones inline, complex ones via a 
 
 ## Workflow (repeat until queue is empty or user stops)
 
+### Step 0 — Which repo (once per run)
+
+Take the main worktree's basename: the parent directory of the absolute `git rev-parse --git-common-dir` (a linked worktree resolves to its main repo). Call `mcp__task-manager__whoami({ cwdBasename })`. A `repo` back → pass it as `repo` to `getNext` in step 1. `repo: null` (single-repo project, unregistered folder) → no filter and no mismatch warning in step 2.
+
 ### Step 1 — Get next task
 
 - `#NN`: fetch it. An `epic` → invoke the `tm:implement-as-coordinator` skill with `#NN` and stop; that skill runs the epic's children. Status not `todo` → report the actual status and stop.
@@ -25,7 +29,7 @@ Work through `todo` tasks one at a time: simple ones inline, complex ones via a 
 
 ### Step 2 — Show summary, then go
 
-Show the task (id, title, type, summary) and go to step 3. Don't ask whether to start or about per-phase commits: a task is one commit unless the user asks for per-phase commits.
+Show the task (id, title, type, summary) and go to step 3. If step 0 returned a repo and the task's `repo` differs, warn: "#NN belongs to `<task repo>` — run it in `../<repoContext.repo.folder>`" (from `getById`), then carry on with that folder as the working repo (don't wait for the user); a task without `repo` gets no warning. Don't ask whether to start or about per-phase commits: a task is one commit unless the user asks for per-phase commits.
 
 ### Step 3 — Set in_progress
 
@@ -47,9 +51,9 @@ Show the task (id, title, type, summary) and go to step 3. Don't ask whether to 
 
 **Classify the task.** **Simple** if ALL hold: ≤ 3 files; the fix is concrete (specific lines, specific change); no new architectural decisions; diff < ~50 lines. Otherwise **complex**.
 
-**Simple → inline:** read the files, make the changes, add/update tests, run the project's verify command (from its CLAUDE.md, e.g. `npm run verify`; "verify" below means this).
+**Simple → inline:** read the files, make the changes, add/update tests, run the project's verify command (from its CLAUDE.md, e.g. `npm run verify`; "verify" below means this). When `getById` carries `repoContext.repo.commands`, those are the build/test/lint commands: use them instead. One that fails as a command (not found, wrong path), not because of your change: read the repo's `rulesFile`, then fix the entry with `setRepo` in the same session.
 
-**Complex → focused subagent:** pick the most specific type in the project's `CLAUDE.md` agent table. Pass: task id, title, full description, relevant file paths and line numbers, fix approach, the step-4 task IDs, and the instructions: read files → implement → mark each step completed as you go → add/update tests → run verify → report the diff summary and verify result.
+**Complex → focused subagent:** pick the most specific type in the project's `CLAUDE.md` agent table. Pass: task id, title, full description, relevant file paths and line numbers, fix approach, the step-4 task IDs, the repo folder and commands from `repoContext` (when set), and the instructions: read files → implement → mark each step completed as you go → add/update tests → run verify → report the diff summary and verify result.
 
 **Web UI work** (HTML, CSS/SCSS, components, client-side JS/TS), inline or delegated: when the `modern-web-guidance` skill is installed, invoke it (search → retrieve) once before the first such edit and follow the guide; a subagent's brief must say so explicitly and its report must name the guide ids it applied. Skip it for trivial edits (copy, renames, pure logic).
 

@@ -9,6 +9,7 @@ import { StatusPicker } from './StatusPicker';
 import { cn } from '@/lib/utils';
 import { TaskPicker } from './TaskPicker';
 import { filterByProject } from '@/lib/taskView';
+import { useRepos } from './useRepos';
 import type { Task, TaskRef, TaskType, TaskPriority, TaskStatus } from '@/types/task';
 
 type InitialStatus = 'refinement' | 'plan' | 'todo';
@@ -21,13 +22,15 @@ type FormState = {
   description: string;
   summary: string;
   scope: string;
+  repo: string;
+  touches: string[];
   externalId: string;
   parentId: number | null;
   refs: TaskRef[];
   status: InitialStatus | undefined;
 };
 
-const EMPTY: Omit<FormState, 'project'> = { title: '', type: 'feature', priority: 'medium', description: '', summary: '', scope: '', externalId: '', parentId: null, refs: [], status: 'refinement' };
+const EMPTY: Omit<FormState, 'project'> = { title: '', type: 'feature', priority: 'medium', description: '', summary: '', scope: '', repo: '', touches: [], externalId: '', parentId: null, refs: [], status: 'refinement' };
 
 const INITIAL_STATUSES: InitialStatus[] = ['refinement', 'plan', 'todo'];
 
@@ -69,6 +72,8 @@ function deriveForm(initial: Task | null, project: string, prefill?: TaskPrefill
     description: initial.description ?? '',
     summary: initial.summary ?? '',
     scope: initial.scope ?? '',
+    repo: initial.repo ?? '',
+    touches: initial.touches ?? [],
     externalId: initial.externalId ?? '',
     parentId: initial.parentId ?? null,
     refs: initial.refs ?? [],
@@ -84,6 +89,9 @@ function formsEqual(a: FormState, b: FormState): boolean {
     a.description === b.description &&
     a.summary === b.summary &&
     a.scope === b.scope &&
+    a.repo === b.repo &&
+    a.touches.length === b.touches.length &&
+    a.touches.every((t, i) => t === b.touches[i]) &&
     a.externalId === b.externalId &&
     a.parentId === b.parentId &&
     a.status === b.status &&
@@ -101,6 +109,7 @@ export function TaskForm({ open, onOpenChange, initial, prefill, allTasks, proje
   const scopeCloseTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scopeInputRef = useRef<HTMLInputElement | null>(null);
   const titleRef = useRef<HTMLInputElement | null>(null);
+  const { repos } = useRepos(form.project);
 
   // Move focus to the title input after Radix finishes its own focus
   // management on open. Without the rAF the dialog's focus-trap can
@@ -211,7 +220,7 @@ export function TaskForm({ open, onOpenChange, initial, prefill, allTasks, proje
     onOpenChange(requestedOpen);
   }
 
-  const set = <K extends keyof Omit<FormState, 'refs' | 'parentId'>>(k: K) =>
+  const set = <K extends keyof Omit<FormState, 'refs' | 'parentId' | 'touches'>>(k: K) =>
     (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) =>
       setForm((f) => ({ ...f, [k]: e.target.value as FormState[K] }));
 
@@ -231,8 +240,17 @@ export function TaskForm({ open, onOpenChange, initial, prefill, allTasks, proje
     setForm((f) => {
       const epic = f.parentId === null ? undefined : allTasks.find((t) => t.id === f.parentId);
       const keep = epic !== undefined && epic.project.toLowerCase() === next.toLowerCase();
-      return { ...f, project: next, parentId: keep ? f.parentId : null };
+      return { ...f, project: next, parentId: keep ? f.parentId : null, repo: '', touches: [] };
     });
+  }
+
+  function changeRepo(e: ChangeEvent<HTMLSelectElement>) {
+    const repo = e.target.value;
+    setForm((f) => ({ ...f, repo, touches: f.touches.filter((t) => t !== repo) }));
+  }
+
+  function toggleTouch(id: string, on: boolean) {
+    setForm((f) => ({ ...f, touches: on ? [...f.touches, id] : f.touches.filter((t) => t !== id) }));
   }
 
   function clearParent() {
@@ -408,6 +426,38 @@ export function TaskForm({ open, onOpenChange, initial, prefill, allTasks, proje
                 </div>
               </div>
             </div>
+
+            {repos.length > 0 && (
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(9rem,1fr)_3fr]">
+                <label className="flex flex-col gap-1">
+                  <span className="text-xs tracking-widest text-muted-foreground uppercase">Repo</span>
+                  <select
+                    value={form.repo}
+                    onChange={changeRepo}
+                    className="bg-background border border-border px-2 h-9 text-base text-foreground focus:outline-none focus:border-primary min-w-0"
+                  >
+                    <option value="">(none)</option>
+                    {repos.map((r) => <option key={r.id} value={r.id}>{r.id}</option>)}
+                  </select>
+                </label>
+                <fieldset className="flex flex-col gap-1 min-w-0">
+                  <legend className="text-xs tracking-widest text-muted-foreground uppercase mb-1">Also touches</legend>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 min-h-9 items-center">
+                    {repos.filter((r) => r.id !== form.repo).map((r) => (
+                      <label key={r.id} className="flex items-center gap-2 text-sm text-foreground">
+                        <input
+                          type="checkbox"
+                          checked={form.touches.includes(r.id)}
+                          onChange={(e) => toggleTouch(r.id, e.target.checked)}
+                          className="accent-primary"
+                        />
+                        {r.id}
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              </div>
+            )}
 
             {form.type !== 'epic' && (
               <div className="flex flex-col gap-1">

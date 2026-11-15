@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { sortTasks, sortBySeq, groupBySeq, reorderAfterDrop, dropLabel, groupTasks, getSectionValue, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, matchesTaskQuery, pickProject, projectFromPath, projectPath, defaultView, resolveView, resolveCardViews, nextView } from './taskView';
+import { sortTasks, sortBySeq, groupBySeq, reorderAfterDrop, dropLabel, groupTasks, getSectionValue, nestEpicChildren, countOwnTasks, epicProgress, filterByProject, filterByRepo, activeRepoChoice, UNASSIGNED_REPO, parseViewState, DEFAULT_VIEW, settingsPath, isSettingsPath, matchesTaskQuery, pickProject, projectFromPath, projectPath, defaultView, resolveView, resolveCardViews, nextView } from './taskView';
 import type { CardView, CardViewEntry, SortDir } from './taskView';
 import type { Task, TaskStatus } from '@/types/task';
 
@@ -560,5 +560,96 @@ describe('nextView', () => {
     for (const v of ['compact', 'collapsed', 'full'] as CardView[]) {
       expect(nextView(nextView(nextView(v)))).toBe(v);
     }
+  });
+});
+
+describe('filterByRepo', () => {
+  const tasks = [
+    makeTask({ id: 1, repo: 'fw' }),
+    makeTask({ id: 2, repo: 'app', touches: ['fw'] }),
+    makeTask({ id: 3, repo: 'app' }),
+    makeTask({ id: 4 }),
+  ];
+
+  it('keeps everything when no repo is chosen', () => {
+    expect(filterByRepo(tasks, undefined)).toBe(tasks);
+  });
+
+  it('matches repo, touches or no repo, like the server', () => {
+    expect(filterByRepo(tasks, 'fw').map((t) => t.id)).toEqual([1, 2, 4]);
+    expect(filterByRepo(tasks, 'app').map((t) => t.id)).toEqual([2, 3, 4]);
+  });
+
+  it('Unassigned shows only tasks with no repo', () => {
+    expect(filterByRepo(tasks, UNASSIGNED_REPO).map((t) => t.id)).toEqual([4]);
+  });
+
+  describe('epics', () => {
+    const epic = (repo?: string) => makeTask({ id: 10, type: 'epic', repo });
+    const child = (id: number, repo?: string) => makeTask({ id, parentId: 10, repo });
+
+    it('keeps an epic with a non-matching repo while a child matches', () => {
+      const list = [epic('app'), child(11, 'fw'), child(12, 'app')];
+      expect(filterByRepo(list, 'fw').map((t) => t.id)).toEqual([10, 11]);
+    });
+
+    it('drops the epic when neither it nor any child matches', () => {
+      const list = [epic('app'), child(11, 'app')];
+      expect(filterByRepo(list, 'fw')).toEqual([]);
+    });
+
+    it('keeps an epic with a repo for Unassigned when a child has none', () => {
+      const list = [epic('app'), child(11), child(12, 'app')];
+      expect(filterByRepo(list, UNASSIGNED_REPO).map((t) => t.id)).toEqual([10, 11]);
+    });
+  });
+});
+
+describe('activeRepoChoice', () => {
+  it('drops a stored repo that is no longer registered', () => {
+    expect(activeRepoChoice('fw', ['fw', 'app'])).toBe('fw');
+    expect(activeRepoChoice('gone', ['fw'])).toBeUndefined();
+    expect(activeRepoChoice(undefined, ['fw'])).toBeUndefined();
+    expect(activeRepoChoice(UNASSIGNED_REPO, ['fw'])).toBe(UNASSIGNED_REPO);
+    // No repos (or the registry not loaded yet): the picker is hidden, so nothing may filter.
+    expect(activeRepoChoice(UNASSIGNED_REPO, [])).toBeUndefined();
+  });
+});
+
+describe('settingsPath / isSettingsPath', () => {
+  it('lives one segment below the project', () => {
+    expect(settingsPath('a-project')).toBe('/a-project/settings');
+    expect(isSettingsPath('/a-project/settings')).toBe(true);
+    expect(isSettingsPath('/a-project/settings/')).toBe(true);
+    expect(isSettingsPath('/a-project')).toBe(false);
+    expect(isSettingsPath('/settings')).toBe(false);
+    expect(isSettingsPath('/')).toBe(false);
+  });
+
+  it('round-trips the project through projectFromPath', () => {
+    for (const name of ['my project', 'a/b', 'settings']) {
+      expect(projectFromPath(settingsPath(name))).toBe(name);
+      expect(isSettingsPath(settingsPath(name))).toBe(true);
+    }
+  });
+});
+
+describe('parseViewState', () => {
+  it('falls back to the default for nothing or garbage', () => {
+    expect(parseViewState(null)).toEqual(DEFAULT_VIEW);
+    expect(parseViewState('not json')).toEqual(DEFAULT_VIEW);
+    expect(parseViewState('null')).toEqual(DEFAULT_VIEW);
+  });
+
+  it('loads an old state without repos', () => {
+    const v = parseViewState(JSON.stringify({ groupBy: 'type', groupDir: 'desc', sortBy: 'status', sortDir: 'asc' }));
+    expect(v).toEqual({ groupBy: 'type', groupDir: 'desc', sortBy: 'status', sortDir: 'asc', repos: {} });
+  });
+
+  it('keeps per-project repo choices and ignores invalid fields', () => {
+    const v = parseViewState(JSON.stringify({ groupBy: 'bogus', sortBy: 7, repos: { 'a-project': 'fw', b: 3 } }));
+    expect(v.groupBy).toBe(DEFAULT_VIEW.groupBy);
+    expect(v.sortBy).toBe(DEFAULT_VIEW.sortBy);
+    expect(v.repos).toEqual({ 'a-project': 'fw' });
   });
 });

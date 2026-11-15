@@ -13,6 +13,8 @@ import {
   handleGetRelated,
   handleGetScopes,
   handleGetProjects,
+  handleGetRepos,
+  handleWhoami,
   handleHealth,
 } from './queryHandlers.js';
 import {
@@ -27,6 +29,10 @@ import {
   handleCreateProject,
   handleUpdateProject,
   handleReorder,
+  handleSetRepo,
+  handleDeleteRepo,
+  handleSetContract,
+  handleDeleteContract,
   handleUiStart,
   handleUiStop,
 } from './mutationHandlers.js';
@@ -34,6 +40,15 @@ import {
 const PARENT_ID_RULE = 'Optional id of the epic this task belongs to. Must point to a task of type "epic"; an epic itself cannot have a parent (no nesting) and a task belongs to at most one epic. Violations return an error.';
 
 const SEQ_RULE = "Execution step among the epic's children: 10, 20, 30 (gaps leave room to insert 15); siblings with an equal seq are a parallel group. Needs parentId. To order a whole epic use reorder.";
+
+const REPO_RULE = "Id of the registered repo (see getRepos) this task's change lives in. Never inherited from the epic: set it per child.";
+
+const TOUCHES_RULE = 'Other registered repo ids the change also edits; deduped, and the task\'s own repo is dropped from it.';
+
+const CONTRACT_RULE = 'Name of a contract (see getRepos) this change alters; its owner must be the task\'s repo or in touches. Not stored: the response carries suggestedFollowUps, one draft per consumer repo for you to file with add. Nothing is filed automatically.';
+
+const repoFilterParam = z.string().min(1).optional()
+  .describe('Only tasks of this repo id (optional): matches repo, touches, or no repo at all, so unassigned tasks stay listed.');
 
 const statusParam = z.enum(['refinement', 'plan', 'todo', 'in_progress', 'done', 'open']).optional()
   .describe('Filter by status. Default: non-done. Pass "open" for refinement+plan+todo+in_progress, or a specific status (incl. "done") for exact match.');
@@ -67,11 +82,14 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
       .describe('External tracker ticket ID (JIRA/Asana/…, e.g. "OPXPIQ-6532"). Set it whenever the user names a ticket ID for this task. Find tasks by it later with getByExternalId.'),
     prs: prsSchema
       .describe('Pull/merge requests of this task: { url, number, status: draft|open|pipeline_pass|approved|merged|deployed|closed }, url http(s) and unique per task. Works in every project, whether or not it tracks PRs.'),
+    repo: z.string().min(1).optional().describe(REPO_RULE),
+    touches: z.array(z.string().min(1)).optional().describe(TOUCHES_RULE),
+    contract: z.string().min(1).optional().describe(CONTRACT_RULE),
     project: projectParam,
   };
   server.tool(
     'add',
-    'Schedule a new task — call this whenever the user reports a bug, requests a feature, shares an idea, or says "schedule" / "TODO" / "add to the list". Do NOT implement the task inline; add it and stop. Status defaults to "refinement" — see status. Returns { id }. Refs pointing to nonexistent IDs or self-references are silently dropped.',
+    'Schedule a new task — call this whenever the user reports a bug, requests a feature, shares an idea, or says "schedule" / "TODO" / "add to the list". Do NOT implement the task inline; add it and stop. Status defaults to "refinement" — see status. Returns { id }, plus suggestedFollowUps when contract is passed. Refs pointing to nonexistent IDs or self-references are silently dropped.',
     addSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof addSchema>>): Promise<MCPContent> => handleAdd(store, args, ctx))
   );
@@ -89,6 +107,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   const getNextSchema = {
     type: z.enum(['bug', 'feature', 'idea', 'tool', 'other', 'epic']).optional()
       .describe('Narrow to one type (optional). Omit to consider all types. "epic" always yields null.'),
+    repo: repoFilterParam,
     project: projectParam,
   };
   server.tool(
@@ -103,6 +122,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     status: statusParam,
     type: z.enum(['bug', 'feature', 'idea', 'tool', 'other', 'epic']).optional().describe('Only this type (optional).'),
     scope: z.string().optional().describe('Only this scope (optional) — exact, case-sensitive. An empty result may be a typo; see getScopes.'),
+    repo: repoFilterParam,
     project: projectParam,
   };
   server.tool(
@@ -116,7 +136,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
   const getByIdSchema = { id: z.coerce.number().int().positive().describe('The numeric task ID to look up') };
   server.tool(
     'getById',
-    'Get a single task by its numeric ID — returns the full task including both summary (if set) and description, plus notes (oldest first) when the task has any, and refs as { id, relation, title } so you can tell what each linked task is without fetching it. A task in an epic also carries `epic` { id, title, status, summary, description, notes } — the epic\'s full text and notes, authoritative context for the child (order, goals, rules). An epic carries `children` [{ id, title, status, type, priority, seq }] in execution order: by seq, unset last, then id. List methods carry only parentId + epicTitle. List tools omit description when a summary is present and show only noteCount, so use this for the full body. Use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Returns an error listing valid IDs if not found.',
+    'Get a single task by its numeric ID — returns the full task including both summary (if set) and description, plus notes (oldest first) when the task has any, and refs as { id, relation, title } so you can tell what each linked task is without fetching it. A task in an epic also carries `epic` { id, title, status, summary, description, notes } — the epic\'s full text and notes, authoritative context for the child (order, goals, rules). An epic carries `children` [{ id, title, status, type, priority, seq }] in execution order: by seq, unset last, then id. A task with repo or touches carries `repoContext` { repo, touches, contracts }: the full registry entries (folder, role, commands, rulesFile) and every contract those repos own or consume, tagged role owner|consumer. List methods carry only parentId + epicTitle. List tools omit description when a summary is present and show only noteCount, so use this for the full body. Use when the user asks about a specific task by number (e.g. "show me #42", "what is task 37?"). Returns an error listing valid IDs if not found.',
     getByIdSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getByIdSchema>>): Promise<MCPContent> => handleGetById(store, args))
   );
@@ -155,11 +175,14 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     seq: z.number().int().positive().nullable().optional()
       .describe(`${SEQ_RULE} Pass null to clear it. Changing parentId clears it unless you pass a new one.`),
     project: z.string().min(1).optional()
-      .describe('Move the task to this project id. Must already exist (see getProjects). Omit to keep its current project.'),
+      .describe('Move the task to this project id. Must already exist (see getProjects). Omit to keep its current project. Its repo and touches must be registered there too, or be replaced/cleared in the same update.'),
+    repo: z.string().nullable().optional().describe(`${REPO_RULE} Pass null to clear.`),
+    touches: z.array(z.string().min(1)).nullable().optional().describe(`${TOUCHES_RULE} Full replacement list; null or [] clears.`),
+    contract: z.string().min(1).optional().describe(CONTRACT_RULE),
   };
   server.tool(
     'update',
-    'Patch any fields of an existing task in place — use when the user asks to edit, rename, reprioritize, retype, rescope, move to another project, or update the refs/description of a task. Omitted fields keep their current values. Returns { success: true, task } (plan and note bodies omitted, noteCount instead — use getById), or { success: false, error }.',
+    'Patch any fields of an existing task in place — use when the user asks to edit, rename, reprioritize, retype, rescope, move to another project, or update the refs/description of a task. Omitted fields keep their current values. Returns { success: true, task } (plan and note bodies omitted, noteCount instead — use getById), plus suggestedFollowUps when contract is passed, or { success: false, error }.',
     updateSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof updateSchema>>): Promise<MCPContent> => handleUpdate(store, args))
   );
@@ -244,6 +267,7 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     ids: z.array(z.number().int().positive()).optional().describe('Only these task ids (optional). ORed with epicId when both are given; omit both to poll the whole project/scope.'),
     epicId: z.number().int().positive().optional().describe('Only this epic and its children (optional). ORed with ids when both are given.'),
     scope: z.string().optional().describe('Only this scope (optional), ANDed with ids/epicId.'),
+    repo: repoFilterParam,
     project: projectParam,
   };
   server.tool(
@@ -320,6 +344,80 @@ export function registerTools(server: McpServer, store: Store, ctx: SessionConte
     'Change a project\'s settings (pass trackPrs, description or both). Only call when the user asks for this setting (e.g. "turn on PR tracking", "describe this project"), never to make another tool or field work. Returns { success, project: { id, name, description, trackPrs } }, or an error for an unknown project.',
     updateProjectSchema,
     withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof updateProjectSchema>>): Promise<MCPContent> => handleUpdateProject(store, args))
+  );
+
+  // ── getRepos ──────────────────────────────────────────────────────────────────
+  const getReposSchema = { project: projectParam };
+  server.tool(
+    'getRepos',
+    "List a multi-repo project's registry: the single source for each repo's sibling folder, role, build/test/lint commands and rules file, and for the contracts between repos (owner, source glob, consumers, rule). Read it instead of listing sibling folders or grepping their CLAUDE.md files. Folders are siblings under one parent: resolve ../<folder> from the current repo. Returns { project, repos, contracts }; both empty for a single-repo project.",
+    getReposSchema,
+    withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof getReposSchema>>): Promise<MCPContent> => handleGetRepos(store, args, ctx))
+  );
+
+  // ── whoami ────────────────────────────────────────────────────────────────────
+  const whoamiSchema = {
+    cwdBasename: z.string().min(1).describe("Basename of the main worktree: the parent directory of the absolute `git rev-parse --git-common-dir`, so a linked worktree resolves too. Not a full path."),
+    project: projectParam,
+  };
+  server.tool(
+    'whoami',
+    'Map the current repo to its registry entry: returns { project, repo } with the repo id whose folder matches cwdBasename (case-insensitive), or repo: null when none does. repo null means no repo filter and no mismatch warning.',
+    whoamiSchema,
+    withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof whoamiSchema>>): Promise<MCPContent> => handleWhoami(store, args, ctx))
+  );
+
+  // ── setRepo ───────────────────────────────────────────────────────────────────
+  const commandText = z.string().describe('Shell command run from the repo root; empty string removes it.');
+  const setRepoSchema = {
+    id: z.string().min(1).describe('Short slug, e.g. "firmware" (a–z, 0–9, \'-\'). Upsert key within the project.'),
+    folder: z.string().min(1).optional().describe('Sibling directory name only, e.g. "example-repo" — never a path. Required for a new repo; unique per project.'),
+    name: z.string().optional().describe('Display name (default: the id).'),
+    role: z.string().optional().describe('One line: what this repo is, e.g. "watch client".'),
+    commands: z.object({ build: commandText.optional(), test: commandText.optional(), lint: commandText.optional() }).strict().optional()
+      .describe('Merged per key into the stored commands. Keep them here, not duplicated in the repo\'s CLAUDE.md.'),
+    rulesFile: z.string().min(1).optional().describe('Path of the repo\'s agent rules file inside it (default "CLAUDE.md").'),
+    project: projectParam,
+  };
+  server.tool(
+    'setRepo',
+    "Register or update a repo in the project's registry (upsert by id; omitted fields keep their value). Call when the user asks to register a repo, or when a registry command failed and you found the right one in the repo's rulesFile. Returns { success, repo }.",
+    setRepoSchema,
+    withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof setRepoSchema>>): Promise<MCPContent> => handleSetRepo(store, args, ctx))
+  );
+
+  // ── deleteRepo ────────────────────────────────────────────────────────────────
+  const deleteRepoSchema = { id: z.string().min(1).describe('Repo id to remove'), project: projectParam };
+  server.tool(
+    'deleteRepo',
+    'Remove a repo from the registry. Errors while any task (repo or touches) or contract still references it. Returns { success }.',
+    deleteRepoSchema,
+    withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof deleteRepoSchema>>): Promise<MCPContent> => handleDeleteRepo(store, args, ctx))
+  );
+
+  // ── setContract ───────────────────────────────────────────────────────────────
+  const setContractSchema = {
+    name: z.string().min(1).describe('Contract name, e.g. "Wire protocol v1". Upsert key within the project, case-insensitive.'),
+    owner: z.string().min(1).optional().describe('Repo id that owns the source of truth; changes start there. Required for a new contract.'),
+    source: z.string().optional().describe('Glob in the owner repo, e.g. "docs/protocol/*.yaml" (a pointer, not validated).'),
+    consumers: z.array(z.string().min(1)).optional().describe('Repo ids that must follow a change (full list; never the owner).'),
+    rule: z.string().optional().describe('One line, e.g. "change the source first, then a follow-up in every consumer".'),
+    project: projectParam,
+  };
+  server.tool(
+    'setContract',
+    'Register or update a contract between repos (upsert by name; omitted fields keep their value). Owner and consumers must be registered repos. Returns { success, contract }.',
+    setContractSchema,
+    withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof setContractSchema>>): Promise<MCPContent> => handleSetContract(store, args, ctx))
+  );
+
+  // ── deleteContract ────────────────────────────────────────────────────────────
+  const deleteContractSchema = { name: z.string().min(1).describe('Contract name to remove (case-insensitive)'), project: projectParam };
+  server.tool(
+    'deleteContract',
+    'Remove a contract from the registry. Returns { success }.',
+    deleteContractSchema,
+    withSchemaCheck(store, async (args: z.infer<z.ZodObject<typeof deleteContractSchema>>): Promise<MCPContent> => handleDeleteContract(store, args, ctx))
   );
 
   // ── health ────────────────────────────────────────────────────────────────────

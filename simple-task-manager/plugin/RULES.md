@@ -20,6 +20,12 @@ Refs are mirrored automatically. Pick the relation that describes A → B when a
 ## Projects
 This session is bound to the project in its `.mcp.json` (PROJECT_NAME) or its API key's default; list tools and add default to it. Pass `project` when the user names another one. Refs and epic links stay within one project.
 
+## Repos
+A project spanning sibling repos registers them (getRepos). Projects without repos skip this.
+- The registry is the single source for each repo's folder, commands and rules file, and for contract rules: read getRepos or getById's `repoContext`, never sibling CLAUDE.md files, for them. A registry command that fails: read that repo's rulesFile, then fix the entry with setRepo.
+- Set `repo` (and `touches`) per task; an epic child never inherits them.
+- A contract change starts in its owner repo. Pass `contract` on that task and offer its `suggestedFollowUps` to the user; file only what they pick.
+
 ## Auto-knowledge capture
 After every task is closed (setStatus → done), curate the relevant CLAUDE.md file(s) before moving on:
 - **Add**: non-obvious decisions and their rationale, gotchas and env constraints, new conventions or patterns, significant file-layout or architecture changes.

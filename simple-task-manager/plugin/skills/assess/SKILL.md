@@ -25,6 +25,7 @@ Judge a scope as a **product**: is it doing its job for the user, what's weak fr
 ### Step 1 — Gather the state
 
 - `getById` / `getRelated(id, 'open')`, `getAll({ scope })`: what shipped, is open, or is parked behind a "gate on the verdict".
+- `getRepos`: for a multi-repo project, which repos and contracts the scope spans (folders, roles), so evidence is read from the right sibling.
 - The scope's CLAUDE.md; `git log --oneline` since the last assessment (or the evaluation task's creation).
 - A trial tests only the code live when it ran: note fixes landed *between* trials, record each trial's commit.
 

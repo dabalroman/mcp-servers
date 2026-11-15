@@ -15,7 +15,7 @@ interface Props {
   current: string | null;
   onSelect: (id: string) => void;
   onNewProject: () => void;
-  onEditProject: () => void;
+  onSettings: () => void;
 }
 
 const Badge = ({ children }: { children: React.ReactNode }) => (
@@ -24,10 +24,10 @@ const Badge = ({ children }: { children: React.ReactNode }) => (
   </span>
 );
 
-export function ProjectSwitcher({ projects, current, onSelect, onNewProject, onEditProject }: Props) {
+export function ProjectSwitcher({ projects, current, onSelect, onNewProject, onSettings }: Props) {
   const active = projects.find((p) => p.id === current);
   // Opening a dialog while the menu is still closing leaves the page pointer-locked; defer it until the menu has closed.
-  const pendingDialog = useRef<'new' | 'edit' | null>(null);
+  const pendingDialog = useRef<'new' | null>(null);
   return (
     <>
       {projects.length > 1 && (
@@ -62,12 +62,10 @@ export function ProjectSwitcher({ projects, current, onSelect, onNewProject, onE
             align="start"
             className="w-[var(--radix-dropdown-menu-trigger-width)]"
             onCloseAutoFocus={(e) => {
-              const pending = pendingDialog.current;
-              if (!pending) return;
+              if (!pendingDialog.current) return;
               pendingDialog.current = null;
               e.preventDefault();
-              if (pending === 'new') onNewProject();
-              else onEditProject();
+              onNewProject();
             }}
           >
             {projects.map((p) => (
@@ -81,7 +79,7 @@ export function ProjectSwitcher({ projects, current, onSelect, onNewProject, onE
               </DropdownMenuItem>
             ))}
             <DropdownMenuSeparator />
-            {active && <DropdownMenuItem onSelect={() => { pendingDialog.current = 'edit'; }}>Edit project</DropdownMenuItem>}
+            {active && <DropdownMenuItem onSelect={onSettings}>Project settings</DropdownMenuItem>}
             <DropdownMenuItem onSelect={() => { pendingDialog.current = 'new'; }}>New project</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
