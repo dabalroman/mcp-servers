@@ -1,4 +1,5 @@
 import type { EngineInterface, Register, SessionContextUsage, ToolCallResult } from 'claude-code'
+import { type Json, parseJson, taskId, touchedTaskIds } from './watchSet.ts'
 
 const TASK_SERVER = 'task-manager'
 const TASK_PREFIX = 'mcp__task-manager__'
@@ -6,8 +7,6 @@ const TASK_PREFIX = 'mcp__task-manager__'
 const MUTATORS = new Set(['add', 'setStatus', 'delete', 'update'])
 // The task-manager UI's own colour for an in-progress task (styles.scss --primary).
 const PRIMARY = '#51CDEC'
-
-type Json = Record<string, unknown>
 
 // What the band draws: the model, the context fill and the task.
 type Band = {
@@ -21,10 +20,14 @@ type Band = {
 let band: Band = { model: '', context: '', epic: undefined, phrase: undefined, rest: undefined }
 let bandKey = ''
 type Epic = { id: number; title: string }
-let active: { id: number; others: number; epic: Epic | undefined } | undefined
+let active: { id: number; epic: Epic | undefined } | undefined
+// Task ids this session touched, most recent first: only these can be its current task.
+let touched: number[] = []
 let open: number | undefined
 let fetchedAt = 0
 let stale = true
+
+const modelName = (id: string): string => id.replace(/^(?:[a-z]+\.)?anthropic\./, '')
 
 const trimmed = (s: string): string => s.replace(/\.0$/, '')
 
@@ -50,24 +53,13 @@ const clip = (s: string): string => (s.length > EPIC_TITLE_MAX ? `${s.slice(0, E
 
 const taskParts = (): Pick<Band, 'epic' | 'phrase' | 'rest'> => {
   const epic = active?.epic === undefined ? undefined : `#${active.epic.id} ${clip(active.epic.title)}`
-  const phrase =
-    active === undefined ? undefined : `#${active.id} in_progress${active.others > 0 ? ` +${active.others}` : ''}`
+  const phrase = active === undefined ? undefined : `#${active.id} in_progress`
   const rest = open !== undefined && open > 0 ? `${open} open` : undefined
 
   return { epic, phrase, rest }
 }
 
 const keyOf = (b: Band): string => [b.model, b.context, b.epic ?? '', b.phrase ?? '', b.rest ?? ''].join('\u0000')
-
-const parseJson = (text: unknown): Json | undefined => {
-  if (typeof text !== 'string') return undefined
-  try {
-    const value: unknown = JSON.parse(text)
-    return typeof value === 'object' && value !== null ? (value as Json) : undefined
-  } catch {
-    return undefined
-  }
-}
 
 // The task-manager MCP is optional: absent or unreachable leaves the band as it was.
 async function readTaskTool($: EngineInterface, tool: string, args: Json = {}): Promise<Json | undefined> {
@@ -84,39 +76,33 @@ async function readTaskTool($: EngineInterface, tool: string, args: Json = {}): 
   return undefined
 }
 
-const taskId = (value: unknown): number | undefined => {
-  const n = typeof value === 'number' ? value : Number(value)
-
-  return Number.isInteger(n) && n > 0 ? n : undefined
-}
-
-// Several tasks can be in progress at once. Show the one touched last and how
-// many others there are; an epic is a container that follows its children, so
-// it is never the work being shown.
+// Not the newest updated_at: other sessions, the UI and pr-watch bump it too.
+// An epic follows its children, so it is never the work being shown.
 async function seedActive($: EngineInterface): Promise<void> {
+  if (touched.length === 0) {
+    active = undefined
+    return
+  }
   const answer = await readTaskTool($, 'getAll', { status: 'in_progress' })
   const groups = answer?.tasks
   active = undefined
   if (typeof groups !== 'object' || groups === null) return
-  let newest: { id: number; at: string; epic: Epic | undefined } | undefined
-  let count = 0
+  const inProgress = new Map<number, Json>()
   for (const list of Object.values(groups as Record<string, unknown>)) {
     if (!Array.isArray(list)) continue
     for (const entry of list) {
       const task = entry as Json
-      if (task.type === 'epic') continue
       const id = taskId(task.id)
-      if (id === undefined) continue
-      count += 1
-      const at = typeof task.updated_at === 'string' ? task.updated_at : ''
-      if (newest !== undefined && at <= newest.at) continue
-      const epicId = taskId(task.parentId)
-      const epic =
-        epicId !== undefined && typeof task.epicTitle === 'string' ? { id: epicId, title: task.epicTitle } : undefined
-      newest = { id, at, epic }
+      if (id !== undefined && task.type !== 'epic') inProgress.set(id, task)
     }
   }
-  if (newest !== undefined) active = { id: newest.id, others: count - 1, epic: newest.epic }
+  const id = touched.find(t => inProgress.has(t))
+  if (id === undefined) return
+  const task = inProgress.get(id) as Json
+  const epicId = taskId(task.parentId)
+  const epic =
+    epicId !== undefined && typeof task.epicTitle === 'string' ? { id: epicId, title: task.epicTitle } : undefined
+  active = { id, epic }
 }
 
 async function syncTasks($: EngineInterface, force = false): Promise<void> {
@@ -144,7 +130,7 @@ async function refresh($: EngineInterface): Promise<void> {
     context = undefined
   }
 
-  const next: Band = { model, context: contextPart(context), ...taskParts() }
+  const next: Band = { model: modelName(model), context: contextPart(context), ...taskParts() }
   const key = keyOf(next)
   band = next
   // The band reads this module's state, so a change asks the engine to draw it.
@@ -157,14 +143,18 @@ async function refresh($: EngineInterface): Promise<void> {
 const observe = async ($: EngineInterface, tool: string, input: Json, result: ToolCallResult): Promise<void> => {
   if (result.deny !== undefined || result.isError === true) return
   const name = tool.startsWith(TASK_PREFIX) ? tool.slice(TASK_PREFIX.length) : ''
-  if (!MUTATORS.has(name)) return
   const answer = parseJson(result.text)
   if (answer !== undefined && answer.error !== undefined) return
+  const ids = touchedTaskIds(name, input, answer)
+  const mutated = MUTATORS.has(name)
+  const next = [...ids, ...touched.filter(t => !ids.includes(t))]
+  if (!mutated && next.join() === touched.join()) return
+  touched = next
 
-  stale = true
+  if (mutated) stale = true
   // Any status move or delete can change which tasks are in progress, so re-read
   // the set rather than guessing from the one call.
-  if (name !== 'add') await seedActive($)
+  await seedActive($)
   await syncTasks($)
   await refresh($)
 }
@@ -173,7 +163,6 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     // A line the previous load pinned is cleared: the band carries it now.
     $.ui.status(undefined)
-    await seedActive($)
     await syncTasks($, true)
     await refresh($)
     // No model-change event and no per-step measure: poll the free figure so

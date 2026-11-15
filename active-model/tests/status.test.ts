@@ -34,7 +34,7 @@ const harness = (on: On, lines: (string | undefined)[], state: () => State) => {
 
     return { value: undefined }
   })
-  on('session.model', () => ({ value: 'test-model' }))
+  on('session.model', () => ({ value: 'us.anthropic.test-model' }))
   on('session.usage', () => ({
     value: { startedAt: 0, rateLimits: [], context: { tokens: 24_300, window: 400_000, percent: 6 } },
   }))
@@ -51,11 +51,18 @@ const harness = (on: On, lines: (string | undefined)[], state: () => State) => {
   return invalidations
 }
 
+const answerTaskCalls = (on: On) =>
+  on('tool.call', (_, e) => ({ result: {}, text: JSON.stringify({ task: { id: e.id } }), isReadOnly: true }))
+
+const touch = ($: Engine, id: number) => $.tool.call({ tool: 'mcp__task-manager__getById', id })
+
 test('the band carries the model, the context fill and the task in its colour', async ($, on) => {
   const lines: (string | undefined)[] = []
   harness(on, lines, () => ({ open: 2, rows: [{ id: 7, type: 'feature', updated_at: '2026-01-01 10:00:00' }] }))
+  answerTaskCalls(on)
 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: false })
+  await touch($, 7)
 
   // Nothing is pinned under the prompt: the band carries it all.
   expect(lines).toEqual([undefined])
@@ -82,28 +89,33 @@ test('a task mutation redraws the band', async ($, on) => {
 
   const ui = await mountBand($)
   expect((await ui.find({ type: 'Text', text: 'test-model' }))?.text).toBe(
-    'test-model · 24.3k/400k 6% · #7 in_progress · 3 open',
+    'test-model · 24.3k/400k 6% · 3 open',
   )
   await ui.unmount()
 })
 
-test('several in progress: the newest, and how many others', async ($, on) => {
+test('only a task this session touched is shown, not the newest in progress', async ($, on) => {
   const lines: (string | undefined)[] = []
   harness(on, lines, () => ({
     open: 4,
     rows: [
       { id: 7, type: 'feature', updated_at: '2026-01-01 10:00:00' },
       { id: 8, type: 'tool', updated_at: '2026-01-02 10:00:00' },
-      // An epic follows its children; it is not the work shown.
       { id: 9, type: 'epic', updated_at: '2026-01-03 10:00:00' },
     ],
   }))
+  answerTaskCalls(on)
 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: false })
+  const before = await mountBand($)
+  expect((await before.find({ type: 'Text', text: 'test-model' }))?.text).toBe('test-model · 24.3k/400k 6% · 4 open')
+  await before.unmount()
 
+  await touch($, 7)
+  await touch($, 9)
   const ui = await mountBand($)
   expect((await ui.find({ type: 'Text', text: 'test-model' }))?.text).toBe(
-    'test-model · 24.3k/400k 6% · #8 in_progress +1 · 4 open',
+    'test-model · 24.3k/400k 6% · #7 in_progress · 4 open',
   )
   await ui.unmount()
 })
@@ -115,8 +127,10 @@ test('a task in an epic shows the epic before it, a long title clipped', async (
     open: 2,
     rows: [{ id: 8, type: 'feature', updated_at: '2026-01-02 10:00:00', parentId: 3, epicTitle }],
   }))
+  answerTaskCalls(on)
 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: false })
+  await touch($, 8)
 
   const ui = await mountBand($)
   expect((await ui.find({ type: 'Text', text: 'test-model' }))?.text).toBe(

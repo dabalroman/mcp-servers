@@ -38,6 +38,7 @@ function world(on: On, tasks: Task[], branch = 'main') {
   const epicOf = (t: Task) => (t.parentId === undefined ? {} : { epic: { id: t.parentId } })
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('session.id', () => ({ value: 'this-session' }))
   on('ui.toast', () => ({ value: undefined }))
   on('prompt.submit', (_, e) => {
     prompts.push(e.text)
@@ -67,7 +68,7 @@ function world(on: On, tasks: Task[], branch = 'main') {
       case 'getByPr':
         return answer({ tasks: tasks.filter(t => t.prs.some(p => p.url === a.url)).map(t => ({ ...t, ...epicOf(t) })) })
       case 'update':
-        byId.get(Number(a.id))!.prs = a.prs as Pr[]
+        if (a.prs !== undefined) byId.get(Number(a.id))!.prs = a.prs as Pr[]
         return answer({ success: true })
       case 'addNote':
         if (failing.notes-- > 0) return answer({ error: 'database is locked' })
@@ -98,8 +99,8 @@ async function bandText($: Engine) {
   return text
 }
 
-async function start($: Engine, on: On) {
-  mock.store(on)
+async function start($: Engine, on: On, store: Record<string, unknown> = {}) {
+  mock.store(on, store)
   const clock = mock.clock(on, { now: NOW })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: false })
   return { poll: () => clock.advance(60_000) }
@@ -117,6 +118,9 @@ test('the branch JIRA id finds the task; a merged PR is written merged, its othe
   await poll()
 
   expect(w.byId.get(1)!.prs).toEqual([pr(5, 'merged'), pr(6, 'open')])
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain('PR #5 (#1 Example) merged as abcdef12')
+  expect(w.prompts[0]).toContain('PR #5 (#1 Example) no deploy-dev workflow')
 })
 
 test('green checks and an approval write approved; a new push with pending checks goes back to open', async ($, on) => {
@@ -135,7 +139,8 @@ test('green checks and an approval write approved; a new push with pending check
   w.gh['pr checks 5'] = { exitCode: 8, out: [{ name: 'build', bucket: 'pending', link: 'l2' }] }
   await poll()
   expect(w.byId.get(1)!.prs).toEqual([pr(5, 'open')])
-  expect(w.prompts).toEqual([])
+  expect(w.prompts.length).toBe(1)
+  expect(w.prompts[0]).toContain('PR #5 (#1 Example) all checks passed on aaaaaaaa')
   expect(await bandText($)).toBe('pr-watch · #5 open')
 })
 
@@ -200,4 +205,21 @@ test('a failed deploy note is retried on the next poll, once', async ($, on) => 
   expect(w.notes).toEqual([{ taskId: 1, body: 'PR #5 merged as abcdef12, deploy-dev 42: failure' }])
   expect(w.byId.get(1)!.prs).toEqual([pr(5, 'merged')])
   expect(w.prompts.length).toBe(1)
+})
+
+test('a task another live session owns is not polled here until this session writes to it', async ($, on) => {
+  const w = world(on, [{ id: 1, title: 'Example', type: 'feature', externalId: 'ABC-12', prs: [pr(5, 'open')] }], 'feature/ABC-12_x')
+  on('tool.call', () => ({ result: {}, text: JSON.stringify({ success: true }) }))
+  Object.assign(w.gh, {
+    'pr view 5': { out: view('OPEN') },
+    'pr checks 5': { exitCode: 8, out: [{ name: 'build', bucket: 'pending', link: 'l1' }] },
+    ...noFeedback(5),
+  })
+  const { poll } = await start($, on, { 'owner:1': { session: 'other-session', at: NOW + 60_000 } })
+  await poll()
+  expect(w.ghCalls).toEqual([])
+
+  await $.tool.call({ tool: 'mcp__task-manager__update', id: 1, summary: 'x' })
+  await poll()
+  expect(w.ghCalls.some(c => c.startsWith('gh pr view 5'))).toBe(true)
 })

@@ -86,7 +86,7 @@ async function pollOpen(gh: Gh, pr: PrRef, ledger: Ledger, now: number, isNew: b
     // A PR merged long before it was first seen is settled without turns or notes.
     if (isNew && now - Date.parse(v.mergedAt) >= QUIET_AFTER_MS) ledger.quiet = true
     Object.assign(ledger, { phase: 'deploy', sha: v.mergeCommit.oid, mergedAt: v.mergedAt })
-    events.push({ key: 'merged', line: `merged as ${v.mergeCommit.oid.slice(0, 8)}`, turn: false, toast: true })
+    events.push({ key: 'merged', line: `merged as ${v.mergeCommit.oid.slice(0, 8)}`, turn: true, toast: true })
     return { status: 'merged', events }
   }
   if (v.state === 'CLOSED') {
@@ -106,7 +106,7 @@ async function pollOpen(gh: Gh, pr: PrRef, ledger: Ledger, now: number, isNew: b
   // No checks yet (right after a push) is not green.
   const green = checks.length > 0 && checks.every(c => c.bucket === 'pass' || c.bucket === 'skipping')
   if (green) {
-    events.push({ key: `allpass:${v.headRefOid}`, line: `all checks passed on ${v.headRefOid.slice(0, 8)}`, turn: ledger.failed === true })
+    events.push({ key: `allpass:${v.headRefOid}`, line: `all checks passed on ${v.headRefOid.slice(0, 8)}`, turn: true })
     ledger.failed = false
   }
   await feedback(gh, pr, events)
@@ -128,7 +128,7 @@ async function pollDeploy(gh: Gh, pr: PrRef, ledger: Ledger, now: number, cfg: P
   if (ledger.run === undefined) {
     if (!(await gh.exists(`repos/${pr.repo}/contents/.github/workflows/${cfg.workflow}`))) {
       Object.assign(ledger, { phase: 'done', finishedAt: now })
-      events.push({ key: 'noworkflow', line: `no ${name} workflow`, turn: false })
+      events.push({ key: 'noworkflow', line: `no ${name} workflow`, turn: true })
       return { events }
     }
     const runs = (await gh.json([
