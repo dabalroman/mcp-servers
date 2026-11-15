@@ -51,6 +51,8 @@ Show the task (id, title, type, summary) and go to step 3. Don't ask whether to 
 
 **Complex → focused subagent:** pick the most specific type in the project's `CLAUDE.md` agent table. Pass: task id, title, full description, relevant file paths and line numbers, fix approach, the step-4 task IDs, and the instructions: read files → implement → mark each step completed as you go → add/update tests → run verify → report the diff summary and verify result.
 
+**Web UI work** (HTML, CSS/SCSS, components, client-side JS/TS), inline or delegated: when the `modern-web-guidance` skill is installed, invoke it (search → retrieve) once before the first such edit and follow the guide; a subagent's brief must say so explicitly and its report must name the guide ids it applied. Skip it for trivial edits (copy, renames, pure logic).
+
 ### Debugging during implementation
 
 When verify fails or behaviour is unexpected and the cause isn't obvious, **ask the user to add temporary debug logs** (which file, which line, what to log) and re-run — faster than guessing. Remove them before completing the step.

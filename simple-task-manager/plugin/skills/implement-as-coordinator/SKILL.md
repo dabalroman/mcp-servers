@@ -74,6 +74,7 @@ The brief must contain:
 - "No per-phase commits; the coordinator commits."
 - **No build tool run, no deploy/flash, no commit, no push, no CLAUDE.md edits** (report proposed wording), no stray files (`__pycache__`, temp scripts).
 - Comments: terse, non-obvious *why* only.
+- For web UI work (HTML, CSS/SCSS, components, client-side JS/TS), when the `modern-web-guidance` skill is installed: "Invoke `modern-web-guidance` (search → retrieve) before the first UI edit and follow the guide; name the guide ids you applied in your report."
 - "Run `/tm:implement`'s OCR code review step and fix its findings before handing back — it is not optional."
 - Report back: files changed, check outputs, proof diffs, OCR summary (coverage, fixed, left open with reasons — or "Skipping code review, OCR not installed"), proposed CLAUDE.md wording, a suggested commit message in the project's style, "confirm you ran no build and no deploy".
 
