@@ -1,6 +1,6 @@
 {
   "name": "tm",
-  "version": "2026-11-058",
+  "version": "2026-11-059",
   "description": "Skills (init, refine, implement, implement-as-coordinator, assess) and the full usage rules for the simple-task-manager MCP",
   "author": {
     "name": "dabalroman"

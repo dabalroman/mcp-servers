@@ -19,6 +19,7 @@ Refs are mirrored automatically. Pick the relation that describes A → B when a
 
 ## Projects
 This session is bound to the project in its `.mcp.json` (PROJECT_NAME) or its API key's default; list tools and add default to it. Pass `project` when the user names another one. Refs and epic links stay within one project.
+- Next-step suggestions (after a task lands, a session ends, or an epic step) come only from the bound project. Never offer to refine, plan or implement another project's task. If the landed task's text names one there that waited on it, add one line at most ("FYI: #NN in <project> is now unblocked"), with no offer or question.
 
 ## Repos
 A project spanning sibling repos registers them (getRepos). Projects without repos skip this.
