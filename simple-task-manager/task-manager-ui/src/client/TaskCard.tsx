@@ -92,14 +92,17 @@ export function TaskCard({ task, view, onViewChange, onStatus, onEdit, onAddChil
 
   const copyIdCommand = (e: React.MouseEvent<HTMLButtonElement>) => {
     e.stopPropagation();
+    const isRunnableEpic = task.type === 'epic' && (task.status === 'todo' || task.status === 'in_progress');
     const cmd =
       task.status === 'refinement' ? `/tm:refine #${task.id}` :
       task.status === 'plan' ? `/plan #${task.id}` :
+      isRunnableEpic ? `/tm:implement-as-coordinator #${task.id}` :
       task.status === 'todo' || task.status === 'in_progress' ? `/tm:implement #${task.id}` :
       `#${task.id}`;
     const successMsg =
       task.status === 'refinement' ? 'Copied — paste into Claude Code to refine' :
       task.status === 'plan' ? 'Copied — paste into Claude Code to plan' :
+      isRunnableEpic ? 'Copied - paste into Claude Code to run the epic as coordinator' :
       task.status === 'todo' || task.status === 'in_progress' ? 'Copied — paste into Claude Code to implement' :
       `#${task.id} copied`;
     const fallback = (container: HTMLElement) => {
