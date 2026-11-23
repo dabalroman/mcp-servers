@@ -72,6 +72,10 @@ Every MCP tool call, on both transports, becomes one JSON line in `<package>/tas
 
 A task's `updated_at` says nothing about the current session: other sessions, the UI and pr-watch's `update({prs})` bump it. The band's task is the last one this session touched (`touchedTaskIds`, copied per plugin in `hooks/watchSet.ts`) that is still `in_progress`; none touched shows no task.
 
+## pr-watch (root plugin)
+
+Every session polls, and the shared `$.store` ledger hands each event to whichever poller sees it first, so a session polls a task's PRs only while it owns the task (`hooks/owner.ts`: `owner:<id>`, claimed on a task write, refreshed each poll, taken over after 5 min without a refresh). `$.store` has no CAS, so two sessions can both claim an unowned task in the same minute. `/clear` changes the session id, so polling pauses for up to 5 min. Sessions running an older plugin version ignore owners: restart all of them after an update.
+
 ## Git repo location
 
 The git repository root is `~/.claude/mcp-servers/`, **not** `~/.claude/mcp-servers/simple-task-manager/`. The `simple-task-manager/` directory has no `.git` of its own — it is a subdirectory of the `mcp-servers` repo. Always run git commands from `~/.claude/mcp-servers/` (or pass `-C ~/.claude/mcp-servers`). The pre-commit hook lives at `~/.claude/mcp-servers/.git/hooks/pre-commit` and is installed by `simple-task-manager/setup-hooks.ts`.
