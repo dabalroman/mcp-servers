@@ -84,8 +84,6 @@ Every task moves through `refinement` → `plan` (optional) → `todo` → `in_p
 
 If another command uses the same name, the namespaced form works too (`/tm:implement`).
 
-The browser use is optional and needs the [Playwright MCP](https://github.com/microsoft/playwright-mcp), skipped without it: `claude mcp add --scope user playwright -- npx -y @playwright/mcp@latest --headless`. On Linux and WSL add `--browser chromium` and run `npx playwright install chromium` (missing system libraries: `sudo npx playwright install-deps chromium`); on Windows it uses the installed Chrome, or Edge with `--browser msedge`.
-
 ### Organising tasks
 
 - **Projects** — every task belongs to one project, so repos can share a database. A repo's
@@ -118,6 +116,18 @@ Claude calls the tools itself: `add`, `update`, `setStatus`, `getNext`, `getAll`
 `addNote`, `health`, and more. Each describes itself to Claude when it connects.
 Every call is logged, with free text reduced to its length, to `task-logs/<date>.jsonl` in this
 package, so you can see how agents actually use the tools.
+
+## Recommended tools
+
+None is needed for the basics, only for the feature in its row. The implement skills skip a step whose tool is missing and say so in one line.
+
+| Tool | Used by | Install |
+|---|---|---|
+| [open-code-review](https://github.com/alibaba/open-code-review) (`ocr`) | `/tm:implement` and `/tm:implement-as-coordinator`: code review before the change reaches you, delegation mode, no API key | `npm i -g @alibaba-group/open-code-review` |
+| [Playwright MCP](https://github.com/microsoft/playwright-mcp) | the implement skills look at web UI changes in a browser while they build | `claude mcp add --scope user playwright -- npx -y @playwright/mcp@latest --headless`. Linux and WSL: add `--browser chromium` and run `npx playwright install chromium` (missing system libraries: `sudo npx playwright install-deps chromium`). Windows: uses the installed Chrome, or Edge with `--browser msedge` |
+| [modern-web-guidance](https://github.com/GoogleChrome/modern-web-guidance) | the implement skills read its guide before a web UI edit | `/plugin marketplace add GoogleChrome/modern-web-guidance`, then `/plugin install modern-web-guidance@googlechrome` |
+| [gh](https://cli.github.com/) (logged in) | PR statuses on tasks and the `pr-watch` plugin | per [cli.github.com](https://cli.github.com/), then `gh auth login` |
+| [pm2](https://pm2.keymetrics.io/) | client mode: keeps the shared server running (see below) | `npm i -g pm2` |
 
 ## Web UI
 
