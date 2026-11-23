@@ -78,11 +78,13 @@ Every task moves through `refinement` → `plan` (optional) → `todo` → `in_p
 |---|---|
 | `/tm:init` | Binds the current repo to the MCP server (stdio or client mode). |
 | `/tm:refine` | Claude acts as PM: clarifies the goal and scope, rewrites the task, and offers to group a split under an epic. |
-| `/tm:implement` | Implements one task (or every `todo` in a scope), runs a code review, and commits after you confirm. |
+| `/tm:implement` | Implements one task (or every `todo` in a scope), checks web UI changes in a browser while it builds, runs a code review, and commits after you confirm. |
 | `/tm:implement-as-coordinator` | Supervises a queue or an epic: one subagent per task, independent checks and review, then one commit per task after you approve. |
 | `/tm:assess` | Judges a scope as a product: real-usage evidence, an advocate/skeptic debate, ranked suggestions. |
 
 If another command uses the same name, the namespaced form works too (`/tm:implement`).
+
+The browser use is optional and needs the [Playwright MCP](https://github.com/microsoft/playwright-mcp), skipped without it: `claude mcp add --scope user playwright -- npx -y @playwright/mcp@latest --headless`. On Linux and WSL add `--browser chromium` and run `npx playwright install chromium` (missing system libraries: `sudo npx playwright install-deps chromium`); on Windows it uses the installed Chrome, or Edge with `--browser msedge`.
 
 ### Organising tasks
 

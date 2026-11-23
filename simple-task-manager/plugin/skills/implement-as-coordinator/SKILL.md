@@ -78,6 +78,7 @@ The brief must contain:
 - Comments: terse, non-obvious *why* only.
 - For web UI work (HTML, CSS/SCSS, components, client-side JS/TS), when the `modern-web-guidance` skill is installed: "Invoke `modern-web-guidance` (search → retrieve) before the first UI edit and follow the guide; name the guide ids you applied in your report."
 - "Run `/tm:implement`'s OCR code review step and fix its findings before handing back — it is not optional."
+- For web UI work: "Use the browser as `/tm:implement` step 5 says while you build." With a parallel agent, only one lane may run the dev server and browser: name it in both briefs; the other reports what to look at and you check it in Step 3.
 - Report back: files changed, check outputs, proof diffs, OCR summary (coverage, fixed, left open with reasons — or "Skipping code review, OCR not installed"), proposed CLAUDE.md wording, a suggested commit message in the project's style, "confirm you ran no build and no deploy".
 
 Meanwhile do non-overlapping work (review rules, doc drafts), never in their files.
@@ -86,7 +87,7 @@ Meanwhile do non-overlapping work (review rules, doc drafts), never in their fil
 
 1. `git status` / `git diff --stat` — lane respected? A parallel agent's files show up too: attribute, don't revert. **Stage each task once verified** (`git add -- <its paths>`) so unstaged `git diff` shows only the next agent's work. Staging is bookkeeping, not approval.
 2. Read the risky hunks; fix small gaps (a missed redraw path, an off-by-one) directly, don't re-dispatch.
-3. Re-run the host-side checks yourself.
+3. Re-run the host-side checks yourself. A web UI change: open it in the browser yourself (Playwright MCP, when installed) once no agent edits the checkout.
 4. Another agent's work-in-progress in the tree → **don't build yet**; wait, then build once.
 
 ## Step 4 — Build (per task, as each lands) — no commit
