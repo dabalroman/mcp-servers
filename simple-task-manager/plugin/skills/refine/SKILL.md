@@ -1,6 +1,6 @@
 ---
 name: refine
-description: Act as PM — clarify scope, enrich descriptions, promote refinement tasks to plan or todo. Args: "#NN" | fuzzy scope (e.g. "eink") | empty for all.
+description: 'Act as PM — clarify scope, enrich descriptions, promote refinement tasks to plan or todo. Args: "#NN" | fuzzy scope (e.g. "eink") | empty for all.'
 model: opus
 ---
 

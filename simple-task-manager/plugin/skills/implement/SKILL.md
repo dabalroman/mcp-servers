@@ -1,6 +1,6 @@
 ---
 name: implement
-description: Implement todo tasks via subagents — one at a time, summary then go, OCR code review before relay, commit on lgtm. Args: "#NN" | fuzzy scope (e.g. "svg joiner") | empty for all.
+description: 'Implement todo tasks via subagents — one at a time, summary then go, OCR code review before relay, commit on lgtm. Args: "#NN" | fuzzy scope (e.g. "svg joiner") | empty for all.'
 ---
 
 # Implement
