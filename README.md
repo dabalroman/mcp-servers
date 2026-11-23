@@ -26,3 +26,7 @@ Add the marketplace once: `/plugin marketplace add dabalroman/mcp-servers`
 `pr-watch` needs `gh` (logged in) and the task-manager MCP. It watches the PRs on the tasks of the current branch's JIRA id and on the tasks the agent works on (an epic brings its children), polls GitHub every minute, writes each PR's status (`draft` -> `open` -> `pipeline_pass` -> `approved` -> `merged` -> `deployed`, or `closed`) and one deploy note per PR, and starts a turn when a check fails, all checks pass on a new push, someone comments, a PR merges or the deploy workflow (`deployWorkflow` option, default `deploy-dev.yml`) finishes. Only the session that last wrote a task watches its PRs. A row above the prompt lists the PRs it watches and their state. Install it only where GitHub workflows run.
 
 `task-watch` needs a task-manager server with `getUpdates`. It watches the tasks the agent works on (a task in an epic, or an epic, brings the whole epic), polls every minute, and toasts each change made outside the session; status changes and new or edited notes start a turn, other edits ride on the next prompt. The agent's own writes and `prs` changes are never reported. It only reads task-manager.
+
+## License
+
+GPL-3.0, see [LICENSE](LICENSE).
