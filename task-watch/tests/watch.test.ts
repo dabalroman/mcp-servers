@@ -11,6 +11,7 @@ type Task = {
   priority: string
   parentId?: number
   prs: unknown[]
+  refs?: { id: number; relation: string }[]
   notes: Note[]
   updated_at: string
 }
@@ -55,6 +56,8 @@ function world(on: On, tasks: Task[]) {
   }
 
   on('session.start', (_, e) => ({ cwd: e.cwd }))
+  on('command.register', () => ({ value: { command: 'task-watch' } }))
+  on('tool.register', () => ({ value: { tool: 'mcp__task-watch__watch' } }))
   on('ui.toast', (_, e) => {
     toasts.push(e.text)
     return { value: undefined }
@@ -79,6 +82,12 @@ function world(on: On, tasks: Task[]) {
       }
       case 'addNote':
         return reply({ success: true, note: addNote(id, String(a.body)) })
+      case 'add': {
+        const created = task(50, 'New', { refs: a.refs as Task['refs'] })
+        byId.set(50, created)
+        for (const ref of created.refs ?? []) write(ref.id, { refs: [{ id: 50, relation: 'is depended on by' }] })
+        return reply({ id: 50 })
+      }
       default:
         return reply({ error: 'unexpected' })
     }
@@ -101,13 +110,14 @@ function world(on: On, tasks: Task[]) {
 async function start($: Engine, on: On) {
   const clock = mock.clock(on, { now: NOW })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: false })
-  return { poll: () => clock.advance(60_000) }
+  const watch = (args: string) => $.command.run({ command: 'task-watch', args })
+  return { watch, poll: () => clock.advance(60_000) }
 }
 
 test('own writes start no turn and show no toast', async ($, on) => {
   const w = world(on, [task(1, 'Example')])
-  const { poll } = await start($, on)
-  await $.tool.call({ tool: 'mcp__task-manager__getById', id: 1 })
+  const { watch, poll } = await start($, on)
+  await watch('1')
   await $.tool.call({ tool: 'mcp__task-manager__setStatus', id: 1, status: 'todo' })
   await $.tool.call({ tool: 'mcp__task-manager__addNote', taskId: 1, body: 'Own note' })
   await poll()
@@ -118,8 +128,8 @@ test('own writes start no turn and show no toast', async ($, on) => {
 
 test('a foreign edit right after an own write is still reported', async ($, on) => {
   const w = world(on, [task(1, 'Example')])
-  const { poll } = await start($, on)
-  await $.tool.call({ tool: 'mcp__task-manager__getById', id: 1 })
+  const { watch, poll } = await start($, on)
+  await watch('1')
   await $.tool.call({ tool: 'mcp__task-manager__update', id: 1, priority: 'high' })
   w.foreign.write(1, { status: 'todo' })
   await poll()
@@ -128,10 +138,10 @@ test('a foreign edit right after an own write is still reported', async ($, on) 
   expect(w.submitted.map(s => s.text)).toEqual([`${HEAD}:\n- #1 Example: status refinement -> todo`])
 })
 
-test('a foreign status change and note in the watched epic start one turn', async ($, on) => {
+test('a foreign status change and note in a watched epic start one turn', async ($, on) => {
   const w = world(on, [task(10, 'Epic', { type: 'epic' }), task(11, 'Child', { parentId: 10 })])
-  const { poll } = await start($, on)
-  await $.tool.call({ tool: 'mcp__task-manager__getById', id: 11 })
+  const { watch, poll } = await start($, on)
+  await watch('10')
   w.foreign.write(11, { status: 'todo' })
   w.foreign.addNote(10, 'Order changed: #11 goes first.')
   await poll()
@@ -143,8 +153,8 @@ test('a foreign status change and note in the watched epic start one turn', asyn
 
 test('a foreign title change rides on the next prompt as context', async ($, on) => {
   const w = world(on, [task(1, 'Example')])
-  const { poll } = await start($, on)
-  await $.tool.call({ tool: 'mcp__task-manager__getById', id: 1 })
+  const { watch, poll } = await start($, on)
+  await watch('1')
   w.foreign.write(1, { title: 'Renamed' })
   await poll()
   expect(w.submitted).toEqual([])
@@ -155,8 +165,8 @@ test('a foreign title change rides on the next prompt as context', async ($, on)
 
 test('a change to prs alone is ignored', async ($, on) => {
   const w = world(on, [task(1, 'Example')])
-  const { poll } = await start($, on)
-  await $.tool.call({ tool: 'mcp__task-manager__getById', id: 1 })
+  const { watch, poll } = await start($, on)
+  await watch('1')
   w.foreign.write(1, { prs: [{ url: 'https://github.com/example-org/example-repo/pull/5', number: 5, status: 'merged' }] })
   await poll()
 
@@ -166,11 +176,77 @@ test('a change to prs alone is ignored', async ($, on) => {
 
 test('a deleted task is reported once', async ($, on) => {
   const w = world(on, [task(1, 'Example')])
-  const { poll } = await start($, on)
-  await $.tool.call({ tool: 'mcp__task-manager__getById', id: 1 })
+  const { watch, poll } = await start($, on)
+  await watch('1')
   w.foreign.remove(1)
   await poll()
   await poll()
 
   expect(w.toasts).toEqual(['#1 Example: deleted'])
+})
+
+test('a task only read is not watched', async ($, on) => {
+  const w = world(on, [task(1, 'Example')])
+  const { poll } = await start($, on)
+  await $.tool.call({ tool: 'mcp__task-manager__getById', id: 1 })
+  w.foreign.write(1, { status: 'todo' })
+  await poll()
+
+  expect(w.toasts).toEqual([])
+})
+
+test('a watched child does not bring its siblings', async ($, on) => {
+  const w = world(on, [task(10, 'Epic', { type: 'epic' }), task(11, 'Child', { parentId: 10 }), task(12, 'Sibling', { parentId: 10 })])
+  const { watch, poll } = await start($, on)
+  await watch('11')
+  w.foreign.write(12, { status: 'todo' })
+  await poll()
+  expect(w.toasts).toEqual([])
+
+  w.foreign.write(11, { status: 'todo' })
+  await poll()
+  expect(w.toasts).toEqual(['#11 Child: status refinement -> todo'])
+})
+
+test('stop ends the watch', async ($, on) => {
+  const w = world(on, [task(1, 'Example')])
+  const { watch, poll } = await start($, on)
+  await watch('1')
+  await watch('stop #1')
+  w.foreign.write(1, { status: 'todo' })
+  await poll()
+
+  expect(w.toasts).toEqual([])
+})
+
+test('a stored watch without optIn is dropped', async ($, on) => {
+  const w = world(on, [task(1, 'Example')])
+  const old = { groups: [{ epicId: null, cursor: '2026-01-01 11:00:00', tasks: { 1: { title: 'Example', status: 'refinement', priority: 'medium', summary: '', parentId: null, refs: [], prs: '[]', updatedAt: '2026-01-01 11:00:00', notes: {}, ownTouch: false } } }], pending: [] }
+  on('state.get', () => ({ value: { value: old as never, version: 1 } }))
+  const { poll } = await start($, on)
+  w.foreign.write(1, { status: 'todo' })
+  await poll()
+
+  expect(w.toasts).toEqual([])
+})
+
+test('the watch tool starts a watch', async ($, on) => {
+  const w = world(on, [task(1, 'Example')])
+  const { poll } = await start($, on)
+  await $.tool.call({ tool: 'mcp__task-watch__watch', action: 'start', ids: [1] })
+  w.foreign.write(1, { status: 'todo' })
+  await poll()
+
+  expect(w.toasts).toEqual(['#1 Example: status refinement -> todo'])
+})
+
+test('the mirrored ref of an own add is not reported', async ($, on) => {
+  const w = world(on, [task(1, 'Example')])
+  const { watch, poll } = await start($, on)
+  await watch('1')
+  await $.tool.call({ tool: 'mcp__task-manager__add', title: 'New', refs: [{ id: 1, relation: 'depends on' }] })
+  await poll()
+
+  expect(w.toasts).toEqual([])
+  expect(w.submitted).toEqual([])
 })

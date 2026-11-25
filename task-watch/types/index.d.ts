@@ -13,7 +13,7 @@ export type Snapshot = {
 
 export type Group = { epicId: number | null; cursor: string; tasks: Record<string, Snapshot> }
 
-export type Watch = { groups: Group[]; pending: string[] }
+export type Watch = { optIn: true; groups: Group[]; pending: string[] }
 
 declare module 'claude-code' {
   interface PluginState {

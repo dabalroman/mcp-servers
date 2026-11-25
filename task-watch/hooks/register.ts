@@ -1,9 +1,9 @@
 import type { EngineInterface, Register } from 'claude-code'
 import type { Group, Snapshot, Watch } from '../types'
 import type { Change } from './snapshot.ts'
-import { applyOwnWrite, diffTask, findNote, findTask, groupEpicOf, snapshotOf } from './snapshot.ts'
+import { applyOwnWrite, diffTask, findNote, findTask, snapshotOf } from './snapshot.ts'
 import type { Json } from './watchSet.ts'
-import { parseJson, taskId, touchedTaskIds } from './watchSet.ts'
+import { parseJson, taskId } from './watchSet.ts'
 
 const TASK_SERVER = 'task-manager'
 const TASK_PREFIX = 'mcp__task-manager__'
@@ -11,7 +11,12 @@ const WATCH = { plugin: 'task-watch', key: 'watch' } as const
 const POLL_MS = 60_000
 const BACKOFF_MS = 10 * 60_000
 const FAIL_LIMIT = 6
-const WRITE_TOOLS = new Set(['setStatus', 'update', 'replace', 'addNote', 'updateNote', 'deleteNote', 'delete'])
+const WRITE_TOOLS = new Set(['setStatus', 'add', 'update', 'replace', 'addNote', 'updateNote', 'deleteNote', 'delete'])
+const USAGE = 'Usage: /task-watch [start|stop] #id ... | stop | list'
+const ABSENT = 'task-watch needs the task-manager MCP in this session'
+const ID = /^#?\d+$/
+const WATCH_DESCRIPTION =
+  'Watches task-manager tasks for changes made by other sessions or the UI. Start it on the task or epic you are implementing or coordinating (an epic id covers all its children, a child id only that child), never on tasks you only read. stop without ids clears all.'
 const TURN_HEAD = 'task-watch: another session or the UI changed tasks this session works on:'
 const CONTEXT_HEAD = 'task-watch: another session or the UI changed tasks this session works on (no action needed unless it affects the current work):'
 
@@ -31,10 +36,12 @@ let fails = 0
 let isLoud = false
 let nextAt = 0
 
+const fresh = (): Watch => ({ optIn: true, groups: [], pending: [] })
+
 const load = ($: EngineInterface): Promise<Watch> =>
   (memory ??= $.state.get(WATCH).then(
-    ({ value }) => value ?? { groups: [], pending: [] },
-    () => ({ groups: [], pending: [] }),
+    ({ value }) => (value?.optIn === true ? value : fresh()),
+    fresh,
   ))
 
 const save = async ($: EngineInterface, watch: Watch): Promise<void> => {
@@ -57,33 +64,144 @@ const taskCall =
   }
 
 const fetchTask = async (call: TaskCall, id: number): Promise<Json | undefined> =>
-  (await call('getById', { id }).catch(() => undefined))?.task as Json | undefined
+  (
+    await call('getById', { id }).catch((error: unknown) => {
+      if (error instanceof TaskManagerAbsent) throw error
+      return undefined
+    })
+  )?.task as Json | undefined
 
-// A task in an epic, or an epic, watches the whole epic as one getUpdates group.
-async function join(watch: Watch, call: TaskCall, task: Json): Promise<void> {
-  const id = taskId(task.id)
-  if (id === undefined || findTask(watch, id) !== undefined) return
-  const epicId = groupEpicOf(task)
-  const members = new Map<number, Json>([[id, task]])
-  if (epicId !== null && !watch.groups.some(g => g.epicId === epicId)) {
-    const epic = epicId === id ? task : await fetchTask(call, epicId)
-    if (epic !== undefined) members.set(epicId, epic)
-    for (const child of Array.isArray(epic?.children) ? (epic.children as Json[]) : []) {
-      const childId = taskId(child.id)
-      if (childId === undefined || members.has(childId)) continue
-      const full = await fetchTask(call, childId)
-      if (full !== undefined) members.set(childId, full)
-    }
-  }
-  let group = watch.groups.find(g => g.epicId === epicId)
+const looseGroup = (watch: Watch, cursor: string): Group => {
+  let group = watch.groups.find(g => g.epicId === null)
   if (group === undefined) {
-    const stamps = [...members.values()].map(m => String(m.updated_at ?? '')).filter(Boolean).sort()
-    group = { epicId, cursor: stamps[0] ?? '1970-01-01 00:00:00', tasks: {} }
+    group = { epicId: null, cursor, tasks: {} }
     watch.groups.push(group)
   }
-  for (const [memberId, member] of members) {
-    if (findTask(watch, memberId) === undefined) group.tasks[memberId] = snapshotOf(member)
+  if (cursor < group.cursor) group.cursor = cursor
+
+  return group
+}
+
+async function watchEpic(watch: Watch, call: TaskCall, epic: Json, id: number): Promise<void> {
+  const members = new Map<number, Json>([[id, epic]])
+  for (const child of Array.isArray(epic.children) ? (epic.children as Json[]) : []) {
+    const childId = taskId(child.id)
+    if (childId === undefined) continue
+    const full = await fetchTask(call, childId)
+    if (full !== undefined) members.set(childId, full)
   }
+  const stamps = [...members.values()].map(m => String(m.updated_at ?? '')).filter(Boolean).sort()
+  const group: Group = { epicId: id, cursor: stamps[0] ?? '1970-01-01 00:00:00', tasks: {} }
+  const loose = watch.groups.find(g => g.epicId === null)
+  for (const [memberId, member] of members) {
+    const moved = loose?.tasks[memberId]
+    group.tasks[memberId] = moved ?? snapshotOf(member)
+    if (moved === undefined) continue
+    delete loose!.tasks[memberId]
+    if (loose!.cursor < group.cursor) group.cursor = loose!.cursor
+  }
+  watch.groups.push(group)
+}
+
+async function startWatching(watch: Watch, call: TaskCall, ids: number[]): Promise<string> {
+  const started: string[] = []
+  const notes: string[] = []
+  for (const id of ids) {
+    const task = await fetchTask(call, id)
+    if (task === undefined) {
+      notes.push(`#${id} skipped (not found)`)
+      continue
+    }
+    const parentId = taskId(task.parentId)
+    if (task.type === 'epic') {
+      if (!watch.groups.some(g => g.epicId === id)) await watchEpic(watch, call, task, id)
+    } else if (parentId !== undefined && watch.groups.some(g => g.epicId === parentId)) {
+      notes.push(`#${id} already watched via epic #${parentId}`)
+      continue
+    } else if (findTask(watch, id) === undefined) {
+      looseGroup(watch, String(task.updated_at ?? '1970-01-01 00:00:00')).tasks[id] = snapshotOf(task)
+    }
+    started.push(`#${id}`)
+  }
+  regroup(watch)
+
+  return [...(started.length > 0 ? [`Watching ${started.join(', ')}`] : []), ...notes].join('; ')
+}
+
+function stopWatching(watch: Watch, ids: number[]): string {
+  if (ids.length === 0) {
+    watch.groups = []
+    watch.pending = []
+
+    return 'Stopped watching everything'
+  }
+  const stopped: string[] = []
+  const notes: string[] = []
+  for (const id of ids) {
+    const epic = watch.groups.find(g => g.epicId === id)
+    const owner = watch.groups.find(g => id in g.tasks)
+    if (epic !== undefined) watch.groups = watch.groups.filter(g => g !== epic)
+    else if (owner?.epicId === null) delete owner.tasks[id]
+    else if (owner !== undefined) {
+      notes.push(`#${id} is watched via epic #${owner.epicId}; stop #${owner.epicId}`)
+      continue
+    } else {
+      notes.push(`#${id} was not watched`)
+      continue
+    }
+    stopped.push(`#${id}`)
+  }
+  regroup(watch)
+
+  return [...(stopped.length > 0 ? [`Stopped ${stopped.join(', ')}`] : []), ...notes].join('; ')
+}
+
+function listWatched(watch: Watch): string {
+  const lines = watch.groups.flatMap(g =>
+    Object.entries(g.tasks)
+      .map(([id, s]) => [Number(id), s] as const)
+      .sort(([a], [b]) => Number(b === g.epicId) - Number(a === g.epicId) || a - b)
+      .map(([id, s]) => labelOf(id, s)),
+  )
+
+  return lines.length > 0 ? lines.join('\n') : 'Nothing watched'
+}
+
+async function act($: EngineInterface, action: 'start' | 'stop' | 'list', ids: number[]): Promise<string> {
+  const watch = await load($)
+  try {
+    if (action === 'list') return listWatched(watch)
+    const reply = action === 'start' ? await startWatching(watch, taskCall($), ids) : stopWatching(watch, ids)
+    await save($, watch)
+
+    return reply
+  } catch (error) {
+    if (error instanceof TaskManagerAbsent) return ABSENT
+    throw error
+  }
+}
+
+function parseCommand(args: string): { action: 'start' | 'stop' | 'list'; ids: number[] } | undefined {
+  const tokens = args.split(/\s+/).filter(Boolean)
+  const [head = 'list', ...rest] = tokens
+  const verb = ID.test(head) ? 'start' : head
+  const idTokens = ID.test(head) ? tokens : rest
+  if (!idTokens.every(t => ID.test(t))) return undefined
+  const ids = idTokens.map(t => Number(t.replace('#', '')))
+  if (verb === 'start' && ids.length > 0) return { action: 'start', ids }
+  if (verb === 'stop') return { action: 'stop', ids }
+  if (verb === 'list' && ids.length === 0) return { action: 'list', ids }
+
+  return undefined
+}
+
+async function runTool($: EngineInterface, input: Json): Promise<string> {
+  const ids = (Array.isArray(input.ids) ? input.ids : []).flatMap(n => taskId(n) ?? [])
+  const { action } = input
+  if (action === 'start' && ids.length === 0) return USAGE
+  if (action !== 'start' && action !== 'stop' && action !== 'list') return USAGE
+
+  return act($, action, ids)
 }
 
 const labelOf = (id: number, s: Snapshot): string =>
@@ -195,13 +313,6 @@ async function track($: EngineInterface, tool: string, input: Json, result: Json
   const watch = await load($)
   const own = applyOwnWrite(watch, tool, input, result)
   for (const id of own) polling?.add(id)
-  const call = taskCall($)
-  for (const id of touchedTaskIds(tool, input, result)) {
-    if (findTask(watch, id) !== undefined) continue
-    const given = result.task as Json | undefined
-    const task = tool === 'getById' && taskId(given?.id) === id ? given : await fetchTask(call, id)
-    if (task !== undefined) await join(watch, call, task)
-  }
   regroup(watch)
   await save($, watch)
 }
@@ -210,16 +321,40 @@ function writeTargets(watch: Watch, input: Json): number[] {
   const id = taskId(input.id) ?? taskId(input.taskId) ?? findNote(watch, taskId(input.noteId) ?? 0)?.[0]
   const parentId = id === undefined ? null : (findTask(watch, id)?.parentId ?? null)
 
-  return [id, parentId].flatMap(n => n ?? [])
+  const refIds = (Array.isArray(input.refs) ? (input.refs as Json[]) : []).map(r => taskId(r.id))
+
+  return [id, parentId, ...refIds].flatMap(n => n ?? [])
 }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     const started = await next(e)
+    await $.command.register({
+      name: 'task-watch',
+      description: 'Watch task-manager tasks in this session: /task-watch [start|stop] #id ... | stop',
+      argumentHint: '[start|stop] #id ... | stop',
+    })
+    await $.tool.register({
+      name: 'watch',
+      description: WATCH_DESCRIPTION,
+      inputSchema: {
+        type: 'object',
+        properties: { action: { enum: ['start', 'stop', 'list'] }, ids: { type: 'array', items: { type: 'integer' } } },
+        required: ['action'],
+      },
+    })
     $.clock.every(POLL_MS, () => void tick($))
 
     return started
   })
+
+  on('command.run', { command: 'task-watch' }, async ($, e) => {
+    const parsed = parseCommand(e.args)
+
+    return { text: parsed === undefined ? USAGE : await act($, parsed.action, parsed.ids) }
+  })
+
+  on('tool.run', { tool: 'mcp__task-watch__watch' }, async ($, e) => ({ result: await runTool($, e as unknown as Json) }))
 
   on('tool.call', { tool: /^mcp__task-manager__/ }, async ($, e, next) => {
     const tool = String(e.tool).slice(TASK_PREFIX.length)

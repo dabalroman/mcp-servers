@@ -1,4 +1,4 @@
-// Copied from task-watch/hooks/watchSet.ts: the plugins install on their own, so none imports another.
+// Copied from pr-watch/hooks/watchSet.ts: the plugins install on their own, so none imports another.
 export type Json = Record<string, unknown>
 
 export const taskId = (value: unknown): number | undefined => {

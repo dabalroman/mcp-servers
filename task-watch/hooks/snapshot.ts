@@ -6,6 +6,16 @@ export type Change = { short: string; line: string; turn: boolean }
 
 const NOTE_LIMIT = 1000
 const UPDATE_FIELDS = ['title', 'priority', 'summary', 'parentId', 'refs', 'prs'] as const
+const INVERSE: Record<string, string> = {
+  blocks: 'is blocked by',
+  'is blocked by': 'blocks',
+  'depends on': 'is depended on by',
+  'is depended on by': 'depends on',
+  causes: 'is caused by',
+  'is caused by': 'causes',
+  tests: 'is tested by',
+  'is tested by': 'tests',
+}
 const EPIC_MOVED = /^Epic #(\d+) .* moved to (\w+)\.$/
 
 const text = (value: unknown): string => (typeof value === 'string' ? value : '')
@@ -34,9 +44,6 @@ export const snapshotOf = (task: Json): Snapshot => ({
   notes: notesOf(task.notes),
   ownTouch: false,
 })
-
-export const groupEpicOf = (task: Json): number | null =>
-  task.type === 'epic' ? (taskId(task.id) ?? null) : (taskId(task.parentId) ?? null)
 
 const clip = (id: number, body: string): string =>
   body.length > NOTE_LIMIT ? `${body.slice(0, NOTE_LIMIT)} (truncated, getById #${id})` : body
@@ -92,6 +99,38 @@ export function findNote(watch: Watch, noteId: number): [number, Snapshot] | und
   return undefined
 }
 
+const inverseOf = (relation: unknown): string => {
+  const name = text(relation) || 'relates to'
+
+  return INVERSE[name] ?? name
+}
+
+// The server mirrors a ref onto its target as the inverse relation, so that echo is the agent's own write too.
+function mirrorRefs(watch: Watch, source: number, refs: unknown): number[] {
+  const suffix = ` #${source}`
+  const wanted = new Map<number, string>()
+  for (const ref of listOf(refs)) {
+    const target = taskId(ref.id)
+    if (target !== undefined) wanted.set(target, inverseOf(ref.relation))
+  }
+  const touched: number[] = []
+  for (const group of watch.groups) {
+    for (const [key, snapshot] of Object.entries(group.tasks)) {
+      const id = Number(key)
+      if (id === source) continue
+      const kept = snapshot.refs.filter(r => !r.endsWith(suffix))
+      const relation = wanted.get(id)
+      if (relation === undefined && kept.length === snapshot.refs.length) continue
+      if (relation !== undefined) kept.push(`${relation}${suffix}`)
+      snapshot.refs = kept.sort()
+      snapshot.ownTouch = true
+      touched.push(id)
+    }
+  }
+
+  return touched
+}
+
 // The agent's own write goes into the snapshot field by field; the server's echo of fields the call
 // did not set is never taken, so a foreign edit to them still diffs on the next poll.
 export function applyOwnWrite(watch: Watch, tool: string, input: Json, result: Json): number[] {
@@ -106,12 +145,17 @@ export function applyOwnWrite(watch: Watch, tool: string, input: Json, result: J
       if (epic !== undefined) Object.assign(epic, { status: moved![2], ownTouch: true })
       return [id, epic === undefined ? undefined : Number(moved![1])].flatMap(n => n ?? [])
     }
+    case 'add': {
+      const created = taskId(result.id)
+      return created === undefined ? [] : mirrorRefs(watch, created, input.refs)
+    }
     case 'update': {
-      if (snapshot === undefined) return []
+      const mirrored = 'refs' in input && id !== undefined ? mirrorRefs(watch, id, input.refs) : []
+      if (snapshot === undefined) return mirrored
       const echo = snapshotOf((result.task ?? {}) as Json)
       for (const key of UPDATE_FIELDS) if (key in input) Object.assign(snapshot, { [key]: echo[key] })
       snapshot.updatedAt = echo.updatedAt
-      return [id!]
+      return [id!, ...mirrored]
     }
     case 'replace':
       if (snapshot === undefined) return []
