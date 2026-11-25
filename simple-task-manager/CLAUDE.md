@@ -68,7 +68,7 @@ Every MCP tool call, on both transports, becomes one JSON line in `<package>/tas
 
 `task-watch/` only reads task-manager (`getById`, `getUpdates`). It suppresses the agent's own writes by applying each call to its snapshot field by field, never by a full `getById` refresh, and ignores `prs` (pr-watch owns them). The live watch sits in module memory mirrored to `$.state`, because every `$.state.get` in one dispatch returns the value from when the dispatch began.
 
-No auto-joins: only `/task-watch` and the `watch` tool add tasks; a child id watches the child alone, an epic id the whole epic; a stored watch without `optIn` is dropped on load.
+No auto-joins: only `/task-watch` and the `watch` tool add tasks; a child id watches the child alone, an epic id the whole epic; a stored watch without `optIn` is dropped on load. `/tm:implement` and the coordinator start and stop it on the work they run (skills, not the plugin).
 
 ## active-model (root plugin)
 

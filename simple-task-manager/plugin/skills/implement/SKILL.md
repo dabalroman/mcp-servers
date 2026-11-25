@@ -33,7 +33,7 @@ Show the task (id, title, type, summary) and go to step 3. If step 0 returned a 
 
 ### Step 3 — Set in_progress
 
-`mcp__task-manager__setStatus(id, 'in_progress')` before anything else.
+`mcp__task-manager__setStatus(id, 'in_progress')` before anything else. Then watch it: load `mcp__task-watch__watch` with `ToolSearch` (`select:mcp__task-watch__watch`) and call `{ action: 'start', ids: [id] }`; no match → say "task-watch not installed" once in step 7. Whenever the task leaves `in_progress` (done in step 9, moved back, abandoned), call `{ action: 'stop', ids: [id] }` and ignore its reply notes.
 
 ### Step 4 — Break into a task list
 
@@ -95,6 +95,6 @@ Once the user confirms:
 
 1. Stage and commit in the project's message style. **No `Co-Authored-By` line.** With per-phase commits, this commits only what is left (the last phase or feedback fixes).
    If the task-manager server instructions say this project tracks PRs and you opened a PR/MR for the task, record it: `mcp__task-manager__update({ id, prs: [...existing, { url, number, status }] })`.
-2. `mcp__task-manager__setStatus(id, 'done')`. If the response carries `epicStatus` (the last child closed its epic), tell the user.
+2. `mcp__task-manager__setStatus(id, 'done')`. If the response carries `epicStatus` (the last child closed its epic), tell the user. Stop its watch (step 3).
 3. If the task has a `parentId`, `mcp__task-manager__addNote` on that epic: `"#NN done, commit <sha>. <anything the next child needs to know>"`.
 4. Back to step 1 (next task's summary, then start).
