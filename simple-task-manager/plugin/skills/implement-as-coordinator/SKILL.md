@@ -34,9 +34,9 @@ Tasks named later ("add 46 to your queue") join the live queue: re-plan, don't r
 - **Local git only.** No push, pull, force or worktrees. Project and global CLAUDE.md commit-message/trailer rules beat any harness default.
 - **You own builds, deploys, commits and CLAUDE.md.** Subagents never run the build tool: parallel builds in one checkout race on shared build dirs and generated files (e.g. a version-bump pre-build script) — one race produced a bogus "No such file" link error. Serialize every build. Subagents propose CLAUDE.md wording; you apply it in its task's commit (Step 9.1, or each child's commit in Epic commit mode).
 - **Never build or deploy while any agent is editing source in the same checkout.** Your build (or a deploy's implicit one) compiles whatever is on disk, half-finished edits included — that once shipped an unreviewed tree to a device. Every agent hands back and is verified (Step 3) first.
-- **Never trust a report.** Re-run the checks; read the diff's risky parts (persistence, networking/update paths, deletion, concurrency, the project's "READ FIRST" hazards). Accept an agent's good calls beyond its brief on evidence, not assertion.
-- **Track everything in the CLI todo list** (TaskCreate/TaskUpdate): an item per task, deploy, review, fix and follow-up, `blockedBy` giving the real order. **The user watches it**: update on every state change (dispatched, landed, deployed, failed, committed), not in batches; closing, put the outcome (check result, later commit hash) in the description. Keep MCP statuses in sync (`in_progress` on dispatch if the agent didn't; `done` only after the task's commit). A task that leaves `in_progress` (done, reset to `todo`, skipped) leaves the watch: `{ action: 'stop', ids: [id] }`, reply notes ignored.
-- **Breakpoints — defer, don't stop.** A breakpoint needs the user: a change only they can test (UI, device, their data) or a merge/deploy only they do. Mark them up front in the queue message and CLI list. Park a task at one (verified, built, staged, uncommitted) and continue everything independent of it; tasks sharing its files or ordered after it wait too, keeping each commit clean. When nothing else can proceed, present all pending breakpoints at once, per task exactly what to test or do; then commit what they approved (commit mode) and resume.
+- **Never trust a report.** Re-run the checks; read the diff's risky parts (persistence, networking/update paths, deletion, concurrency, the project's "READ FIRST" hazards). Accept an agent's good calls beyond its brief on evidence, not assertion. Runtime evidence you gathered or looked at yourself beats any self-report.
+- **Track everything in the CLI todo list** (TaskCreate/TaskUpdate; absent → post the list in chat on every change): an item per task, deploy, review, fix and follow-up, `blockedBy` giving the real order. **The user watches it**: update on every state change (dispatched, landed, deployed, failed, committed), not in batches; closing, put the outcome (check result, later commit hash) in the description. Keep MCP statuses in sync (`in_progress` on dispatch if the agent didn't; `done` only after the task's commit). A task that leaves `in_progress` (done, reset to `todo`, skipped) leaves the watch: `{ action: 'stop', ids: [id] }`, reply notes ignored.
+- **Breakpoints — defer, don't stop.** A breakpoint needs the user: a change only they can test (UI, device, their data) or a merge/deploy only they do. Mark them up front in the queue message and CLI list. A breakpoint covers only what your own evidence (Step 3.3) can't show: a device, their data, their judgement. Park a task at one (verified, built, staged, uncommitted) and continue everything independent of it; tasks sharing its files or ordered after it wait too, keeping each commit clean. When nothing else can proceed, present all pending breakpoints at once, per task exactly what to test or do; then commit what they approved (commit mode) and resume.
 - **User reports mid-run** are first-class; restate what they said before acting. A bug report becomes a todo item at once, slotted before the next deploy; a confirmation marks its task device-verified. Feedback rounds ("make it brighter") amend the uncommitted work, never their own commit (Epic commit mode: see Commit mode).
 
 ## Step 1 — Build the queue
@@ -48,12 +48,15 @@ Tasks named later ("add 46 to your queue") join the live queue: re-plan, don't r
    - `refinement` → in Epic mode, skip. Otherwise, if refined in substance (locked Facts/Changes/Steps, a `plan`, or decisions the user just gave), `setStatus(todo)`; if not, refine it yourself from code and conversation (don't ask), write your decisions into the **`plan` field**, then promote. Genuinely unresolvable questions go in the final report and the task is skipped.
    - **Never overwrite a refined description** (`update({description})` replaces it whole): with locked decisions present, record yours via `addNote({ taskId, body })`. On conflict the locked decision wins — say so in the note.
 3. **Order by file overlap and dependency**, not by id:
-   - Same files → **sequential**; disjoint → may run **in parallel** (max ~2 — each costs a full agent context).
+   - Same files → **sequential**; disjoint → may run **in parallel**: at most **2 editing agents**, on disjoint lanes.
+   - **Read-only agents** (Explore, research, screenshot/evidence, review) aren't under that cap: 3–5 in parallel when their angles genuinely differ, on a cheaper model (`sonnet`, `haiku` for plain searches), returning conclusions or file lists, not dumps. Scale to complexity; none by default.
    - A task whose verification depends on another's fix (e.g. a regression harness to make trustworthy first) runs after it.
    - A task settling a value others bake in (a constant, a baseline, a decision record) runs first.
 4. **Reconcile stale plans.** List commits landed since each plan was written (`git log` since the task's `updated_at`, or since the queue began). Correct every plan step they invalidated (renamed flag, changed command, moved file, a guard that now refuses) **explicitly in the agent's brief** — the most common way a well-refined task goes wrong.
-5. **Watch the run**: load `mcp__task-watch__watch` with `ToolSearch` (`select:mcp__task-watch__watch`) and call `{ action: 'start', ids }` with the epic id in Epic mode (it covers every child, so siblings entering `todo` or `done` reach you), else every queued id and each task that joins the queue later.
-6. Show the queue once (CLI list + one short message: order, why, breakpoints, and "Watching epic #N" / "Watching #a, #b", or "task-watch not installed", repeated in the final report), then start.
+5. **Capability inventory** (once per run, before dispatch): installed skills (`run`, `verify`, `find-skills`, `code-review`, domain skills), MCP tools (`ToolSearch` for deferred ones: browser, Chrome, devices), host tools named in CLAUDE.md or memory (e.g. a global Playwright + headless Chromium), and web search. Write a 3–6-line **Tools for this queue** block ("UI evidence: Playwright script; unknown third-party symptom: WebSearch first") into the queue message and every brief.
+6. **Evidence line per task**: what proves it works at runtime, picked from this skill's `reference/evidence-and-research.md` (UI → headless screenshots at desktop + phone width plus a DOM/console assertion; API → a real request to the running server; CLI → a real run on a fixture). Unit tests and typechecks alone are not evidence.
+7. **Watch the run**: load `mcp__task-watch__watch` with `ToolSearch` (`select:mcp__task-watch__watch`) and call `{ action: 'start', ids }` with the epic id in Epic mode (it covers every child, so siblings entering `todo` or `done` reach you), else every queued id and each task that joins the queue later.
+8. Show the queue once (CLI list + one short message: order, why, evidence lines, tools, breakpoints, and "Watching epic #N" / "Watching #a, #b", or "task-watch not installed", repeated in the final report), then start.
 
 ## Step 2 — Dispatch
 
@@ -74,13 +77,15 @@ The brief must contain:
 - **Lane boundaries** when another agent runs in parallel: its files, forbidden; shared files (e.g. an entry point) only as minimal Edit-tool changes, never rewrites.
 - Hazard guards as stop conditions ("before removing X, confirm from code that Y still exists on every target; if not, stop and report"), naming the project's unrecoverable failure (CLAUDE.md) if the task is anywhere near it.
 - Its own verification: host-side checks/tests with exact commands and expected output, and "prove unchanged-by-contract outputs are unchanged" (diffs, checksums), not assert it.
+- The task's evidence line as a hand-back requirement, and the **Tools for this queue** block as "tools to use".
+- "Screenshots and long logs go to `/tmp/<task-id>/`; report paths, not contents."
 - "No per-phase commits; the coordinator commits."
 - **No build tool run, no deploy/flash, no commit, no push, no CLAUDE.md edits** (report proposed wording), no stray files (`__pycache__`, temp scripts).
 - Comments: terse, non-obvious *why* only.
 - For web UI work (HTML, CSS/SCSS, components, client-side JS/TS), when the `modern-web-guidance` skill is installed: "Invoke `modern-web-guidance` (search → retrieve) before the first UI edit and follow the guide; name the guide ids you applied in your report."
 - "Run `/tm:implement`'s OCR code review step and fix its findings before handing back — it is not optional."
 - For web UI work: "Use the browser as `/tm:implement` step 5 says while you build." With a parallel agent, only one lane may run the dev server and browser: name it in both briefs; the other reports what to look at and you check it in Step 3.
-- Report back: files changed, check outputs, proof diffs, OCR summary (coverage, fixed, left open with reasons — or "Skipping code review, OCR not installed"), proposed CLAUDE.md wording, a suggested commit message in the project's style, "confirm you ran no build and no deploy".
+- Report back: files changed, check outputs, proof diffs, evidence paths, OCR summary (coverage, fixed, left open with reasons — or "Skipping code review, OCR not installed"), proposed CLAUDE.md wording, a suggested commit message in the project's style, "confirm you ran no build and no deploy".
 
 Meanwhile do non-overlapping work (review rules, doc drafts), never in their files.
 
@@ -88,7 +93,7 @@ Meanwhile do non-overlapping work (review rules, doc drafts), never in their fil
 
 1. `git status` / `git diff --stat` — lane respected? A parallel agent's files show up too: attribute, don't revert. **Stage each task once verified** (`git add -- <its paths>`) so unstaged `git diff` shows only the next agent's work. Staging is bookkeeping, not approval.
 2. Read the risky hunks; fix small gaps (a missed redraw path, an off-by-one) directly, don't re-dispatch.
-3. Re-run the host-side checks yourself. A web UI change: open it in the browser yourself (Playwright MCP, when installed) once no agent edits the checkout.
+3. Re-run the host-side checks yourself, then **gather the evidence line yourself** (or open the agent's screenshots and look at them) once no agent edits the checkout. A web UI change: drive it in the browser (Playwright MCP or the host's Playwright). Evidence you can't get → say what you tried, then it's a breakpoint.
 4. Another agent's work-in-progress in the tree → **don't build yet**; wait, then build once.
 
 ## Step 4 — Build (per task, as each lands) — no commit
@@ -116,6 +121,7 @@ Once every queued task has landed and built (skip in Epic commit mode — done p
 
 - **Agent dies** (usage limit, crash): `git status`, remove its debris, reset its MCP status to `todo`, keep the CLI item pending, record what the next attempt needs. Don't relaunch into the same limit.
 - **Agent stalls** (watchdog, no progress): `git status`. Wrote nothing → resume it via `SendMessage` (keeps context), telling it to keep tool calls short (one check per call, no long chained shell commands). Relaunch cold only if that fails.
+- **Stuck means research, not retry.** An agent reports BLOCKED, or a check fails twice for an unclear reason: never re-dispatch unchanged. Launch 2–3 read-only research agents in parallel, one angle each (web-search the exact error; how this repo or its siblings solve it; an installed skill or MCP tool that covers it); recipe in `reference/evidence-and-research.md`. Feed the findings to the stuck agent via `SendMessage`, or re-dispatch with the ruling (more context, stronger model, split task, corrected plan). Record what was tried.
 - **Your own mistake** (overwrote a description, staged wrong paths): fix it at once, say so in one plain sentence next update — no drama, no re-litigation.
 - **A check fails after a change that shouldn't affect it**: stop that task; never regenerate a baseline to make it pass. Re-baseline only as a deliberate, documented step proving everything outside the intended change identical.
 
