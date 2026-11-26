@@ -51,9 +51,9 @@ Show the task (id, title, type, summary) and go to step 3. If step 0 returned a 
 
 **Classify the task.** **Simple** if ALL hold: ≤ 3 files; the fix is concrete (specific lines, specific change); no new architectural decisions; diff < ~50 lines. Otherwise **complex**.
 
-**Simple → inline:** read the files, make the changes, add/update tests, run the project's verify command (from its CLAUDE.md, e.g. `npm run verify`; "verify" below means this). When `getById` carries `repoContext.repo.commands`, those are the build/test/lint commands: use them instead. One that fails as a command (not found, wrong path), not because of your change: read the repo's `rulesFile`, then fix the entry with `setRepo` in the same session.
+**Simple → inline:** read the files, make the changes, add/update tests (coding rules below), run the project's verify command (from its CLAUDE.md, e.g. `npm run verify`; "verify" below means this). When `getById` carries `repoContext.repo.commands`, those are the build/test/lint commands: use them instead. One that fails as a command (not found, wrong path), not because of your change: read the repo's `rulesFile`, then fix the entry with `setRepo` in the same session.
 
-**Complex → focused subagent:** pick the most specific type in the project's `CLAUDE.md` agent table. Pass: task id, title, full description, relevant file paths and line numbers, fix approach, the step-4 task IDs, the repo folder and commands from `repoContext` (when set), the epic's Rules from `getEpic` (when the task has a `parentId`), for web UI work the Browser paragraph below verbatim, and the instructions: read files → implement → mark each step completed as you go → add/update tests → run verify → report the diff summary, verify result and what the browser showed.
+**Complex → focused subagent:** pick the most specific type in the project's `CLAUDE.md` agent table. Pass: task id, title, full description, relevant file paths and line numbers, fix approach, the step-4 task IDs, the repo folder and commands from `repoContext` (when set), the epic's Rules from `getEpic` (when the task has a `parentId`), the coding rules below, for web UI work the Browser paragraph below verbatim, and the instructions: read files → implement → mark each step completed as you go → add/update tests → run verify → report the diff summary, verify result and what the browser showed.
 
 **Browser (web UI work)** — a dev tool while you build, not a final gate. When the change shows in a web app (UI, styling, client logic, an API change the UI shows) and the Playwright MCP tools (`mcp__playwright__browser_*`, deferred ones included; load them with `ToolSearch`, `+playwright browser`) are in the session: open the affected view before the first edit to see what is there, and after each meaningful edit look again and fix what you see before moving on. Assert on `browser_snapshot` (the accessibility tree), take `browser_take_screenshot` and look at it (light/dark, narrow widths when the project requires them), and read `browser_console_messages` and `browser_network_requests` for errors and 4xx/5xx. No such tools: work without it and say **"No browser check, Playwright MCP not installed"** in step 7. A browser that fails to launch: report the error and carry on without it; on Linux (WSL, Debian) usually a missing Chromium (`npx playwright install chromium`) or system libraries (`sudo npx playwright install-deps chromium`), on Windows a missing Chrome/Edge channel. Fixing that is the user's: install nothing, never `sudo`.
 - **App:** run it the way the project's CLAUDE.md says (dev server, URL, local auth). Reuse a server already running there, it is the user's. Otherwise start the project's script with `run_in_background` as is (no `&`, `nohup` or `Start-Process`: on Windows the shell may be PowerShell or Git Bash), wait for its ready line, and stop it before step 7. In WSL the browser runs inside Linux and reaches the WSL `localhost`; never drive the Windows host's browser.
@@ -62,9 +62,16 @@ Show the task (id, title, type, summary) and go to step 3. If step 0 returned a 
 
 **Web UI work** (HTML, CSS/SCSS, components, client-side JS/TS), inline or delegated: when the `modern-web-guidance` skill is installed, invoke it (search → retrieve) once before the first such edit and follow the guide; a subagent's brief must say so explicitly and its report must name the guide ids it applied. Skip it for trivial edits (copy, renames, pure logic).
 
+**Coding rules:**
+- Read callers, exports and shared helpers of each file you touch; reuse what exists.
+- Match local conventions even if you'd choose differently; two conflicting patterns: pick one, flag the other.
+- Spec reads two ways: state both and ask.
+- A bug fix starts with a test that reproduces it and fails: see it red, then green. Tests must fail if the behaviour changes.
+- Deviating from the plan or notes: one line in the relay (what, why, cost if wrong). Stop only for destructive, security-sensitive or outside-the-repo actions.
+
 ### Debugging during implementation
 
-When verify fails or behaviour is unexpected and the cause isn't obvious, **ask the user to add temporary debug logs** (which file, which line, what to log) and re-run — faster than guessing. Remove them before completing the step.
+When verify fails or behaviour is unexpected: find the root cause before changing code, one hypothesis and one change at a time. After three failed fixes, stop and question the approach with the user. When reading and running can't expose the cause, **ask the user to add temporary debug logs** (which file, which line, what to log) and re-run — faster than guessing. Remove them before completing the step.
 
 ### Step 6 — Code review (OCR)
 
@@ -77,13 +84,13 @@ When verify fails or behaviour is unexpected and the cause isn't obvious, **ask 
 3. **Rules** — `ocr delegate rule --format json <path...>` for the in-scope files; apply each rule group's checklist to its files.
 4. **Review every in-scope file** — tracked: `git --no-pager diff --no-ext-diff --no-textconv --no-color HEAD -- "<path>"`; untracked (`added`): read the whole file. Read surrounding code as needed; don't stop at the first finding. Each file ends `reviewed` or `skipped` with a concrete reason.
 5. **Classify** each finding: `path:line`, category (bug, security, performance, maintainability, test, style, documentation), severity (critical, high, medium, low). Discard likely false positives.
-6. **Address:** critical / high / medium → fix, re-run verify. Low → fix if trivial, else list for the user. A finding you deliberately don't fix (out of scope, contradicts the task/plan, false positive on reflection) stays in the report with the reason. After non-trivial fixes, re-run steps 1–5 once on the changed files.
+6. **Address:** critical / high / medium → fix, re-run verify. Low → fix if trivial, else list for the user; add no abstractions, options or tests for cases that cannot happen. A finding you deliberately don't fix (out of scope, contradicts the task/plan, false positive on reflection) stays in the report with the reason. After non-trivial fixes, re-run steps 1–5 once on the changed files.
 
 For complex tasks the review runs in the main conversation after the subagent reports, not inside it — the reviewer shouldn't be the author.
 
 ### Step 7 — Relay to user
 
-Summarise the changes, verify result, OCR summary (files reviewed/skipped, findings fixed, findings left open with reasons) and what you checked in the browser (views, screenshot paths, or the skip line). Tell the user exactly what to test: golden path + edge cases from the task description, saying which of them you already saw working in the browser.
+Read verify's actual output and exit code from this run ("should pass" is no evidence); check any subagent's claims against `git diff`, never relay its summary unchecked. Say what you skipped or are unsure of; never call partial work complete. Summarise the changes, verify result, OCR summary (files reviewed/skipped, findings fixed, findings left open with reasons) and what you checked in the browser (views, screenshot paths, or the skip line). Tell the user exactly what to test: golden path + edge cases from the task description, saying which of them you already saw working in the browser.
 
 ### Step 8 — Wait for confirmation
 
