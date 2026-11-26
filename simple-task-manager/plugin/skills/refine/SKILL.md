@@ -8,7 +8,7 @@ model: opus
 
 **Model**: must run on Opus — refinement quality depends on it. If you are not on Opus, tell the user to switch (`/model opus`) and stop.
 
-Act as PM for `refinement` tasks: ask clarifying questions, enrich the description via `update()`, promote to `plan` or `todo` once the spec can be implemented without guessing. **Do not implement**: never edit source files or run agents other than the step 3c advocate/skeptic.
+Act as PM for `refinement` tasks: ask clarifying questions, enrich the description via `update()`, promote to `plan` or `todo` once the spec can be implemented without guessing. **Do not implement**: never edit source files or run agents other than the step 3b2 builder check and the step 3c advocate/skeptic.
 
 ## Usage
 
@@ -32,7 +32,8 @@ For a whole scope rather than one task (is it working for the user, what's next)
 
 Epics first (their children read them as context), then `getNext` order: bug > tool > feature > idea > other; within type, priority desc, id desc. For each task:
 
-1. `getById` it (lists omit description, notes and epic) and show the full description. An epic is refined in the epic format of step 2a, skipping steps 2a, 3c and 4. If the task has a `parentId`, read `getEpic({ id })` first (the epic's text, notes and sibling order in one call): keep the task's Goal and Steps consistent with its order and rules, and flag any conflict to the user instead of silently diverging. In a project with repos (`getRepos` non-empty) take repo folders, commands and contracts from `repoContext` / `getRepos`, never from sibling CLAUDE.md files, and make sure the task has a `repo` (plus `touches` for other repos it edits). Already specific enough → say so, write the summary (3b), ask whether to promote without more questions.
+1. `getById` it (lists omit description, notes and epic) and show the full description. An epic is refined in the epic format of step 2a, skipping steps 2a, 2b, 3b2, 3c and 4. If the task has a `parentId`, read `getEpic({ id })` first (the epic's text, notes and sibling order in one call): keep the task's Goal and Steps consistent with its order and rules, and flag any conflict to the user instead of silently diverging. In a project with repos (`getRepos` non-empty) take repo folders, commands and contracts from `repoContext` / `getRepos`, never from sibling CLAUDE.md files, and make sure the task has a `repo` (plus `touches` for other repos it edits). Already specific enough → say so, write the summary (3b), ask whether to promote without more questions (the step-5 gate still applies).
+   - **Size it.** Say whether the task is **large**: more than one repo, more than ~3 files, an external mechanism (OS, device, third-party API, library semantics) or a new pattern. *(large)* steps run only then.
 1a. **Product lens first.** Before any technical question, write a short chat take on the task as a product decision, covering what applies:
    - **Who and why.** Who uses it, in what moment, for what job? If the task only says *what* to build, name the user problem; if you can't, that's the first question.
    - **What the user sees**, in their terms: what changes in their day, what they stop doing or get back.
@@ -46,6 +47,7 @@ Epics first (their children read them as context), then `getNext` order: bug > t
    - **Explain the reasoning first.** Before each round, write per question: what the term or concept refers to, which fact from the task or codebase raises it, and how each answer changes the spec. Only then call `AskUserQuestion` — never ask a question whose context the user hasn't seen.
    - **Verify before you assert.** Every fact you present (in chat or in Facts) comes from opening its source: the file, the note, the log, the rule's git history. A rule that looks like a bug may be deliberate; a "missing" fact may already be there. If you got something wrong, correct the task and say so plainly.
    - **Check a user's constraint, don't just accept it** ("X is too slow", "Y needs a native tool"): measure it, read the code, record the result as a fact, push back with numbers if it doesn't hold.
+   - **Probe the mechanism, don't reason about it** *(large)*. A Change relying on behaviour outside the repo needs evidence code can't give: run a read-only command or a throwaway probe in `/tmp` (nothing in the repo), record the result as a verified Fact. A probe needing real implementation becomes Step 1: "probe X; stop and note if it fails". A rule the user will see (ranking, format, schedule): run 1–2 concrete scenarios through it and show the sample output before locking it.
 2a. **Split into an epic.** When the answers split the task (the original keeps a narrowed scope, new tasks are filed for the rest), don't leave them loosely linked:
    - **Original already has an epic** → file the new tasks with the same `parentId`, `reorder` the epic's children to slot them in, note the split on the epic, skip the rest of this step.
    - **Otherwise** → propose a new epic (title keeping the shared prefix, e.g. the ticket id, and which tasks go under it) and wait for an explicit yes via `AskUserQuestion`. Declined → file the tasks with `refs` to the original only.
@@ -53,14 +55,18 @@ Epics first (their children read them as context), then `getNext` order: bug > t
    - **Repos:** set `repo` (and `touches`) on every child; it is never inherited from the epic. When a child changes a contract's source, pass `contract: "<name>"` on its add/update, show the returned `suggestedFollowUps` to the user, and file only the drafts they pick. The epic's Rules point at `getRepos` instead of restating contract rules.
    - Epic description: **Goal** (user outcome of the whole group), **Facts** (each source item, e.g. ticket bullet → `#NN`), **Order of execution** (only gates and their reasons: what waits on a merge, a deploy or the user, and why — the order itself lives in the children's `seq`, never as an id list here), **Rules** (constraints for every child). Summary (3b): the children in one line, the gates in the next.
    - Cross-task context (order, shared goal, item → task mapping) goes in the epic, not a child. Narrow the original's description to what it keeps; append the new children to the queue (also in `#NN` mode).
-3. `mcp__task-manager__update` the description with the answers and notes (3a), in **Goal / Facts / Changes / Steps** format:
+2b. **Lay out approaches** *(large)*. Before writing Changes, sketch 2–3 real alternatives, recommend one and say why; the user picks when it's their call. Record a Facts line: "Approaches: considered X, Y; chose Z because …".
+3. `mcp__task-manager__update` the description with the answers and notes (3a), in **Goal / Facts / Assumptions / Changes / Steps** format:
 
    ```
    Goal (user outcome)
    - [one line: who gets what, and how we'd know it worked]
 
    Facts (current state)
-   - [bullet per relevant fact about how things work today]
+   - [bullet per relevant fact about how things work today] (verified: <source>)
+
+   Assumptions (unverified)
+   - [inference the spec relies on] — impact high|low, confidence high|low, test: [how to check]
 
    Changes (what will be different)
    - [bullet per concrete change this task introduces]
@@ -69,15 +75,18 @@ Epics first (their children read them as context), then `getNext` order: bug > t
    1. [numbered steps in the order an implementer should execute them]
    ```
 
-   Each section is a flat list of single-line items, no prose or nesting. Goal comes from step 1a (omit for purely internal work). Facts: the world as-is (paths, APIs, data formats, constraints). Changes: the target-state delta. Steps: a top-to-bottom checklist. Mark agreed sections "(locked YYYY-MM-DD)". Convert relative dates in answers to absolute ones ("next Tuesday" → `2026-05-13`).
+   Each section is a flat list of single-line items, no prose or nesting. Goal comes from step 1a (omit for purely internal work). Facts: the world as-is (paths, APIs, data formats, constraints), each tagged with the source you opened (file, command, note, user answer). **A guess is never a Fact**: put it under Assumptions (omit when empty). Changes: the target-state delta. Steps: a top-to-bottom checklist. Mark agreed sections "(locked YYYY-MM-DD)". Convert relative dates in answers to absolute ones ("next Tuesday" → `2026-05-13`).
 
-3a. **Fold notes.** Fold each note from `getById` into Facts/Changes/Steps in the same update (notes are as authoritative as the description; newer note > older note > description), then remove it with `mcp__task-manager__deleteNote({ noteId })`.
+3a. **Fold notes.** Fold each note from `getById` into Facts/Assumptions/Changes/Steps in the same update (notes are as authoritative as the description; newer note > older note > description), then remove it with `mcp__task-manager__deleteNote({ noteId })`.
 
 3b. **Summary**: 2–3 lines — (1) what the task does, (2) the key decision, (3) the user-visible outcome — saved with `update({ id, summary })`. Required before promoting (the server rejects refinement → `todo` without it).
+
+3b2. **Builder check** (mandatory when large, else offer): spawn one `model: "sonnet"` agent (label `builder:#NN`) with the builder prompt from `reference/depth.md` (open it now) and only the title, description and epic Rules: it reads the spec cold, as `/tm:implement` will. Sort its questions: *answered already* → write it into the spec; *minor* → settle it, mark "(refiner's call)"; *theirs* → one batched question to the user. Then redo 3b.
 
 3c. **Pros/Cons analysis (offer)**: once the description is solid, ask: "Want me to run a quick pros/cons analysis before promoting?" On yes, spawn two agents in parallel, both `model: "sonnet"`:
    - **Advocate** (label `advocate:#NN`, finds wins and what it unlocks): "You are an optimistic, product-minded senior engineer. Given this task description, argue FOR it. Cover the user first: what do they get, and why will they come back to it? Then cover what it unlocks next and what value it delivers. Be specific and concrete. Under 200 words. Task: {title + description}"
    - **Skeptic** (label `skeptic:#NN`, finds hidden costs, maintenance burden, complexity creep): "You are a grumpy senior architect who has been burned before and has watched users abandon features. Given this task description, argue AGAINST it. On the product side: will the user actually use this, where does it annoy or break trust, and is it solving the wrong problem or a symptom? On the engineering side: what are the hidden costs, what technical debt does it introduce, and what will be painful in 6 months? Be specific and brutally honest. Under 200 words. Task: {title + description}"
+   - **Large task: the skeptic runs a pre-mortem instead** (`model: "opus"`, prompt in `reference/depth.md`, open it now): it hunts a wrong spec, not lost value, returning Tigers, Paper Tigers and Elephants tied to spec lines. Its brief adds the Assumptions and the settled decisions, not to be reopened.
    - Give them verified facts (numbers, usage, what shipped), not just the task text, and the off-limits dirs (private user data).
    - Present both reports, then **keep refining**, treating the skeptic's concerns like step-2 answers:
      - Say which concerns are real threats and which speculative noise.
@@ -85,7 +94,8 @@ Epics first (their children read them as context), then `getNext` order: bug > t
      - Once aligned, `update()` the spec itself (a different approach, a constraint, a scope reduction) — no passive "Risks" section; it should read as if the concern was considered from the start. Then redo 3b.
 
 4. An `idea` now concretely scoped: ask whether to reclassify to `feature` before promoting.
-5. **Confirmation summary**, once description and summary are written and concerns resolved:
+5. **Assumptions gate**: no promotion while a high-impact Assumption stands. Verify (move to Facts), probe (step 2) or ask the user; low-impact ones may stay.
+   **Confirmation summary**, once description and summary are written, the gate clear and concerns resolved:
 
    ```
    Task #NN is fully refined. Goal: [the one-line Goal].

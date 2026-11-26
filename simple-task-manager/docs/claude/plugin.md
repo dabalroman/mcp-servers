@@ -2,7 +2,7 @@
 
 Read before touching anything under `plugin/`, `bump-version.ts`, or the plugin version check in `health`.
 
-- Layout: `.claude-plugin/plugin.json`, `skills/<name>/SKILL.md` (the 5 skills, single source), `hooks/hooks.json`, `hooks/session-rules.mjs`, `RULES.md`. The marketplace is `.claude-plugin/marketplace.json` at the repo root; `marketplace add owner/repo` reads only that path.
+- Layout: `.claude-plugin/plugin.json`, `skills/<name>/SKILL.md` (the 5 skills, single source) plus optional `skills/<name>/reference/*.md` a skill opens on demand at a named step (they ship: the install copies all of `plugin/`; not counted toward a SKILL.md word cap), `hooks/hooks.json`, `hooks/session-rules.mjs`, `RULES.md`. The marketplace is `.claude-plugin/marketplace.json` at the repo root; `marketplace add owner/repo` reads only that path.
 - `plugin/` must be self-contained: a git-marketplace install copies only that folder into the plugin cache. No `../` references, no symlinks out, no `CLAUDE.md` inside it (not loaded; validate warns).
 - The plugin carries no MCP entry: project binding is per repo (`.mcp.json`) and plugin config (`pluginConfigs`) is user/managed-scope only; a plugin MCP would also connect in unbound repos.
 
